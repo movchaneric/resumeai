@@ -1,0 +1,3 @@
+# Tailoring is a workflow, not an agent, in v1
+
+The original design used a tool-calling agent for tailoring (`findEvidence`, `getRequirement`, `scoreDraft`). A CV and a Job Description each fit in one prompt, so those tools only fetch data already in context, and the agent loop would nest inside the graph's own tailor → validate → score loop. We use one LCEL chain that returns structured Changes plus questions for the user, and the graph owns the only loop. This is also more robust on small local models, where tool calling is the weakest link. An agent version remains a possible experiment, to be compared against the workflow using Phoenix traces.

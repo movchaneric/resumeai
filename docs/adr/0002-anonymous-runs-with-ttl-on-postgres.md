@@ -1,0 +1,3 @@
+# Anonymous runs with a TTL, persisted in Postgres
+
+Runs pause at `interrupt()` for user input, so state must be durable: we use the LangGraph Postgres checkpointer, with the same Postgres instance holding run metadata and, later, users. There are no accounts in v1; a run is addressed by an unguessable ID and deleted after 7 days or on demand. CVs are personal data, so the original upload is deleted right after parsing, and only extracted structure and exported files are kept until the TTL. SQLite and in-memory checkpointers were rejected because they tie state to one machine or lose runs on restart; MongoDB was rejected because the data we will add (users, runs, ownership) is relational.

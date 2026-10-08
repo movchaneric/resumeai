@@ -1,0 +1,10 @@
+{
+  "name": "resume-ai",
+  "private": true,
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "pnpm --filter backend dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck"
+  }
+}

@@ -22,7 +22,7 @@ Every plan, handoff, review or note belongs to the slice being worked on, in `do
 | Folder | Scope | Status |
 |---|---|---|
 | [`00-scaffold-and-schemas`](./slices/00-scaffold-and-schemas) | Monorepo scaffold, shared Zod schemas, glossary, ADRs | Done |
-| `01-upload-parse-run-view` | Config, `runs` table, PDF/DOCX parsing, `POST /runs`, `GET /runs/:id`, Postman collection | Next |
+| [`01-upload-parse-run-view`](./slices/01-upload-parse-run-view) | Config, `runs` table, PDF/DOCX parsing, `POST /runs`, `GET /runs/:id`, Postman collection | In progress |
 | `02-llm-extraction` | CV and Job Profile chains, ID assignment, first Phoenix traces | Planned |
 | `03-scoring` | Coverage chain, Match Score function | Planned |
 | `04-graph` | LangGraph, checkpointer, questions interrupt, tailoring, validation, exit router, SSE, resume | Planned |

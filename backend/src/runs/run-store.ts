@@ -1,5 +1,5 @@
 import type { RunId } from "@resume-ai/shared";
-import type { PrismaClient } from "./generated/prisma/client.js";
+import type { PrismaClient } from "@/generated/prisma/client.js";
 
 export type StoredRun = {
   id: RunId;

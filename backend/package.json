@@ -6,7 +6,7 @@
   "scripts": {
     "postinstall": "prisma generate",
     "dev": "tsx watch src/index.ts",
-    "build": "prisma generate && tsc -p tsconfig.build.json",
+    "build": "prisma generate && tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "fixtures": "tsx test/make-fixtures.ts",
@@ -34,8 +34,10 @@
     "pdf-lib": "^1.17.1",
     "prisma": "^7.10.0",
     "supertest": "^7.3.1",
+    "tsc-alias": "^1.9.7",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0",
+    "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^5.0.3"
   }
 }

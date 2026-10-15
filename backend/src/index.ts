@@ -1,8 +1,8 @@
 import "dotenv/config";
-import { createApp } from "./app.js";
-import { loadConfig } from "./config.js";
-import { createPrisma } from "./db.js";
-import { RunStore } from "./run-store.js";
+import { createApp } from "@/app.js";
+import { loadConfig } from "@/config.js";
+import { createPrisma } from "@/db.js";
+import { RunStore } from "@/runs/run-store.js";
 
 const config = loadConfig();
 const prisma = createPrisma(config.databaseUrl);

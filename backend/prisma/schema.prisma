@@ -1,0 +1,23 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["app"]
+}
+
+// Run metadata only (ADR 0003). cv_text and jd_text are transitional until the graph exists in slice 4.
+model Run {
+  id         String    @id @db.Uuid
+  status     String
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  exportPath String?   @map("export_path")
+  cvText     String    @map("cv_text")
+  jdText     String    @map("jd_text")
+
+  @@map("runs")
+  @@schema("app")
+}

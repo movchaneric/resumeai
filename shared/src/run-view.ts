@@ -17,6 +17,7 @@ export const RunErrorCodeSchema = z.enum([
   "FILE_TOO_LARGE",
   "TOO_MANY_PAGES",
   "SCANNED_PDF",
+  "JOB_DESCRIPTION_TOO_LONG",
   "EXTRACTION_FAILED",
   "INTERNAL",
 ]);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadConfig } from "@/config.js";
+import { loadConfig } from "@/utils/config.js";
 
 describe("loadConfig", () => {
   it("applies the documented defaults", () => {

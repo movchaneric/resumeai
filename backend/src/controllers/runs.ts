@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
-import { ApiError } from "@/errors.js";
-import type { RunsService } from "@/runs/runs.service.js";
+import { ApiError } from "@/utils/errors.js";
+import type { RunsService } from "@/services/runs.js";
 
 /** The HTTP edge of Runs: reads the request, calls the service, shapes the response. */
 export class RunsController {

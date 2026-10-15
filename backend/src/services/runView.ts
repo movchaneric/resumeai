@@ -1,5 +1,5 @@
 import { RunViewSchema, StepKeySchema, type RunView } from "@resume-ai/shared";
-import type { StoredRun } from "@/runs/run-store.js";
+import type { StoredRun } from "@/stores/runStore.js";
 
 /**
  * Slice 1 parks every Run at `extracting` with `parse` done: nothing advances it until slice 2 adds

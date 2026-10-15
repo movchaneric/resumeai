@@ -2,11 +2,11 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { ApiError } from "@/errors.js";
-import { loadConfig } from "@/config.js";
-import { parseCv } from "@/parsing/parse-cv.js";
+import { ApiError } from "@/utils/errors.js";
+import { loadConfig } from "@/utils/config.js";
+import { parseCv } from "@/parsing/parseCv.js";
 
-const fixture = (name: string) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../test/fixtures", name));
+const fixture = (name: string) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures", name));
 const { limits } = loadConfig({ DATABASE_URL: "x" });
 
 async function rejection(buffer: Buffer): Promise<ApiError> {

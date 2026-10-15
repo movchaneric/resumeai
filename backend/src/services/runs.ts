@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { RunIdSchema, type RunId, type RunView } from "@resume-ai/shared";
-import type { Config } from "@/config.js";
-import { ApiError } from "@/errors.js";
-import { parseCv, stripNul } from "@/parsing/parse-cv.js";
-import type { RunStore } from "@/runs/run-store.js";
-import { toRunView } from "@/runs/run-view.js";
+import type { Config } from "@/utils/config.js";
+import { ApiError } from "@/utils/errors.js";
+import { parseCv, stripNul } from "@/parsing/parseCv.js";
+import type { RunStore } from "@/stores/runStore.js";
+import { toRunView } from "@/services/runView.js";
 
 type Deps = { store: RunStore; config: Config; now?: () => Date };
 

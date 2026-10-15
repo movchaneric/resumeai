@@ -1,6 +1,6 @@
 import type { ErrorRequestHandler, RequestHandler } from "express";
 import { MulterError } from "multer";
-import { ApiError } from "@/errors.js";
+import { ApiError } from "@/utils/errors.js";
 
 /** Unknown paths answer with the same JSON shape as every other error. */
 export const notFound: RequestHandler = (_req, _res, next) => next(new ApiError("RUN_NOT_FOUND", "Not found."));

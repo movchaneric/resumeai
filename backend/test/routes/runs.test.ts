@@ -5,11 +5,11 @@ import { RunIdSchema, RunViewSchema } from "@resume-ai/shared";
 import request from "supertest";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "@/app.js";
-import { loadConfig } from "@/config.js";
-import { createPrisma } from "@/db.js";
-import { RunStore } from "@/runs/run-store.js";
+import { loadConfig } from "@/utils/config.js";
+import { createPrisma } from "@/utils/db.js";
+import { RunStore } from "@/stores/runStore.js";
 
-const fixtures = join(dirname(fileURLToPath(import.meta.url)), "../test/fixtures");
+const fixtures = join(dirname(fileURLToPath(import.meta.url)), "../fixtures");
 const fixture = (name: string) => readFileSync(join(fixtures, name));
 
 const config = loadConfig(process.env);

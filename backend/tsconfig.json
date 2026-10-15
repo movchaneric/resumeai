@@ -1,8 +1,6 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "dist",
-    "rootDir": "src",
     "paths": {
       "@/*": [
         "./src/*"
@@ -10,6 +8,9 @@
     }
   },
   "include": [
-    "src"
+    "src",
+    "test",
+    "prisma.config.ts",
+    "vitest.config.ts"
   ]
 }

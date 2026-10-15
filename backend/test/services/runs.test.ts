@@ -3,12 +3,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RunId } from "@resume-ai/shared";
 import { describe, expect, it } from "vitest";
-import { loadConfig } from "@/config.js";
-import { ApiError } from "@/errors.js";
-import type { NewRun, RunStore, StoredRun } from "@/runs/run-store.js";
-import { RunsService } from "@/runs/runs.service.js";
+import { loadConfig } from "@/utils/config.js";
+import { ApiError } from "@/utils/errors.js";
+import type { NewRun, RunStore, StoredRun } from "@/stores/runStore.js";
+import { RunsService } from "@/services/runs.js";
 
-const cv = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../test/fixtures/cv.pdf"));
+const cv = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf"));
 const config = loadConfig({ DATABASE_URL: "x" });
 
 /** In-memory stand-in for the Prisma-backed store, so the service is tested without a database. */

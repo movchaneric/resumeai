@@ -1,7 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
-import type { Config } from "@/config.js";
-import type { RunsController } from "@/runs/runs.controller.js";
+import type { Config } from "@/utils/config.js";
+import type { RunsController } from "@/controllers/runs.js";
 
 export function createRunsRouter(controller: RunsController, { limits }: Config): Router {
   // Memory storage: an upload never touches disk, so there is nothing to delete after parsing (ADR 0002).

@@ -4,18 +4,27 @@ See `CONTEXT.md` for the domain language, `docs/README.md` for where docs go, an
 
 ## Backend structure
 
-Separate the layers. A feature lives in its own folder under `backend/src/<feature>/`, with one file per layer:
+Organise `backend/src` by layer, one folder per layer, with one file per feature in each (`runs.ts` in each folder for Runs). File names are camelCase.
 
-- `<feature>.router.ts`: routes and HTTP middleware (multer, validation of the transport). No logic.
-- `<feature>.controller.ts`: the HTTP edge. Reads the request, calls the service, sets the status and response. No business rules and no database access.
-- `<feature>.service.ts`: business rules. Knows nothing about Express (no `req`/`res`). Throws `ApiError` to reject.
-- `<feature>/…store.ts`: data access (Prisma). Only the store imports the Prisma client.
+```
+backend/src/
+  routes/        index.ts mounts each feature's router and wires store -> service -> controller
+  controllers/   the HTTP edge: read the request, call the service, set status and response. No business rules, no DB.
+  services/      business rules. No Express (`req`/`res`). Throws `ApiError` to reject.
+  stores/        data access (Prisma). Only stores import the Prisma client.
+  middleware/    cross-cutting HTTP code (error handler, not-found)
+  parsing/       CV file parsing
+  utils/         config, db client, errors
+backend/test/    mirrors src (routes/, services/, parsing/, utils/); fixtures live in test/fixtures
+```
 
-`app.ts` only wires store -> service -> controller -> router. Cross-cutting HTTP code (error handling) goes in `src/middleware/`. Dependencies are passed in through constructors so layers can be tested alone (a service test uses a fake store; routes are tested with `supertest`).
+- Routers hold routes and transport middleware (multer) only, with no logic.
+- `app.ts` builds the Express app; `index.ts` starts the server.
+- Dependencies come in through constructors so each layer can be tested alone (a service test uses a fake store; routes are tested with `supertest`).
 
 ## Imports
 
-- Inside `backend/src`, import with the `@/` alias, never with relative paths: `import { ApiError } from "@/errors.js"`.
+- Inside `backend/src` and `backend/test`, import src code with the `@/` alias, never with relative paths: `import { ApiError } from "@/utils/errors.js"`.
 - Keep the `.js` extension (NodeNext module resolution requires it, even for aliased imports).
 - Do not use `@/` for other packages: shared code comes from `@resume-ai/shared`.
 - `pnpm build` runs `tsc-alias` to rewrite `@/` in the compiled output. Don't add other alias prefixes.

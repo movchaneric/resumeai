@@ -1,7 +1,7 @@
 import mammoth from "mammoth";
 import { extractText, getDocumentProxy } from "unpdf";
-import type { Config } from "@/config.js";
-import { ApiError } from "@/errors.js";
+import type { Config } from "@/utils/config.js";
+import { ApiError } from "@/utils/errors.js";
 
 type Limits = Config["limits"];
 

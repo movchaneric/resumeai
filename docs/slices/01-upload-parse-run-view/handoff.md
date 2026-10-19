@@ -4,7 +4,7 @@
 - `POST /runs` takes a `cv` file (PDF or DOCX) and a `jobDescription` text field, parses the CV in memory, stores the plain text in `app.runs` and returns `201 { id }`. Rejections return `4xx { code, message }` and create no Run.
 - `GET /runs/:id` returns a `RunView`. Every Run is parked at `extracting` (`parse` done, the other six steps pending) until slice 2 advances it. Unknown, malformed and expired IDs return `404 RUN_NOT_FOUND`.
 - The backend is layered under `backend/src/` (`routes/`, `controllers/`, `services/`, `stores/`, `middleware/`, `parsing/`, `utils/`). The rules, including `@/` imports, are in the root `CLAUDE.md`.
-- Decisions: `decisions.md` in this folder, ADR 0005 and the slice 1 addendum in ADR 0003. Review findings: `review-code.md` in this folder.
+- Decisions: `decisions.md` in this folder, ADR 0005 and the slice 1 addendum in ADR 0003. Review findings: `review-code.md`. What went wrong and how it was handled: `retrospective.md`.
 - Tests: 33 backend (parsers, config, `RunsService` with a fake store, and `supertest` integration against `resume_ai_test`) and 26 shared. Postman: `postman/resume-ai.postman_collection.json` (11 requests; set Postman's working directory to the repo root).
 
 ## Next: slice 2, extraction (needs the LLM)

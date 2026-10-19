@@ -11,6 +11,16 @@
 - The CV and Job Profile chains, ID assignment with date normalization, and the first Phoenix traces.
 - It reads `cv_text` and `jd_text` from `runs` (transitional, ADR 0003 addendum), writes the structured result, and moves the Run past `extracting`. `toRunView` in `backend/src/services/runView.ts` must then stop hardcoding `extracting` and read the real status and step state.
 
+## LLM for development: Ollama with Qwen3 14B (decided after slice 1)
+No paid API key for now. Slice 2 runs against a local model:
+- **Model:** `qwen3:14b` through Ollama (about 9 GB; fits the owner's M1 Pro with 16 GB). Fallback `qwen3:8b`. `.env.example` already points `OPENAI_BASE_URL` at `http://localhost:11434/v1/` with a dummy key; the OpenAI SDK requires a key but Ollama ignores it.
+- **Turn thinking off** for extraction (`reasoning_effort: "none"` on the OpenAI-compatible endpoint) and use `temperature: 0`. Confirm both with the smoke test.
+- **Smoke test against Ollama:** the open item about strict structured output (`additionalProperties`, the date `pattern`) must be checked against Ollama's `response_format` support, not OpenAI's. Zod validation of the result stays the real guard.
+- **Seam:** put a small `LlmClient` interface in front of the SDK, so tests use a fake that returns canned, schema-valid output (like the fake store in `backend/test/services/runs.ts`). Automated tests never call a model.
+- **Expect lower quality** than GPT-class models on the jumbled CV text; don't judge final quality or eval results from it.
+- **At the end of the project** the owner will switch to a hosted model (OpenAI, Anthropic or Gemini). Keep model names and the base URL in config, not in code, so that is a config change.
+- The owner's CV stays local; this is a single-user project, so sending it to a local model is fine.
+
 ## First task for slice 2: the CV text has a jumbled reading order
 Found with the project owner's real two-column CV. `unpdf`'s `extractText` returns text in PDF storage order, not visual order:
 - Sections come out in the wrong order (summary first, name and contact after).

@@ -27,3 +27,6 @@ Settled in a grilling session before implementation. Scope comes from the slice 
 
 ## Structure (changed after the first implementation)
 The first version kept routes, handlers and rules in `app.ts`. They are now split by layer into `routes/`, `controllers/`, `services/` and `stores/` under `backend/src/`, mirroring the layout of the `policy_agent_vecdb` backend, with tests mirrored under `backend/test/`. Imports use the `@/` alias. Both rules are in the root `CLAUDE.md`.
+
+## Considered and rejected after implementation
+- **Saving uploaded files to a folder.** The owner briefly considered keeping originals so they are easy to delete in bulk, then kept the original decision: uploads are parsed in memory and dropped (ADR 0002). Deleting is already one statement (`DELETE FROM app.runs`). Test CVs to re-run after parser changes go in `local-cvs/`, which is gitignored.

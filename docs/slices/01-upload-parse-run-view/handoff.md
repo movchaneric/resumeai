@@ -35,6 +35,9 @@ Dates and titles are exactly what must never change (ADR 0004), so a wrong guess
 - Environments and deployment haven't been designed.
 - Known risks from `review-code.md`, needed before untrusted public traffic: expired Runs and their CV text stay in the database until the slice 5 sweep, and the 10-second parse timeout does not stop the work (parse in a killable worker, cap decompressed DOCX size).
 - A DOCX over the character limit returns `TOO_MANY_PAGES`; revisit if the frontend needs to tell them apart.
+- Review items left open on purpose (judgement calls, not bugs): the `Deps` type is defined in three places (`app.ts`, `routes/index.ts`, `services/runs.ts`); `StoredRun.status` is a plain `string` instead of a `RunStatus`; the Job Description check is split between the service and the controller; and the fixture script lives at `backend/test/make-fixtures.ts`. Worth cleaning up when slice 2 touches these files.
+- Missing tests: an encrypted PDF fixture and a parse-timeout test (the `EXTRACTION_FAILED` paths for both are only exercised by the corrupt-PDF case).
+- The Postman collection passed 11/11 again after the review fixes.
 
 ## Fixes after the PR #2 review
 A two-axis review (standards and spec) of PR #2 led to these changes:

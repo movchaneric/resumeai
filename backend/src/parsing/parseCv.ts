@@ -15,10 +15,43 @@ export const stripNul = (text: string) => text.replaceAll("\u0000", "");
 
 type FileKind = "pdf" | "docx";
 
+const ZIP_END_OF_CENTRAL_DIRECTORY = 0x06054b50;
+const ZIP_CENTRAL_DIRECTORY_ENTRY = 0x02014b50;
+
+/**
+ * Lists the entry names in a ZIP's central directory, or returns null when the directory cannot be read.
+ * Reading the directory, not searching the bytes, means a ZIP that merely contains the text "word/document.xml" is not a DOCX.
+ */
+function zipEntryNames(buffer: Buffer): string[] | null {
+  // The end record is 22 bytes plus a comment of up to 65,535 bytes, so it sits within that distance of the end.
+  const searchFrom = Math.max(0, buffer.length - 22 - 0xffff);
+  let end = -1;
+  for (let i = buffer.length - 22; i >= searchFrom; i--) {
+    if (buffer.readUInt32LE(i) === ZIP_END_OF_CENTRAL_DIRECTORY) {
+      end = i;
+      break;
+    }
+  }
+  if (end < 0) return null;
+
+  const entries = buffer.readUInt16LE(end + 10);
+  let offset = buffer.readUInt32LE(end + 16);
+  const names: string[] = [];
+  for (let n = 0; n < entries; n++) {
+    if (offset + 46 > buffer.length || buffer.readUInt32LE(offset) !== ZIP_CENTRAL_DIRECTORY_ENTRY) return null;
+    const nameLength = buffer.readUInt16LE(offset + 28);
+    const extraLength = buffer.readUInt16LE(offset + 30);
+    const commentLength = buffer.readUInt16LE(offset + 32);
+    names.push(buffer.subarray(offset + 46, offset + 46 + nameLength).toString("utf8"));
+    offset += 46 + nameLength + extraLength + commentLength;
+  }
+  return names;
+}
+
 /** Detects the type from the bytes: a client-supplied MIME type or file name proves nothing. */
 function detectKind(buffer: Buffer): FileKind | null {
   if (startsWith(buffer, "%PDF-")) return "pdf";
-  if (startsWith(buffer, "PK\u0003\u0004") && buffer.includes("word/document.xml")) return "docx";
+  if (startsWith(buffer, "PK\u0003\u0004") && zipEntryNames(buffer)?.includes("word/document.xml")) return "docx";
   return null;
 }
 

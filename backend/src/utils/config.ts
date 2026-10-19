@@ -7,7 +7,7 @@ const ConfigSchema = z.object({
   MAX_CV_BYTES: z.coerce.number().int().positive().default(5 * 1024 * 1024),
   MAX_CV_PAGES: z.coerce.number().int().positive().default(5),
   MAX_DOCX_CHARS: z.coerce.number().int().positive().default(30_000),
-  MAX_JD_CHARS: z.coerce.number().int().positive().default(20_000),
+  MAX_JOB_DESCRIPTION_CHARS: z.coerce.number().int().positive().default(20_000),
   /** A PDF averaging fewer extracted characters per page than this is treated as a scan. */
   MIN_PDF_CHARS_PER_PAGE: z.coerce.number().nonnegative().default(100),
   PARSE_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
@@ -30,7 +30,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       maxCvBytes: e.MAX_CV_BYTES,
       maxCvPages: e.MAX_CV_PAGES,
       maxDocxChars: e.MAX_DOCX_CHARS,
-      maxJdChars: e.MAX_JD_CHARS,
+      maxJobDescriptionChars: e.MAX_JOB_DESCRIPTION_CHARS,
       minPdfCharsPerPage: e.MIN_PDF_CHARS_PER_PAGE,
       parseTimeoutMs: e.PARSE_TIMEOUT_MS,
     },

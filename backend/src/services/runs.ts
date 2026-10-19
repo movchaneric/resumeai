@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { RunIdSchema, type RunId, type RunView } from "@resume-ai/shared";
+import { RunIdSchema, RunViewSchema, StepKeySchema, type RunId, type RunView } from "@resume-ai/shared";
 import type { Config } from "@/utils/config.js";
 import { ApiError } from "@/utils/errors.js";
 import { parseCv, stripNul } from "@/parsing/parseCv.js";
-import type { RunStore } from "@/stores/runStore.js";
-import { toRunView } from "@/services/runView.js";
+import type { RunStore, StoredRun } from "@/stores/runs.js";
 
 type Deps = { store: RunStore; config: Config; now?: () => Date };
 
@@ -21,19 +20,22 @@ export class RunsService {
   /** Validates and parses the upload, then stores the Run. Throws an `ApiError` when the upload is rejected. */
   async createRun({ cv, jobDescription }: CreateRunInput): Promise<RunId> {
     const { store, config } = this.deps;
-    const jdText = stripNul(jobDescription).trim();
-    if (!jdText) throw new ApiError("BAD_REQUEST", "The `jobDescription` field is required.");
-    if (jdText.length > config.limits.maxJdChars) {
-      throw new ApiError("JOB_DESCRIPTION_TOO_LONG", `The job description is longer than ${config.limits.maxJdChars} characters.`);
+    const jobDescriptionText = stripNul(jobDescription).trim();
+    if (!jobDescriptionText) throw new ApiError("BAD_REQUEST", "The `jobDescription` field is required.");
+    if (jobDescriptionText.length > config.limits.maxJobDescriptionChars) {
+      throw new ApiError("JOB_DESCRIPTION_TOO_LONG", `The job description is longer than ${config.limits.maxJobDescriptionChars} characters.`);
     }
 
     const cvText = await parseCv(cv, config.limits);
+    // Both timestamps come from one clock, so a Run lives exactly RUN_TTL_DAYS.
+    const createdAt = this.now();
     const run = await store.create({
       id: RunIdSchema.parse(randomUUID()),
       status: "extracting",
-      expiresAt: new Date(this.now().getTime() + config.runTtlMs),
+      createdAt,
+      expiresAt: new Date(createdAt.getTime() + config.runTtlMs),
       cvText,
-      jdText,
+      jobDescriptionText,
     });
     return run.id;
   }
@@ -48,4 +50,19 @@ export class RunsService {
     if (!run || run.expiresAt <= this.now()) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
     return toRunView(run);
   }
+}
+
+/**
+ * Slice 1 parks every Run at `extracting` with `parse` done: nothing advances it until slice 2 adds
+ * extraction. Validating against the schema keeps the response honest as the view grows.
+ */
+function toRunView(run: StoredRun): RunView {
+  return RunViewSchema.parse({
+    id: run.id,
+    status: "extracting",
+    createdAt: run.createdAt.toISOString(),
+    expiresAt: run.expiresAt.toISOString(),
+    job: null,
+    steps: StepKeySchema.options.map((key) => ({ key, state: key === "parse" ? "done" : "pending" })),
+  });
 }

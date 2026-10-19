@@ -17,7 +17,7 @@ Settled in a grilling session before implementation. Scope comes from the slice 
 
 ## Storage
 - Prisma, with the `runs` table in the `app` schema; see ADR 0005.
-- `runs` holds id, status, timestamps, expiry, export path, and the transitional `cv_text` and `jd_text` columns; see the addendum in ADR 0003.
+- `runs` holds id, status, timestamps, expiry, export path, and the transitional `cv_text` and `job_description_text` columns (first named `jd_text`; renamed after review because `CONTEXT.md` avoids "JD"); see the addendum in ADR 0003.
 - A successful Run is stored as `extracting`: `parse` done, the other six steps pending, `job` null, `expiresAt` = `createdAt` + `RUN_TTL_DAYS`. Nothing advances it until slice 2.
 - A thin `RunStore` module (`create`, `get`, `delete`) hides Prisma. `config.ts` validates env with Zod and fails fast.
 

@@ -6,7 +6,7 @@ describe("loadConfig", () => {
     const config = loadConfig({ DATABASE_URL: "postgresql://x" });
     expect(config.port).toBe(3000);
     expect(config.runTtlMs).toBe(7 * 24 * 60 * 60 * 1000);
-    expect(config.limits).toMatchObject({ maxCvBytes: 5 * 1024 * 1024, maxCvPages: 5, maxDocxChars: 30_000, maxJdChars: 20_000, minPdfCharsPerPage: 100 });
+    expect(config.limits).toMatchObject({ maxCvBytes: 5 * 1024 * 1024, maxCvPages: 5, maxDocxChars: 30_000, maxJobDescriptionChars: 20_000, minPdfCharsPerPage: 100 });
   });
 
   it("reads overrides from the environment", () => {

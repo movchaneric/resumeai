@@ -5,7 +5,7 @@ import type { RunId } from "@resume-ai/shared";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "@/utils/config.js";
 import { ApiError } from "@/utils/errors.js";
-import type { NewRun, RunStore, StoredRun } from "@/stores/runStore.js";
+import type { NewRun, RunStore, StoredRun } from "@/stores/runs.js";
 import { RunsService } from "@/services/runs.js";
 
 const cv = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf"));
@@ -15,7 +15,7 @@ const config = loadConfig({ DATABASE_URL: "x" });
 class FakeStore {
   rows = new Map<string, StoredRun>();
   async create(run: NewRun): Promise<StoredRun> {
-    const stored = { ...run, createdAt: new Date(), exportPath: null };
+    const stored = { ...run, exportPath: null };
     this.rows.set(run.id, stored);
     return stored;
   }
@@ -36,22 +36,24 @@ describe("RunsService", () => {
     const { store, service } = setup();
     const id = await service.createRun({ cv, jobDescription: "  Backend developer \u0000 " });
     const row = store.rows.get(id)!;
-    expect(row.jdText).toBe("Backend developer");
+    expect(row.jobDescriptionText).toBe("Backend developer");
     expect(row.cvText).toContain("Jane Doe");
   });
 
-  it("sets the expiry from the configured time-to-live", async () => {
+  it("sets the creation time and the expiry from the same clock", async () => {
     const start = new Date("2026-10-01T00:00:00Z");
     const { store, service } = setup(() => start);
     const id = await service.createRun({ cv, jobDescription: "Backend developer" });
-    expect(store.rows.get(id)!.expiresAt.getTime()).toBe(start.getTime() + config.runTtlMs);
+    const row = store.rows.get(id)!;
+    expect(row.createdAt).toEqual(start);
+    expect(row.expiresAt.getTime()).toBe(start.getTime() + config.runTtlMs);
   });
 
   it("rejects an empty or over-long job description before parsing the CV", async () => {
     const { store, service } = setup();
     const garbage = Buffer.from("not a cv");
     expect(code(await service.createRun({ cv: garbage, jobDescription: "   " }).catch((e) => e))).toBe("BAD_REQUEST");
-    const long = "x".repeat(config.limits.maxJdChars + 1);
+    const long = "x".repeat(config.limits.maxJobDescriptionChars + 1);
     expect(code(await service.createRun({ cv: garbage, jobDescription: long }).catch((e) => e))).toBe("JOB_DESCRIPTION_TOO_LONG");
     expect(store.rows.size).toBe(0);
   });

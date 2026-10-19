@@ -7,7 +7,7 @@
 - NUL characters are stripped from extracted CV text and the Job Description (Postgres TEXT rejects them; it was a 500).
 - The scanned-PDF check counts non-whitespace characters only, so page separators cannot make a scan look like text.
 - multer also limits `fields`, `parts` and `fieldNameSize`.
-- The error handler checks `res.headersSent`, and unknown paths answer with the JSON `{ code, message }` shape instead of Express's HTML 404.
+- The error handler checks `res.headersSent`, and unknown paths answer with the JSON `{ code, message }` shape instead of Express's HTML 404. (A later review found they reused `RUN_NOT_FOUND`; they now return `NOT_FOUND`, see `handoff.md`.)
 - The server closes and disconnects Prisma on SIGINT and SIGTERM.
 
 ## Not fixed, on purpose

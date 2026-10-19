@@ -1,11 +1,13 @@
 import tsconfigPaths from "vite-tsconfig-paths";
 import { defineConfig } from "vitest/config";
+import { TEST_DATABASE_URL } from "./test/globalSetup.js";
 
 export default defineConfig({
   plugins: [tsconfigPaths()],
   test: {
     include: ["test/**/*.test.ts"],
-    env: { DATABASE_URL: "postgresql://resume:resume@localhost:15432/resume_ai_test" },
+    globalSetup: ["test/globalSetup.ts"],
+    env: { DATABASE_URL: TEST_DATABASE_URL },
     fileParallelism: false,
   },
 });

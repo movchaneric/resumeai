@@ -7,7 +7,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "@/app.js";
 import { loadConfig } from "@/utils/config.js";
 import { createPrisma } from "@/utils/db.js";
-import { RunStore } from "@/stores/runStore.js";
+import { RunStore } from "@/stores/runs.js";
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "../fixtures");
 const fixture = (name: string) => readFileSync(join(fixtures, name));
@@ -17,9 +17,9 @@ const prisma = createPrisma(config.databaseUrl);
 const store = new RunStore(prisma);
 const app = createApp({ store, config });
 
-const JD = "We are hiring a backend developer with Node.js and PostgreSQL experience.";
+const JOB_DESCRIPTION = "We are hiring a backend developer with Node.js and PostgreSQL experience.";
 
-const upload = (file: string | null, jobDescription: string | null = JD) => {
+const upload = (file: string | null, jobDescription: string | null = JOB_DESCRIPTION) => {
   const req = request(app).post("/runs");
   if (file) req.attach("cv", fixture(file), file);
   if (jobDescription !== null) req.field("jobDescription", jobDescription);
@@ -27,7 +27,7 @@ const upload = (file: string | null, jobDescription: string | null = JD) => {
 };
 
 beforeEach(async () => {
-  await prisma.run.deleteMany();
+  await store.deleteAll();
 });
 afterAll(async () => {
   await prisma.$disconnect();
@@ -42,8 +42,8 @@ describe("POST /runs", () => {
 
     const row = await store.get(id);
     expect(row?.cvText).toContain("Jane Doe");
-    expect(row?.jdText).toBe(JD);
-    expect(row!.expiresAt.getTime() - row!.createdAt.getTime()).toBeCloseTo(config.runTtlMs, -4);
+    expect(row?.jobDescriptionText).toBe(JOB_DESCRIPTION);
+    expect(row!.expiresAt.getTime() - row!.createdAt.getTime()).toBe(config.runTtlMs);
   });
 
   it.each([
@@ -57,7 +57,7 @@ describe("POST /runs", () => {
     expect(res.status).toBe(status);
     expect(res.body.code).toBe(code);
     expect(typeof res.body.message).toBe("string");
-    expect(await prisma.run.count()).toBe(0);
+    expect(await store.count()).toBe(0);
   });
 
   it("rejects a request without a CV", async () => {
@@ -70,20 +70,20 @@ describe("POST /runs", () => {
     const res = await upload("cv.pdf", null);
     expect(res.status).toBe(400);
     expect(res.body.code).toBe("BAD_REQUEST");
-    expect(await prisma.run.count()).toBe(0);
+    expect(await store.count()).toBe(0);
   });
 
   it("strips NUL characters instead of failing on them", async () => {
     const res = await upload("cv.pdf", "Backend\u0000 developer");
     expect(res.status).toBe(201);
-    expect((await store.get(RunIdSchema.parse(res.body.id)))?.jdText).toBe("Backend developer");
+    expect((await store.get(RunIdSchema.parse(res.body.id)))?.jobDescriptionText).toBe("Backend developer");
   });
 
   it("rejects a job description over the limit", async () => {
-    const res = await upload("cv.pdf", "x".repeat(config.limits.maxJdChars + 1));
+    const res = await upload("cv.pdf", "x".repeat(config.limits.maxJobDescriptionChars + 1));
     expect(res.status).toBe(413);
     expect(res.body.code).toBe("JOB_DESCRIPTION_TOO_LONG");
-    expect(await prisma.run.count()).toBe(0);
+    expect(await store.count()).toBe(0);
   });
 });
 
@@ -106,10 +106,10 @@ describe("GET /runs/:id", () => {
     expect(res.body.code).toBe("RUN_NOT_FOUND");
   });
 
-  it("answers an unknown path with the JSON error shape", async () => {
+  it("answers an unknown path with the JSON error shape and a code that is not about Runs", async () => {
     const res = await request(app).get("/nope");
     expect(res.status).toBe(404);
-    expect(res.body.code).toBe("RUN_NOT_FOUND");
+    expect(res.body.code).toBe("NOT_FOUND");
   });
 
   it("returns the same 404 for a malformed ID", async () => {

@@ -39,6 +39,10 @@ describe("parseCv", () => {
     expect((await rejection(Buffer.from("PK\u0003\u0004 not a docx"))).code).toBe("UNSUPPORTED_FILE");
   });
 
+  it("reads the ZIP directory instead of searching for the DOCX entry name in the bytes", async () => {
+    expect((await rejection(Buffer.from("PK\u0003\u0004 mentions word/document.xml but has no such entry"))).code).toBe("UNSUPPORTED_FILE");
+  });
+
   it("rejects a PDF with too many pages", async () => {
     expect((await rejection(fixture("cv-six-pages.pdf"))).code).toBe("TOO_MANY_PAGES");
   });

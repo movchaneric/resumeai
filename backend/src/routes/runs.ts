@@ -7,7 +7,7 @@ export function createRunsRouter(controller: RunsController, { limits }: Config)
   // Memory storage: an upload never touches disk, so there is nothing to delete after parsing (ADR 0002).
   const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: limits.maxCvBytes, files: 1, fields: 4, parts: 6, fieldNameSize: 100, fieldSize: limits.maxJdChars * 4 },
+    limits: { fileSize: limits.maxCvBytes, files: 1, fields: 4, parts: 6, fieldNameSize: 100, fieldSize: limits.maxJobDescriptionChars * 4 },
   });
 
   const router = Router();

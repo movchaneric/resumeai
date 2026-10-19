@@ -1,13 +1,19 @@
 import "dotenv/config";
-import express from "express";
+import { createApp } from "@/app.js";
+import { loadConfig } from "@/utils/config.js";
+import { createPrisma } from "@/utils/db.js";
+import { RunStore } from "@/stores/runs.js";
 
-const app = express();
+const config = loadConfig();
+const prisma = createPrisma(config.databaseUrl);
+const app = createApp({ store: new RunStore(prisma), config });
 
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok" });
+const server = app.listen(config.port, () => {
+  console.log(`backend listening on :${config.port}`);
 });
 
-const port = Number(process.env.PORT ?? 3000);
-app.listen(port, () => {
-  console.log(`backend listening on :${port}`);
-});
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    server.close(() => void prisma.$disconnect().finally(() => process.exit(0)));
+  });
+}

@@ -197,6 +197,7 @@ describe("run view", () => {
     expect(RunViewSchema.safeParse({ ...base, status: "parsing" }).success).toBe(true);
     expect(RunViewSchema.safeParse({ ...base, status: "interrupted" }).success).toBe(true);
     expect(RunViewSchema.safeParse({ ...base, status: "failed", error: { code: "SCANNED_PDF", message: "m" } }).success).toBe(true);
+    expect(RunViewSchema.safeParse({ ...base, status: "failed", error: { code: "JOB_DESCRIPTION_TOO_LONG", message: "m" } }).success).toBe(true);
   });
   it("parses awaiting_answers with questions", () => {
     const questions = [{ id: "q-1", requirementId: "req-3", text: "Have you used Kubernetes?" }];

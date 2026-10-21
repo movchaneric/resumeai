@@ -81,7 +81,7 @@ describe("parseCv", () => {
   });
 
   it("rejects an encrypted PDF", async () => {
-    await rejection(fixture("cv-encrypted.pdf")); // the code is pinned once ticket 01 renames it
+    expect((await rejection(fixture("cv-encrypted.pdf"))).code).toBe("UNREADABLE_FILE");
   });
 
   it("rejects a parse that takes too long", async () => {
@@ -91,6 +91,7 @@ describe("parseCv", () => {
       (e: unknown) => e,
     );
     expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("UNREADABLE_FILE");
   });
 
   it("rejects a DOCX with too much text", async () => {

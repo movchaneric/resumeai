@@ -261,7 +261,7 @@
           "script": {
             "type": "text/javascript",
             "exec": [
-              "pm.test('422 EXTRACTION_FAILED', () => { pm.response.to.have.status(422); pm.expect(pm.response.json().code).to.eql('EXTRACTION_FAILED'); });"
+              "pm.test('422 UNREADABLE_FILE', () => { pm.response.to.have.status(422); pm.expect(pm.response.json().code).to.eql('UNREADABLE_FILE'); });"
             ]
           }
         }

@@ -8,8 +8,7 @@ export class RunsController {
 
   create = async (req: Request, res: Response): Promise<void> => {
     if (!req.file) throw new ApiError("BAD_REQUEST", "Upload your CV in the `cv` field.");
-    const jobDescription = typeof req.body?.jobDescription === "string" ? req.body.jobDescription : "";
-    const id = await this.service.createRun({ cv: req.file.buffer, jobDescription });
+    const id = await this.service.createRun({ cv: req.file.buffer, jobDescription: req.body?.jobDescription });
     res.status(201).location(`/runs/${id}`).json({ id });
   };
 

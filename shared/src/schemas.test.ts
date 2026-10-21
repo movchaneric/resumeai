@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   ChangeSchema,
   CvSchema,
@@ -6,6 +7,7 @@ import {
   ExtractedCvSchema,
   ExtractedJobProfileSchema,
   ItemIdSchema,
+  PartialDateSchema,
   RequirementIdSchema,
   RunIdSchema,
   RunViewSchema,
@@ -39,6 +41,11 @@ describe("dates", () => {
     expect(DateRangeSchema.safeParse({ start: "2021-06", end: "2021", current: false }).success).toBe(true);
     expect(DateRangeSchema.safeParse({ start: "2021", end: "2021-01", current: false }).success).toBe(true);
     expect(DateRangeSchema.safeParse({ start: "2021-06", end: "2020", current: false }).success).toBe(false);
+  });
+  it("emits a JSON schema without \\d, which Ollama's grammar converter rejects", () => {
+    const json = JSON.stringify(z.toJSONSchema(PartialDateSchema));
+    expect(json).not.toContain("\\d");
+    expect(json).toContain("[0-9]");
   });
   it("normalizes a stray end date on a current range", () => {
     const fixed = normalizeDateRange({ start: "2021-03", end: "2022-01", current: true });

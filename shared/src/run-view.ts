@@ -18,7 +18,9 @@ export const RunErrorCodeSchema = z.enum([
   "TOO_MANY_PAGES",
   "SCANNED_PDF",
   "JOB_DESCRIPTION_TOO_LONG",
+  "UNREADABLE_FILE",
   "EXTRACTION_FAILED",
+  "NO_REQUIREMENTS",
   "INTERNAL",
 ]);
 export type RunErrorCode = z.infer<typeof RunErrorCodeSchema>;

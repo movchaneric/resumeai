@@ -58,6 +58,14 @@ describe("RunsService", () => {
     expect(store.rows.size).toBe(0);
   });
 
+  it("rejects a missing or non-string job description as BAD_REQUEST", async () => {
+    const { store, service } = setup();
+    for (const jobDescription of [undefined, null, 42, ["a"], { text: "a" }]) {
+      expect(code(await service.createRun({ cv, jobDescription }).catch((e) => e))).toBe("BAD_REQUEST");
+    }
+    expect(store.rows.size).toBe(0);
+  });
+
   it("stops treating a Run as readable once it has expired", async () => {
     let now = new Date("2026-10-01T00:00:00Z");
     const { service } = setup(() => now);

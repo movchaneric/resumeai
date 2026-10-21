@@ -3,8 +3,11 @@ import { createApp } from "@/app.js";
 import { loadConfig } from "@/utils/config.js";
 import { createPrisma } from "@/utils/db.js";
 import { RunStore } from "@/stores/runs.js";
+import { setupTracing } from "@/utils/tracing.js";
 
 const config = loadConfig();
+// Registers the LangChain instrumentation; keep it ahead of anything that builds a model.
+setupTracing(config);
 const prisma = createPrisma(config.databaseUrl);
 const app = createApp({ store: new RunStore(prisma), config });
 

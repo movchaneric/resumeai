@@ -63,19 +63,19 @@ export class LlmUnavailableError extends Error {}               // unreachable, 
   - Prompt: one Requirement per line or idea; `source` quotes only the line or sentence it came from, verbatim; importance rules as in the schema descriptions.
   - Calls `llm.structured(ExtractedJobProfileSchema, …, { name: "extract_job_profile" })`. On `LlmSchemaError`, retries once with the issues appended as a user message. A second failure throws `ExtractionError`.
   - Zero Requirements throws `NoRequirementsError` (no retry).
-  - Assigns IDs with `assignJobProfileIds`.
+  - Assigns IDs with `assignJobProfileIds` (`req1`, `req2`, ...), a small pure function in the same file.
 - `extractCv.ts`: `extractCv(llm, cvText) => Promise<Cv>`.
   - Prompt: copy text verbatim; headings guide which section content belongs to; dates as `YYYY` or `YYYY-MM`; `current: true` and `end: null` for "Present"; unknown headings go to `additionalSections` with the candidate's heading as `title`.
   - Calls `llm.structured(ExtractedCvSchema, …, { name: "extract_cv" })`, then runs, in order: `normalizeDateRange` on every range, the empty-CV rule, `checkVerbatim`, then `assignCvIds` (which validates with `CvSchema`, so the refined `DateRangeSchema` runs there).
   - Any failure in that chain (schema, empty CV, verbatim, refinement) collects readable issues; one retry with the issues fed back; a second failure throws `ExtractionError`.
   - Returns the soft mismatch count (bullets, summary, skills not found verbatim) alongside the `Cv` for tracing.
-- `assignIds.ts`: pure functions `assignCvIds(extracted) => Cv` and `assignJobProfileIds(extracted) => JobProfile`, producing the IDs in `decisions.md` and parsing through `CvSchema` / `JobProfileSchema` (branded IDs are parsed, not cast).
+- `assignIds.ts`: pure `assignCvIds(extracted) => Cv`, producing the IDs in `decisions.md` and parsing through `CvSchema` (branded IDs are parsed, not cast). `assignJobProfileIds` lives in `extractJobProfile.ts`, so the two chains never edit the same file.
 - `verbatim.ts`: pure `checkVerbatim(cv, sourceText) => { issues: string[]; softMismatches: number }`.
   - Normalize both sides: lowercase, Unicode NFKC, collapse whitespace, remove punctuation except characters inside words.
   - Protected fields (`company`, `title`, `institution`, `degree`, `field`, certification `name`) must be substrings of the normalized source; each miss is an issue such as `experience[1].company "Acme Ltd" not found in the CV text`.
   - The year of every `start` and `end` must appear in the source.
   - Bullets, summary and skills only count toward `softMismatches`.
-- Errors: `ExtractionError` (with `issues`) and `NoRequirementsError`, both in `extraction/errors.ts` or alongside; they are not `ApiError` because they never reach HTTP.
+- Errors: `ExtractionError` (with `issues`) and `NoRequirementsError` in `extraction/errors.ts`, created by ticket 03 so the two chain tickets can run in parallel. They are not `ApiError` because they never reach HTTP.
 
 ### `backend/src/services/runs.ts`
 - `Deps` gets `llm: LlmClient` and `runInBackground?: (task: () => Promise<void>) => void` (default: call it and attach a `.catch` that logs, so nothing escapes). Tests pass a version that collects the promises so they can await them.

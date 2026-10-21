@@ -22,7 +22,17 @@ Settled in a grilling session before implementation. Scope comes from the slice 
 ## Model access
 - LangChain JS: `ChatOpenAI` (`@langchain/openai`) pointed at `OPENAI_BASE_URL`, with `.withStructuredOutput(zodSchema)`, `temperature: 0` and thinking off.
 - It sits behind our own `LlmClient` interface, roughly `structured(schema, messages, { name })`, where `name` labels the trace span (`extract_cv`, `extract_job_profile`). Only `llm/` imports LangChain; tests use a fake `LlmClient` and never call a model.
-- First implementation step: a smoke test against Ollama confirming that the JSON schema is enforced (including `additionalProperties` and the date `pattern`) and that thinking turns off. If either fails, fall back to the plain `openai` SDK behind the same interface.
+- Thinking is turned off with `modelKwargs: { reasoning_effort: "none" }`. LangChain's own `reasoning: { effort }` option is silently dropped for model names it doesn't recognise as OpenAI reasoning models, so it never reaches Ollama.
+
+### Smoke test findings (2026-10-21, Ollama 0.32.14, `qwen3:14b`, `local-cvs/smoke/`)
+- **Job Profile:** strict structured output works and passes Zod (6 Requirements, importance split correct). Quality issue for the real prompt: every `source` held the whole requirements block instead of the one line it came from.
+- **Thinking off works:** with `reasoning_effort: "none"`, 0 reasoning characters and 58 s, against 1,596 characters and 85 s with the default.
+- **Context window:** `ollama ps` shows `CONTEXT 16384` and `SIZE 12 GB`, but `PROCESSOR 7%/93% CPU/GPU`: macOS gives the GPU only 11.8 GB of the 16 GB, so part of the model runs on the CPU.
+- **The CV schema was rejected** with `400 failed to parse grammar`. A bisect against raw requests isolated the cause: Ollama's regex converter does not support `\d`. `[0-9]` works; `^` and `$` are required; `$ref`/`$defs` and `title` are fine. The full `ExtractedCvSchema` with `[0-9]` passed Zod and every date came back as `YYYY` or `YYYY-MM` (93 s for a 15-line synthetic CV).
+- **The pattern does real work:** without it the model copied `"March 2021"` verbatim despite the prompt; with it, `"2021-03"`. Keep it in the schema sent to the model.
+- **Decision:** `PartialDateSchema` uses `[0-9]` instead of `\d` (identical matching in JavaScript), with a comment saying why. Keep LangChain's own Zod-to-JSON-schema conversion. The plain-SDK fallback is not needed: the failure was the schema, not LangChain.
+- **Speed:** with `OLLAMA_FLASH_ATTENTION=1` and `OLLAMA_KV_CACHE_TYPE=q8_0` (an 8-bit KV cache, about half the memory), the full CV call dropped from 93 s to 39 s with identical, valid output. Ollama runs with all three settings: `OLLAMA_CONTEXT_LENGTH=16384 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 ollama serve`. `.env.example` and the handoff document this.
+- **Timeout:** `LLM_TIMEOUT_MS` stays at 3 minutes for now. Set the final value from the dev script's timings on the owner's real CV.
 - Switching to a hosted provider later: hosted OpenAI is a config change; Anthropic or Gemini need one new `LlmClient` implementation plus an `LLM_PROVIDER` setting added then.
 
 ## Validation and retries
@@ -56,7 +66,7 @@ Short IDs based on position, assigned once at extraction and never recomputed. T
 None collide with the reserved `SectionId` values. Items added by tailoring (slice 4) need their own form, for example `exp1.n1`; that is slice 4's decision.
 
 ## Context window
-- Ollama runs with `OLLAMA_CONTEXT_LENGTH=16384` (documented in `.env.example`). Without it Ollama uses a smaller default and silently drops the oldest tokens.
+- Ollama runs with `OLLAMA_CONTEXT_LENGTH=16384` (documented in `.env.example`). Without it Ollama uses its default of 4096 on this machine (confirmed in its startup log) and silently drops the oldest tokens.
 - A guard estimates prompt size (characters ÷ 3) plus an output reserve against `LLM_CONTEXT_TOKENS`, and fails the Run with `INTERNAL` instead of letting the prompt be truncated.
 - At 16k the KV cache is about 2.5 GB on top of 9 GB of weights on the owner's 16 GB M1 Pro. The smoke test confirms the real window with `ollama ps`.
 

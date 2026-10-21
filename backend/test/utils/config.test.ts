@@ -3,14 +3,14 @@ import { loadConfig } from "@/utils/config.js";
 
 describe("loadConfig", () => {
   it("applies the documented defaults", () => {
-    const config = loadConfig({ DATABASE_URL: "postgresql://x" });
+    const config = loadConfig({ DATABASE_URL: "postgresql://x", OPENAI_API_KEY: "k" });
     expect(config.port).toBe(3000);
     expect(config.runTtlMs).toBe(7 * 24 * 60 * 60 * 1000);
     expect(config.limits).toMatchObject({ maxCvBytes: 5 * 1024 * 1024, maxCvPages: 5, maxDocxChars: 30_000, maxJobDescriptionChars: 20_000, minPdfCharsPerPage: 100 });
   });
 
   it("reads overrides from the environment", () => {
-    const config = loadConfig({ DATABASE_URL: "postgresql://x", PORT: "4000", MAX_CV_PAGES: "2", RUN_TTL_DAYS: "1" });
+    const config = loadConfig({ DATABASE_URL: "postgresql://x", OPENAI_API_KEY: "k", PORT: "4000", MAX_CV_PAGES: "2", RUN_TTL_DAYS: "1" });
     expect(config.port).toBe(4000);
     expect(config.limits.maxCvPages).toBe(2);
     expect(config.runTtlMs).toBe(24 * 60 * 60 * 1000);
@@ -21,6 +21,38 @@ describe("loadConfig", () => {
   });
 
   it("fails fast on a value that is not a number", () => {
-    expect(() => loadConfig({ DATABASE_URL: "x", PORT: "abc" })).toThrow(/PORT/);
+    expect(() => loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", PORT: "abc" })).toThrow(/PORT/);
+  });
+
+  it("applies the LLM and tracing defaults", () => {
+    const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" });
+    expect(config.llm).toEqual({ apiKey: "k", baseUrl: undefined, model: "qwen3:14b", contextTokens: 16_384, timeoutMs: 180_000 });
+    expect(config.tracing).toEqual({ traceContent: false, endpoint: undefined, projectName: undefined });
+  });
+
+  it("reads LLM and tracing overrides", () => {
+    const config = loadConfig({
+      DATABASE_URL: "x",
+      OPENAI_API_KEY: "k",
+      OPENAI_BASE_URL: "http://localhost:11434/v1",
+      LLM_MODEL: "m",
+      TRACE_CONTENT: "true",
+      PHOENIX_COLLECTOR_ENDPOINT: "http://localhost:6006",
+      PHOENIX_PROJECT_NAME: "p",
+    });
+    expect(config.llm.baseUrl).toBe("http://localhost:11434/v1");
+    expect(config.llm.model).toBe("m");
+    expect(config.tracing).toEqual({ traceContent: true, endpoint: "http://localhost:6006", projectName: "p" });
+  });
+
+  it("fails fast when OPENAI_API_KEY is missing", () => {
+    expect(() => loadConfig({ DATABASE_URL: "x" })).toThrow(/OPENAI_API_KEY/);
+  });
+
+  it("refuses TRACE_CONTENT=true in production", () => {
+    expect(() => loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", NODE_ENV: "production", TRACE_CONTENT: "true" })).toThrow(
+      /0006-trace-content-is-outside-run-deletion/,
+    );
+    expect(() => loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", NODE_ENV: "production" })).not.toThrow();
   });
 });

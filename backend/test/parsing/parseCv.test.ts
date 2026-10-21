@@ -7,7 +7,7 @@ import { loadConfig } from "@/utils/config.js";
 import { parseCv } from "@/parsing/parseCv.js";
 
 const fixture = (name: string) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures", name));
-const { limits } = loadConfig({ DATABASE_URL: "x" });
+const { limits } = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" });
 
 async function rejection(buffer: Buffer): Promise<ApiError> {
   const error = await parseCv(buffer, limits).then(

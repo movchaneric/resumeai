@@ -9,7 +9,7 @@ import type { NewRun, RunStore, StoredRun } from "@/stores/runs.js";
 import { RunsService } from "@/services/runs.js";
 
 const cv = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf"));
-const config = loadConfig({ DATABASE_URL: "x" });
+const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" });
 
 /** In-memory stand-in for the Prisma-backed store, so the service is tested without a database. */
 class FakeStore {

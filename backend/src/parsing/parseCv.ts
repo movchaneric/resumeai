@@ -1,5 +1,6 @@
 import mammoth from "mammoth";
-import { extractText, getDocumentProxy } from "unpdf";
+import { extractTextItems, getDocumentProxy } from "unpdf";
+import { layoutPage } from "@/parsing/pdfLayout.js";
 import type { Config } from "@/utils/config.js";
 import { ApiError } from "@/utils/errors.js";
 
@@ -73,8 +74,14 @@ async function parsePdf(buffer: Buffer, limits: Limits): Promise<string> {
     if (pdf.numPages > limits.maxCvPages) {
       throw new ApiError("TOO_MANY_PAGES", `The CV has ${pdf.numPages} pages; the limit is ${limits.maxCvPages}.`);
     }
-    const { text } = await extractText(pdf, { mergePages: false });
-    const pages = Array.isArray(text) ? text : [text];
+    // Positioned items, not unpdf's storage-order text: two-column CVs need their reading order rebuilt.
+    const { items } = await extractTextItems(pdf);
+    const pages = await Promise.all(
+      items.map(async (pageItems, i) => {
+        const [x0, , x1] = (await pdf.getPage(i + 1)).view as number[];
+        return layoutPage(pageItems, (x1 ?? 0) - (x0 ?? 0));
+      }),
+    );
     // Count only visible characters, so page separators and blank lines cannot make a scan look like text.
     const visibleChars = pages.join("").replace(/\s/g, "").length;
     if (visibleChars / pdf.numPages < limits.minPdfCharsPerPage) {

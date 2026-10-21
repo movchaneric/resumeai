@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "fixtures": "tsx test/make-fixtures.ts",
+    "extract": "tsx test/extract.ts",
     "db:migrate": "prisma migrate dev"
   },
   "dependencies": {

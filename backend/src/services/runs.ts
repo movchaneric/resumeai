@@ -7,7 +7,7 @@ import type { RunStore, StoredRun } from "@/stores/runs.js";
 
 export type RunsDeps = { store: RunStore; config: Config; now?: () => Date };
 
-export type CreateRunInput = { cv: Buffer; jobDescription: string };
+export type CreateRunInput = { cv: Buffer; jobDescription: unknown };
 
 /** The business rules for a Run. It knows nothing about HTTP. */
 export class RunsService {
@@ -20,7 +20,7 @@ export class RunsService {
   /** Validates and parses the upload, then stores the Run. Throws an `ApiError` when the upload is rejected. */
   async createRun({ cv, jobDescription }: CreateRunInput): Promise<RunId> {
     const { store, config } = this.deps;
-    const jobDescriptionText = stripNul(jobDescription).trim();
+    const jobDescriptionText = typeof jobDescription === "string" ? stripNul(jobDescription).trim() : "";
     if (!jobDescriptionText) throw new ApiError("BAD_REQUEST", "The `jobDescription` field is required.");
     if (jobDescriptionText.length > config.limits.maxJobDescriptionChars) {
       throw new ApiError("JOB_DESCRIPTION_TOO_LONG", `The job description is longer than ${config.limits.maxJobDescriptionChars} characters.`);

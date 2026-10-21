@@ -52,7 +52,7 @@ describe("parseCv", () => {
   });
 
   it("rejects a corrupt PDF as an extraction failure", async () => {
-    expect((await rejection(fixture("cv-corrupt.pdf"))).code).toBe("EXTRACTION_FAILED");
+    expect((await rejection(fixture("cv-corrupt.pdf"))).code).toBe("UNREADABLE_FILE");
   });
 
   it("rejects a DOCX with too much text", async () => {

@@ -50,7 +50,7 @@ describe("POST /runs", () => {
     ["not-a-cv.txt", 415, "UNSUPPORTED_FILE"],
     ["cv-six-pages.pdf", 422, "TOO_MANY_PAGES"],
     ["cv-scanned.pdf", 422, "SCANNED_PDF"],
-    ["cv-corrupt.pdf", 422, "EXTRACTION_FAILED"],
+    ["cv-corrupt.pdf", 422, "UNREADABLE_FILE"],
     ["cv-oversized.pdf", 413, "FILE_TOO_LARGE"],
   ])("rejects %s without creating a Run", async (file, status, code) => {
     const res = await upload(file);

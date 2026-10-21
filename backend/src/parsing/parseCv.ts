@@ -58,7 +58,7 @@ function detectKind(buffer: Buffer): FileKind | null {
 async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new ApiError("EXTRACTION_FAILED", "Reading the file took too long.")), ms);
+    timer = setTimeout(() => reject(new ApiError("UNREADABLE_FILE", "Reading the file took too long.")), ms);
   });
   try {
     return await Promise.race([work, timeout]);
@@ -89,7 +89,7 @@ async function parsePdf(buffer: Buffer, limits: Limits): Promise<string> {
 async function parseDocx(buffer: Buffer, limits: Limits): Promise<string> {
   const { value } = await mammoth.extractRawText({ buffer });
   const text = value.trim();
-  if (!text) throw new ApiError("EXTRACTION_FAILED", "No text could be read from the document.");
+  if (!text) throw new ApiError("UNREADABLE_FILE", "No text could be read from the document.");
   // A DOCX has no reliable page count without rendering it, so its length is capped in characters instead.
   if (text.length > limits.maxDocxChars) {
     throw new ApiError("TOO_MANY_PAGES", "The CV is too long.");
@@ -109,6 +109,6 @@ export async function parseCv(buffer: Buffer, limits: Limits): Promise<string> {
     return stripNul(await withTimeout(kind === "pdf" ? parsePdf(buffer, limits) : parseDocx(buffer, limits), limits.parseTimeoutMs));
   } catch (error) {
     if (error instanceof ApiError) throw error;
-    throw new ApiError("EXTRACTION_FAILED", "The file could not be read. It may be corrupt or password-protected.");
+    throw new ApiError("UNREADABLE_FILE", "The file could not be read. It may be corrupt or password-protected.");
   }
 }

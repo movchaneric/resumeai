@@ -86,4 +86,34 @@ describe("checkVerbatim", () => {
     c.experience[0]!.title = "Менеджер";
     expect(checkVerbatim(c, "ЯНДЕКС — разработчик, 2020").issues).toHaveLength(1);
   });
+
+  describe("whole-word matching for protected fields", () => {
+    const withCompany = (company: string, title = "Dev") => {
+      const c = cv();
+      c.experience = [{ company, title, location: null, dates: { start: null, end: null, current: false }, bullets: [] }];
+      c.education = [];
+      c.certifications = [];
+      c.summary = null;
+      return c;
+    };
+
+    it("does not match a partial word in a title", () => {
+      const r = checkVerbatim(withCompany("Acme", "Engineer"), "Acme Senior Engineering Manager");
+      expect(r.issues).toEqual(['experience[0].title "Engineer" not found in the CV text']);
+    });
+
+    it("does not match Acme inside Acmex, but matches Acme Ltd and text start/end", () => {
+      expect(checkVerbatim(withCompany("Acme"), "Acmex Ltd Dev").issues).toHaveLength(1);
+      expect(checkVerbatim(withCompany("Acme"), "Acme Ltd Dev").issues).toEqual([]);
+      expect(checkVerbatim(withCompany("Acme"), "Dev at Acme").issues).toEqual([]);
+    });
+
+    it("matches a multi-word title split across a line break", () => {
+      expect(checkVerbatim(withCompany("Acme", "Senior Software Engineer"), "Acme\nSenior Software\nEngineer").issues).toEqual([]);
+    });
+
+    it("reports an empty protected value", () => {
+      expect(checkVerbatim(withCompany(""), "Acme Dev").issues).toEqual(['experience[0].company "" not found in the CV text']);
+    });
+  });
 });

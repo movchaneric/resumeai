@@ -19,12 +19,14 @@ export function normalizeText(text: string): string {
  */
 export function checkVerbatim(cv: ExtractedCv, sourceText: string): { issues: string[]; softMismatches: number } {
   const source = normalizeText(sourceText);
+  const padded = ` ${source} `;
   const issues: string[] = [];
   let softMismatches = 0;
 
   const protectedField = (path: string, value: string | null) => {
     if (value === null) return;
-    if (!source.includes(normalizeText(value))) issues.push(`${path} "${value}" not found in the CV text`);
+    const needle = normalizeText(value);
+    if (needle === "" || !padded.includes(` ${needle} `)) issues.push(`${path} "${value}" not found in the CV text`);
   };
   const year = (path: string, date: string | null) => {
     if (date === null) return;

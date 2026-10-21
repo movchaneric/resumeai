@@ -1,6 +1,8 @@
 /**
  * Rebuilds visual reading order from positioned PDF text items. Pure: no PDF library involved.
  * Coordinates follow PDF space: the origin is the bottom-left, so y grows upward.
+ * On a two-column page, a row that crosses the gutter (a name header, a full-width section title) is emitted in place.
+ * Such rows split the page into horizontal bands, and each band reads its left column, then its right.
  * Out of scope: tables and three or more columns (those fall back to top-to-bottom lines).
  */
 
@@ -116,7 +118,22 @@ export function layoutPage(items: TextItem[], pageWidth: number): string {
   const gutter = findGutter(lines, pageWidth);
   if (gutter === null) return renderLines(lines, unit);
 
-  const leftItems = present.filter((i) => i.x + i.width / 2 < gutter);
-  const rightItems = present.filter((i) => i.x + i.width / 2 >= gutter);
-  return [renderLines(groupLines(leftItems, tolerance), unit), renderLines(groupLines(rightItems, tolerance), unit)].join("\n");
+  const crosses = (line: TextItem[]) => line.some((i) => i.x < gutter && gutter < right(i));
+  const out: string[] = [];
+  let band: TextItem[] = [];
+  const flushBand = () => {
+    if (!band.length) return;
+    const left = band.filter((i) => i.x + i.width / 2 < gutter);
+    const rightSide = band.filter((i) => i.x + i.width / 2 >= gutter);
+    out.push(renderLines(groupLines(left, tolerance), unit), renderLines(groupLines(rightSide, tolerance), unit));
+    band = [];
+  };
+  for (const line of lines) {
+    if (crosses(line)) {
+      flushBand();
+      out.push(lineText(line, unit));
+    } else band.push(...line);
+  }
+  flushBand();
+  return out.filter((t) => t !== "").join("\n");
 }

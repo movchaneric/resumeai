@@ -57,4 +57,38 @@ describe("layoutPage", () => {
       ...rightCol.map((s) => s + " main column text here"),
     ]);
   });
+
+  describe("full-width rows on a two-column page", () => {
+    const column = (prefix: string, x: number, topY: number, n: number) =>
+      Array.from({ length: n }, (_, i) => item(`${prefix} ${i + 1} some text here`, x, topY - i * 30));
+
+    it("emits a centred full-width header first, then the left column, then the right", () => {
+      const header = item("Jane Doe, Backend Developer, Springfield", 300 - 120, 790);
+      const items = [...column("Main", 250, 760, 10), ...column("Side", 30, 760, 10), header];
+      expect(layoutPage(items, W).split("\n")).toEqual([
+        "Jane Doe, Backend Developer, Springfield",
+        ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => `Side ${n} some text here`),
+        ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => `Main ${n} some text here`),
+      ]);
+    });
+
+    it("keeps a full-width row between two two-column bands", () => {
+      const banner = item("A full-width section banner across the page", 300 - 130, 590);
+      const items = [
+        ...column("Main", 250, 740, 5),
+        ...column("Side", 30, 740, 5),
+        banner,
+        ...column("Right", 250, 550, 4),
+        ...column("Left", 30, 550, 4),
+      ];
+      const t = (p: string, n: number) => `${p} ${n} some text here`;
+      expect(layoutPage(items, W).split("\n")).toEqual([
+        ...[1, 2, 3, 4, 5].map((n) => t("Side", n)),
+        ...[1, 2, 3, 4, 5].map((n) => t("Main", n)),
+        "A full-width section banner across the page",
+        ...[1, 2, 3, 4].map((n) => t("Left", n)),
+        ...[1, 2, 3, 4].map((n) => t("Right", n)),
+      ]);
+    });
+  });
 });

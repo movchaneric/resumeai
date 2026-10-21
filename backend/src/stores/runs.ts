@@ -1,9 +1,9 @@
-import type { RunId } from "@resume-ai/shared";
+import type { RunId, RunStatus } from "@resume-ai/shared";
 import type { PrismaClient } from "@/generated/prisma/client.js";
 
 export type StoredRun = {
   id: RunId;
-  status: string;
+  status: RunStatus;
   createdAt: Date;
   expiresAt: Date;
   exportPath: string | null;

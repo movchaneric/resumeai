@@ -13,6 +13,14 @@
     "db:migrate": "prisma migrate dev"
   },
   "dependencies": {
+    "@arizeai/openinference-instrumentation-langchain": "^4.1.4",
+    "@arizeai/openinference-semantic-conventions": "^2.14.0",
+    "@langchain/core": "1.2.18",
+    "@langchain/openai": "1.6.2",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.223.0",
+    "@opentelemetry/resources": "^2.12.0",
+    "@opentelemetry/sdk-trace-node": "^2.12.0",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "@resume-ai/shared": "workspace:*",

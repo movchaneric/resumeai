@@ -23,4 +23,36 @@ describe("loadConfig", () => {
   it("fails fast on a value that is not a number", () => {
     expect(() => loadConfig({ DATABASE_URL: "x", PORT: "abc" })).toThrow(/PORT/);
   });
+
+  it("applies the LLM and tracing defaults", () => {
+    const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" });
+    expect(config.llm).toEqual({ apiKey: "k", baseUrl: undefined, model: "qwen3:14b", contextTokens: 16_384, timeoutMs: 180_000 });
+    expect(config.tracing).toEqual({ traceContent: false, endpoint: undefined, projectName: undefined });
+  });
+
+  it("reads LLM and tracing overrides", () => {
+    const config = loadConfig({
+      DATABASE_URL: "x",
+      OPENAI_API_KEY: "k",
+      OPENAI_BASE_URL: "http://localhost:11434/v1",
+      LLM_MODEL: "m",
+      TRACE_CONTENT: "true",
+      PHOENIX_COLLECTOR_ENDPOINT: "http://localhost:6006",
+      PHOENIX_PROJECT_NAME: "p",
+    });
+    expect(config.llm.baseUrl).toBe("http://localhost:11434/v1");
+    expect(config.llm.model).toBe("m");
+    expect(config.tracing).toEqual({ traceContent: true, endpoint: "http://localhost:6006", projectName: "p" });
+  });
+
+  it("fails fast when OPENAI_API_KEY is missing", () => {
+    expect(() => loadConfig({ DATABASE_URL: "x" })).toThrow(/OPENAI_API_KEY/);
+  });
+
+  it("refuses TRACE_CONTENT=true in production", () => {
+    expect(() => loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", NODE_ENV: "production", TRACE_CONTENT: "true" })).toThrow(
+      /0006-trace-content-is-outside-run-deletion/,
+    );
+    expect(() => loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", NODE_ENV: "production" })).not.toThrow();
+  });
 });

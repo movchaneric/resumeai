@@ -5,7 +5,7 @@ import { ApiError } from "@/utils/errors.js";
 import { parseCv, stripNul } from "@/parsing/parseCv.js";
 import type { RunStore, StoredRun } from "@/stores/runs.js";
 
-type Deps = { store: RunStore; config: Config; now?: () => Date };
+export type RunsDeps = { store: RunStore; config: Config; now?: () => Date };
 
 export type CreateRunInput = { cv: Buffer; jobDescription: string };
 
@@ -13,7 +13,7 @@ export type CreateRunInput = { cv: Buffer; jobDescription: string };
 export class RunsService {
   private readonly now: () => Date;
 
-  constructor(private readonly deps: Deps) {
+  constructor(private readonly deps: RunsDeps) {
     this.now = deps.now ?? (() => new Date());
   }
 

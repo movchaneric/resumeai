@@ -11,6 +11,7 @@ export const EXTRACT_CV_SYSTEM_PROMPT = `You extract the structure of a CV (resu
 Rules:
 - Copy text verbatim from the CV. Never paraphrase, translate, summarize, correct or invent anything. Company names, job titles, institutions, degrees, fields and certification names must appear exactly as written.
 - The candidate's own headings decide which section content belongs to. A heading that matches none of the typed sections (experience, education, skills, projects, certifications) goes to additionalSections, with the heading as its title.
+- A heading that combines a typed section with other content, like "Education & Army" or "Experience and Volunteering", belongs entirely to that typed section: put ALL of its entries there as structured entries with their dates (an army entry under "Education & Army" goes in education). Such a heading never becomes an additional section.
 - Dates are "YYYY" or "YYYY-MM". A bare year stays a bare year: never invent a month. Convert month names to numbers ("March 2021" becomes "2021-03"). Never add a month the CV does not show: "2024 - Present" is start "2024", not "2024-01".
 - For Present, Current or ongoing, set current to true and end to null.
 - The text may come from a two-column layout, so a sidebar block (contact details, skills, languages) can appear before or after the main content, or in the middle of it.

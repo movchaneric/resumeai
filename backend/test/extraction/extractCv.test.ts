@@ -38,6 +38,12 @@ describe("extractCv", () => {
     expect(llm.calls[0]?.messages.some((m) => m.content.includes("Ada Lovelace"))).toBe(true);
   });
 
+  it("tells the model that combined headings go to the typed section", async () => {
+    const llm = new FakeLlmClient().enqueue("extract_cv", fullCv());
+    await extractCv(llm, cvText);
+    expect(llm.calls[0]?.messages[0]?.content).toContain("Education & Army");
+  });
+
   it("retries once after a verbatim failure, feeding the issue back", async () => {
     const bad = fullCv();
     bad.experience[0]!.company = "Acme Ltd";

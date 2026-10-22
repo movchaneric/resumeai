@@ -50,6 +50,20 @@ describe("extractCv", () => {
     expect(last.content).toContain('experience[0].company "Acme Ltd" not found in the CV text');
   });
 
+  it("feeds an invented month back and accepts the bare year", async () => {
+    const text = cvText.replace("Acme - Dev 2020 - 2022", "Acme - Dev 2024- Present");
+    const bad = fullCv();
+    bad.experience[0]!.dates = { start: "2024-01", end: null, current: true };
+    const good = fullCv();
+    good.experience[0]!.dates = { start: "2024", end: null, current: true };
+    const llm = new FakeLlmClient().enqueue("extract_cv", bad, good);
+    const { cv } = await extractCv(llm, text);
+    expect(cv.experience[0]?.dates?.start).toBe("2024");
+    expect(llm.calls[1]!.messages.at(-1)!.content).toContain(
+      "experience[0].dates.start month 01 of 2024 not found in the CV text",
+    );
+  });
+
   it("retries once after a date refinement failure", async () => {
     const bad = fullCv();
     bad.experience[1]!.dates = { start: "2022", end: "2020", current: false };

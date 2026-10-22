@@ -116,4 +116,49 @@ describe("checkVerbatim", () => {
       expect(checkVerbatim(withCompany(""), "Acme Dev").issues).toEqual(['experience[0].company "" not found in the CV text']);
     });
   });
+
+  describe("months", () => {
+    const monthIssues = (text: string, start: string | null, end: string | null = null) => {
+      const c = cv();
+      c.experience = [
+        { company: "Acme Labs", title: "Software Engineer", location: null, dates: { start, end, current: false }, bullets: [] },
+      ];
+      c.education = [];
+      c.certifications = [];
+      c.summary = null;
+      return checkVerbatim(c, text).issues;
+    };
+
+    it("rejects an invented month in a year range with a spaced dash, accepts the bare year", () => {
+      const text = "Software Engineer — Acme Labs  2024- Present";
+      expect(monthIssues(text, "2024-01")).toEqual([
+        "experience[0].dates.start month 01 of 2024 not found in the CV text; if the CV gives only the year, write the year alone",
+      ]);
+      expect(monthIssues(text, "2024")).toEqual([]);
+    });
+
+    it("proves start and end months from abbreviations", () => {
+      const text = "Software Engineer Acme Labs Jun 2017 - Feb 2020";
+      expect(monthIssues(text, "2017-06", "2020-02")).toEqual([]);
+    });
+
+    it.each(["June 2017", "Sept. 2021", "06/2017", "6/2017", "2017-06", "2017/6", "06.2017", "Jun, 2017"])(
+      "proves the month in %s",
+      (form) => {
+        const year = form.match(/\d{4}/)![0];
+        const month = year === "2021" ? "2021-09" : "2017-06";
+        const text = `Software Engineer Acme Labs ${form}`;
+        expect(monthIssues(text, month)).toEqual([]);
+      },
+    );
+
+    it("does not let a larger number prove the month", () => {
+      expect(monthIssues("Software Engineer Acme Labs 2017-061", "2017-06")).toHaveLength(1);
+      expect(monthIssues("Software Engineer Acme Labs 12017-06", "2017-06")).toHaveLength(1);
+    });
+
+    it("does not prove the month when month and year are separate", () => {
+      expect(monthIssues("Software Engineer Acme Labs Jun 2018 and 2017", "2017-06")).toHaveLength(1);
+    });
+  });
 });

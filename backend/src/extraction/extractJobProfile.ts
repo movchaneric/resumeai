@@ -6,6 +6,7 @@ import {
 } from "@resume-ai/shared";
 import { ExtractionError, NoRequirementsError } from "@/extraction/errors.js";
 import { LlmSchemaError, type LlmClient, type LlmMessage } from "@/llm/llmClient.js";
+import { withSpan } from "@/utils/spans.js";
 
 export const JOB_PROFILE_SYSTEM_PROMPT = `You extract a structured profile from a job description.
 
@@ -34,30 +35,34 @@ export function assignJobProfileIds(extracted: ExtractedJobProfile): JobProfile 
 }
 
 export async function extractJobProfile(llm: LlmClient, jobDescriptionText: string): Promise<JobProfile> {
-  const messages: LlmMessage[] = [
-    { role: "system", content: JOB_PROFILE_SYSTEM_PROMPT },
-    { role: "user", content: jobDescriptionText },
-  ];
-
-  let extracted: ExtractedJobProfile;
-  try {
-    extracted = await llm.structured(ExtractedJobProfileSchema, messages, { name: CALL_NAME });
-  } catch (error) {
-    if (!(error instanceof LlmSchemaError)) throw error;
-    const retryMessages: LlmMessage[] = [
-      ...messages,
-      { role: "user", content: RETRY_INSTRUCTION.replace("{issues}", error.issues.map((i) => `- ${i}`).join("\n")) },
+  return withSpan(CALL_NAME, async (span) => {
+    const messages: LlmMessage[] = [
+      { role: "system", content: JOB_PROFILE_SYSTEM_PROMPT },
+      { role: "user", content: jobDescriptionText },
     ];
-    try {
-      extracted = await llm.structured(ExtractedJobProfileSchema, retryMessages, { name: CALL_NAME });
-    } catch (retryError) {
-      if (retryError instanceof LlmSchemaError) {
-        throw new ExtractionError("The model did not return a valid job profile", retryError.issues);
-      }
-      throw retryError;
-    }
-  }
 
-  if (extracted.requirements.length === 0) throw new NoRequirementsError();
-  return assignJobProfileIds(extracted);
+    let extracted: ExtractedJobProfile;
+    span.setAttribute("extraction.retries", 0);
+    try {
+      extracted = await llm.structured(ExtractedJobProfileSchema, messages, { name: CALL_NAME });
+    } catch (error) {
+      if (!(error instanceof LlmSchemaError)) throw error;
+      span.setAttribute("extraction.retries", 1);
+      const retryMessages: LlmMessage[] = [
+        ...messages,
+        { role: "user", content: RETRY_INSTRUCTION.replace("{issues}", error.issues.map((i) => `- ${i}`).join("\n")) },
+      ];
+      try {
+        extracted = await llm.structured(ExtractedJobProfileSchema, retryMessages, { name: CALL_NAME });
+      } catch (retryError) {
+        if (retryError instanceof LlmSchemaError) {
+          throw new ExtractionError("The model did not return a valid job profile", retryError.issues);
+        }
+        throw retryError;
+      }
+    }
+
+    if (extracted.requirements.length === 0) throw new NoRequirementsError();
+    return assignJobProfileIds(extracted);
+  });
 }

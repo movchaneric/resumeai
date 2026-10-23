@@ -5,6 +5,7 @@ import { ExtractionError } from "@/extraction/errors.js";
 import { checkVerbatim } from "@/extraction/verbatim.js";
 import { LlmSchemaError } from "@/llm/llmClient.js";
 import type { LlmClient, LlmMessage } from "@/llm/llmClient.js";
+import { withSpan } from "@/utils/spans.js";
 
 export const EXTRACT_CV_SYSTEM_PROMPT = `You extract the structure of a CV (resume) from its plain text.
 
@@ -25,24 +26,34 @@ type Attempt = { cv: Cv; softMismatches: number } | { issues: string[] };
  * `LlmUnavailableError` is not caught.
  */
 export async function extractCv(llm: LlmClient, cvText: string): Promise<{ cv: Cv; softMismatches: number }> {
-  const messages: LlmMessage[] = [
-    { role: "system", content: EXTRACT_CV_SYSTEM_PROMPT },
-    { role: "user", content: cvText },
-  ];
+  return withSpan("extract_cv", async (span) => {
+    const messages: LlmMessage[] = [
+      { role: "system", content: EXTRACT_CV_SYSTEM_PROMPT },
+      { role: "user", content: cvText },
+    ];
 
-  const first = await attempt(llm, messages, cvText);
-  if (!("issues" in first)) return first;
+    span.setAttribute("extraction.retries", 0);
+    const first = await attempt(llm, messages, cvText);
+    if (!("issues" in first)) {
+      span.setAttribute("extraction.soft_mismatches", first.softMismatches);
+      return first;
+    }
 
-  const retryMessages: LlmMessage[] = [
-    ...messages,
-    {
-      role: "user",
-      content: `Your previous extraction had these problems:\n${first.issues.map((i) => `- ${i}`).join("\n")}\nExtract the CV again from the same text and fix them.`,
-    },
-  ];
-  const second = await attempt(llm, retryMessages, cvText);
-  if (!("issues" in second)) return second;
-  throw new ExtractionError("CV extraction failed after a retry", second.issues);
+    span.setAttribute("extraction.retries", 1);
+    const retryMessages: LlmMessage[] = [
+      ...messages,
+      {
+        role: "user",
+        content: `Your previous extraction had these problems:\n${first.issues.map((i) => `- ${i}`).join("\n")}\nExtract the CV again from the same text and fix them.`,
+      },
+    ];
+    const second = await attempt(llm, retryMessages, cvText);
+    if (!("issues" in second)) {
+      span.setAttribute("extraction.soft_mismatches", second.softMismatches);
+      return second;
+    }
+    throw new ExtractionError("CV extraction failed after a retry", second.issues);
+  });
 }
 
 async function attempt(llm: LlmClient, messages: LlmMessage[], cvText: string): Promise<Attempt> {

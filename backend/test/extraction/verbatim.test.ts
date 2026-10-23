@@ -142,7 +142,7 @@ describe("checkVerbatim", () => {
       expect(monthIssues(text, "2017-06", "2020-02")).toEqual([]);
     });
 
-    it.each(["June 2017", "Sept. 2021", "06/2017", "6/2017", "2017-06", "2017/6", "06.2017", "Jun, 2017"])(
+    it.each(["June 2017", "Sept. 2021", "06/2017", "6/2017", "2017-06", "2017/6", "06.2017", "Jun, 2017", "Jun-2017", "Jun/2017", "Jun.2017", "Jun - 2017", "2017 Jun", "2017-Jun", "2017 June", "2017, Jun"])(
       "proves the month in %s",
       (form) => {
         const year = form.match(/\d{4}/)![0];
@@ -155,6 +155,41 @@ describe("checkVerbatim", () => {
     it("does not let a larger number prove the month", () => {
       expect(monthIssues("Software Engineer Acme Labs 2017-061", "2017-06")).toHaveLength(1);
       expect(monthIssues("Software Engineer Acme Labs 12017-06", "2017-06")).toHaveLength(1);
+    });
+
+    it("does not take a longer word or number as the month name", () => {
+      expect(monthIssues("Software Engineer Acme Labs 2017 Junior", "2017-06")).toHaveLength(1);
+      expect(monthIssues("Software Engineer Acme Labs Jun-2018", "2017-06")).toHaveLength(1);
+      expect(monthIssues("Software Engineer Acme Labs 2018 Jun and 2017", "2017-06")).toHaveLength(1);
+    });
+
+    describe("two-digit years", () => {
+      it.each(["03/21 - 06/23", "Mar '21 - Jun '23", "Mar ’21 – Jun ’23", "Mar' 21 - Jun' 23", "Mar-21 - Jun-23"])(
+        "proves the years and months in %s",
+        (text) => {
+          expect(monthIssues(`Software Engineer Acme Labs ${text}`, "2021-03", "2023-06")).toEqual([]);
+        },
+      );
+
+      it("proves the year from an apostrophe year, but not a month", () => {
+        const text = "Software Engineer Acme Labs since '21";
+        expect(monthIssues(text, "2021")).toEqual([]);
+        expect(monthIssues(text, "2021-03")).toEqual([
+          "experience[0].dates.start month 03 of 2021 not found in the CV text; if the CV gives only the year, write the year alone",
+        ]);
+      });
+
+      it("does not prove a year from a bare two-digit number", () => {
+        expect(monthIssues("Software Engineer Acme Labs 21 projects", "2021")).toEqual([
+          "experience[0].dates.start year 2021 not found in the CV text",
+        ]);
+      });
+
+      it("does not prove a year from a longer number or the wrong month", () => {
+        expect(monthIssues("Software Engineer Acme Labs 03/2021", "2020")).toHaveLength(1);
+        expect(monthIssues("Software Engineer Acme Labs 03/21", "2021-04")).toHaveLength(1);
+        expect(monthIssues("Software Engineer Acme Labs 13/21", "2021")).toHaveLength(1);
+      });
     });
 
     it("does not prove the month when month and year are separate", () => {

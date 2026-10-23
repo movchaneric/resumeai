@@ -28,19 +28,41 @@ const MONTH_NAMES: Record<string, string> = {
   "12": "dec(?:ember)?",
 };
 
-/** True when the raw source shows this month next to this year (name, or numeric with / - .). */
+const APOSTROPHE = "['\u2018\u2019]";
+const ANY_MONTH_NAME = Object.values(MONTH_NAMES).join("|");
+
+/**
+ * True when the raw source shows this month next to this year: a name (before or after the year, joined by
+ * space, comma, / . or -), a number with / - . , or a two-digit year form (`03/21`, `Mar '21`, `Mar-21`).
+ */
 function monthProven(raw: string, year: string, month: string): boolean {
   const n = String(Number(month));
   const num = `0?${n}`;
   const name = MONTH_NAMES[month]!;
+  const yy = year.slice(2);
   const notNum = (re: string) => `(?<![\\p{N}])(?:${re})(?![\\p{N}])`;
   const sep = "\\s*[/.-]\\s*";
   const forms = [
-    `(?<![\\p{L}])${name}\\.?\\s*,?\\s*${year}`,
+    `(?<![\\p{L}])${name}\\.?\\s*[,/.-]?\\s*${year}`,
+    `${year}\\s*[,/.-]?\\s*${name}(?![\\p{L}])`,
     `${num}${sep}${year}`,
     `${year}${sep}${num}`,
+    `${num}\\s*/\\s*${yy}`,
+    `(?<![\\p{L}])${name}\\.?\\s*${APOSTROPHE}\\s*${yy}`,
+    `(?<![\\p{L}])${name}\\.?\\s*-\\s*${yy}`,
   ];
   return new RegExp(notNum(forms.join("|")), "u").test(raw);
+}
+
+/** True when the raw source writes this year in two digits as part of a date: `03/21`, `'21`, `Mar '21`, `Mar-21`. */
+function shortYearProven(raw: string, year: string): boolean {
+  const yy = year.slice(2);
+  const forms = [
+    `(?<![\\p{N}])(?:0?[1-9]|1[0-2])\\s*/\\s*${yy}`,
+    `${APOSTROPHE}\\s*${yy}`,
+    `(?<![\\p{L}])(?:${ANY_MONTH_NAME})\\.?\\s*-\\s*${yy}`,
+  ];
+  return new RegExp(`(?:${forms.join("|")})(?![\\p{N}])`, "u").test(raw);
 }
 
 /**
@@ -62,7 +84,8 @@ export function checkVerbatim(cv: ExtractedCv, sourceText: string): { issues: st
   const year = (path: string, date: string | null) => {
     if (date === null) return;
     const y = date.slice(0, 4);
-    if (!new RegExp(`(?<![\\p{N}])${y}(?![\\p{N}])`, "u").test(source)) {
+    const fourDigits = new RegExp(`(?<![\\p{N}])${y}(?![\\p{N}])`, "u").test(source);
+    if (!fourDigits && !shortYearProven(raw, y)) {
       issues.push(`${path} year ${y} not found in the CV text`);
       return;
     }

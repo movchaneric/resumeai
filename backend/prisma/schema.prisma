@@ -8,7 +8,8 @@ datasource db {
   schemas  = ["app"]
 }
 
-// Run metadata only (ADR 0003). cv_text and job_description_text are transitional until the graph exists in slice 4.
+// Run metadata only (ADR 0003). cv_text, job_description_text, cv, job_profile, error_code and error_message are
+// transitional (ADR 0003, slice 2 extension): slice 4 moves the data into the graph state and drops them.
 model Run {
   id                 String   @id @db.Uuid
   status             String
@@ -17,6 +18,10 @@ model Run {
   exportPath         String?  @map("export_path")
   cvText             String   @map("cv_text")
   jobDescriptionText String   @map("job_description_text")
+  cv                 Json?    @db.JsonB
+  jobProfile         Json?    @map("job_profile") @db.JsonB
+  errorCode          String?  @map("error_code")
+  errorMessage       String?  @map("error_message")
 
   @@map("runs")
   @@schema("app")

@@ -1,5 +1,6 @@
 import mammoth from "mammoth";
-import { extractText, getDocumentProxy } from "unpdf";
+import { extractTextItems, getDocumentProxy } from "unpdf";
+import { layoutPage } from "@/parsing/pdfLayout.js";
 import type { Config } from "@/utils/config.js";
 import { ApiError } from "@/utils/errors.js";
 
@@ -58,7 +59,7 @@ function detectKind(buffer: Buffer): FileKind | null {
 async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new ApiError("EXTRACTION_FAILED", "Reading the file took too long.")), ms);
+    timer = setTimeout(() => reject(new ApiError("UNREADABLE_FILE", "Reading the file took too long.")), ms);
   });
   try {
     return await Promise.race([work, timeout]);
@@ -73,8 +74,14 @@ async function parsePdf(buffer: Buffer, limits: Limits): Promise<string> {
     if (pdf.numPages > limits.maxCvPages) {
       throw new ApiError("TOO_MANY_PAGES", `The CV has ${pdf.numPages} pages; the limit is ${limits.maxCvPages}.`);
     }
-    const { text } = await extractText(pdf, { mergePages: false });
-    const pages = Array.isArray(text) ? text : [text];
+    // Positioned items, not unpdf's storage-order text: two-column CVs need their reading order rebuilt.
+    const { items } = await extractTextItems(pdf);
+    const pages = await Promise.all(
+      items.map(async (pageItems, i) => {
+        const [x0, , x1] = (await pdf.getPage(i + 1)).view as number[];
+        return layoutPage(pageItems, (x1 ?? 0) - (x0 ?? 0));
+      }),
+    );
     // Count only visible characters, so page separators and blank lines cannot make a scan look like text.
     const visibleChars = pages.join("").replace(/\s/g, "").length;
     if (visibleChars / pdf.numPages < limits.minPdfCharsPerPage) {
@@ -89,7 +96,7 @@ async function parsePdf(buffer: Buffer, limits: Limits): Promise<string> {
 async function parseDocx(buffer: Buffer, limits: Limits): Promise<string> {
   const { value } = await mammoth.extractRawText({ buffer });
   const text = value.trim();
-  if (!text) throw new ApiError("EXTRACTION_FAILED", "No text could be read from the document.");
+  if (!text) throw new ApiError("UNREADABLE_FILE", "No text could be read from the document.");
   // A DOCX has no reliable page count without rendering it, so its length is capped in characters instead.
   if (text.length > limits.maxDocxChars) {
     throw new ApiError("TOO_MANY_PAGES", "The CV is too long.");
@@ -109,6 +116,6 @@ export async function parseCv(buffer: Buffer, limits: Limits): Promise<string> {
     return stripNul(await withTimeout(kind === "pdf" ? parsePdf(buffer, limits) : parseDocx(buffer, limits), limits.parseTimeoutMs));
   } catch (error) {
     if (error instanceof ApiError) throw error;
-    throw new ApiError("EXTRACTION_FAILED", "The file could not be read. It may be corrupt or password-protected.");
+    throw new ApiError("UNREADABLE_FILE", "The file could not be read. It may be corrupt or password-protected.");
   }
 }

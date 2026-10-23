@@ -8,6 +8,14 @@ An app that takes a candidate's CV and a job description and produces a tailored
 The candidate's original uploaded document (PDF or Word), and its standardized structured form once extracted. The original layout is discarded; the candidate's own headings guide which field content belongs to.
 _Avoid_: Resume (in code and docs, pick one), profile
 
+**Parsing**:
+Reading the uploaded CV file into plain text. No model is involved; a file that cannot be read is rejected before a Run exists.
+_Avoid_: Extraction (that is the next step), reading
+
+**Extraction**:
+Turning the CV text into the structured CV, and the Job Description into the Job Profile, with a model. Text is copied verbatim; dates, companies, titles and degrees must match the uploaded document.
+_Avoid_: Parsing, structuring
+
 **Section**:
 A titled group of content in the CV. Core sections (contact, summary, experience, education, skills, projects, certifications) are typed; any other heading the candidate used becomes an additional section carrying that heading as its title.
 _Avoid_: Block, category

@@ -7,7 +7,7 @@ export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
     globalSetup: ["test/globalSetup.ts"],
-    env: { DATABASE_URL: TEST_DATABASE_URL },
+    env: { DATABASE_URL: TEST_DATABASE_URL, OPENAI_API_KEY: "test-key" },
     fileParallelism: false,
   },
 });

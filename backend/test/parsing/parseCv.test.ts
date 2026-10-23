@@ -7,7 +7,7 @@ import { loadConfig } from "@/utils/config.js";
 import { parseCv } from "@/parsing/parseCv.js";
 
 const fixture = (name: string) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures", name));
-const { limits } = loadConfig({ DATABASE_URL: "x" });
+const { limits } = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" });
 
 async function rejection(buffer: Buffer): Promise<ApiError> {
   const error = await parseCv(buffer, limits).then(
@@ -52,7 +52,46 @@ describe("parseCv", () => {
   });
 
   it("rejects a corrupt PDF as an extraction failure", async () => {
-    expect((await rejection(fixture("cv-corrupt.pdf"))).code).toBe("EXTRACTION_FAILED");
+    expect((await rejection(fixture("cv-corrupt.pdf"))).code).toBe("UNREADABLE_FILE");
+  });
+
+  describe("PDF reading order", () => {
+    it("reads a two-column PDF as the sidebar block and the main block, never interleaved", async () => {
+      const text = await parseCv(fixture("cv-two-column.pdf"), limits);
+      console.log(`cv-two-column.pdf as extracted:\n${text}`);
+      const lines = text.split("\n");
+      const at = (needle: string) => lines.findIndex((l) => l.includes(needle));
+
+      expect(at("Jane Doe")).toBeGreaterThanOrEqual(0);
+      expect(at("Jane Doe")).toBeLessThan(at("Backend developer with six years"));
+
+      // Each job's date range sits on its title line, separated from it rather than glued to it.
+      expect(lines.find((l) => l.includes("Senior Backend Developer"))).toMatch(/Acme Corp {2,}2021 - Present$/);
+      expect(lines.find((l) => l.includes("Backend Developer, Initech"))).toMatch(/Initech {2,}2018 - 2021$/);
+      expect(lines.find((l) => l.includes("BSc Computer Science"))).toMatch(/University {2,}2014 - 2018$/);
+
+      // Blocks: every sidebar line comes before every main line, or every main line before every sidebar line.
+      const sidebar = ["Jane Doe", "CONTACT", "jane.doe@example.com", "SKILLS", "Docker, AWS"].map(at);
+      const main = ["SUMMARY", "EXPERIENCE", "Initech", "EDUCATION"].map(at);
+      expect(Math.max(...sidebar) < Math.min(...main) || Math.max(...main) < Math.min(...sidebar)).toBe(true);
+      // Within the main block the sections keep their order.
+      expect(at("SUMMARY")).toBeLessThan(at("EXPERIENCE"));
+      expect(at("EXPERIENCE")).toBeLessThan(at("EDUCATION"));
+    });
+  });
+
+  it("rejects an encrypted PDF", async () => {
+    expect((await rejection(fixture("cv-encrypted.pdf"))).code).toBe("UNREADABLE_FILE");
+  });
+
+  it("rejects a parse that takes too long", async () => {
+    const impatient = { ...limits, parseTimeoutMs: 1 };
+    const error = await parseCv(fixture("cv.pdf"), impatient).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("UNREADABLE_FILE");
   });
 
   it("rejects a DOCX with too much text", async () => {

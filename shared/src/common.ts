@@ -34,10 +34,15 @@ export type SectionId = z.infer<typeof SectionIdSchema>;
 export const ParentIdSchema = z.union([ItemIdSchema, SectionIdSchema]);
 export type ParentId = z.infer<typeof ParentIdSchema>;
 
-/** Partial date as written on a CV: "2021" or "2021-03". */
+/**
+ * Partial date as written on a CV: "2021" or "2021-03".
+ * The regex avoids `\d` on purpose: Ollama's JSON-schema-to-grammar converter rejects it
+ * (`400 failed to parse grammar`) and requires the `^` and `$` anchors. See
+ * docs/slices/02-llm-extraction/decisions.md.
+ */
 export const PartialDateSchema = z
   .string()
-  .regex(/^\d{4}(-(0[1-9]|1[0-2]))?$/, "Expected YYYY or YYYY-MM")
+  .regex(/^[0-9]{4}(-(0[1-9]|1[0-2]))?$/, "Expected YYYY or YYYY-MM")
   .describe("Partial date: YYYY or YYYY-MM");
 export type PartialDate = z.infer<typeof PartialDateSchema>;
 

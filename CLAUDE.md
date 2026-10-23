@@ -2,6 +2,14 @@
 
 See `CONTEXT.md` for the domain language, `docs/README.md` for where docs go, and `docs/adr/` for decisions.
 
+## Model split (HARD RULE, no exceptions)
+
+- **Opus 5.5** (`claude-opus-5-5`) handles discussion, questions, design, planning and review. It may write docs (plans, handoffs, reviews, ADRs, `CONTEXT.md`, this file), but it must never write or edit code.
+- **Sonnet 5.5** (`claude-sonnet-5-5`), and ONLY Sonnet 5.5, implements code: anything under `backend/`, `frontend/`, `shared/`, tests, configs, migrations, package files and scripts.
+- When the session runs on Opus and code needs writing, hand the work to a subagent with `model: "sonnet"` and a self-contained brief (the plan, files to touch, rules from this file, commands to run). Do not edit code in the Opus session, not even a one-line fix.
+- Opus reviews the Sonnet agent's result and sends fixes back to a Sonnet agent; it does not patch the code itself.
+- If the session is already running on Sonnet 5.5, implement directly.
+
 ## Backend structure
 
 Organise `backend/src` by layer, one folder per layer, with one file per feature in each (`runs.ts` in each folder for Runs). File names are camelCase.
@@ -13,11 +21,14 @@ backend/src/
   services/      business rules. No Express (`req`/`res`). Throws `ApiError` to reject.
   stores/        data access (Prisma). Only stores import the Prisma client.
   middleware/    cross-cutting HTTP code (error handler, not-found)
-  parsing/       CV file parsing
-  utils/         config, db client, errors
+  parsing/       CV file parsing (file to text, no model)
+  extraction/    Extraction chains, ID assignment, verbatim check. Imports `LlmClient` and `@/utils/spans.js`, never LangChain.
+  llm/           the `LlmClient` interface and its LangChain implementation. Only `llm/` imports LangChain (one exception below).
+  utils/         config, db client, errors, tracing (`tracing.ts`), named spans (`spans.ts`)
 backend/test/    mirrors src (routes/, services/, parsing/, utils/); fixtures live in test/fixtures
 ```
 
+- `utils/tracing.ts` is the one file outside `llm/` that imports LangChain (`@langchain/core/callbacks/manager`, to instrument it). `utils/spans.ts` imports only the OpenTelemetry API and OpenInference semantic conventions, so any layer may use `withSpan`.
 - Routers hold routes and transport middleware (multer) only, with no logic.
 - `app.ts` builds the Express app; `index.ts` starts the server.
 - Dependencies come in through constructors so each layer can be tested alone (a service test uses a fake store; routes are tested with `supertest`).

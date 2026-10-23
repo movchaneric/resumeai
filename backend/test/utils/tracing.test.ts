@@ -1,9 +1,9 @@
-import { context, trace } from "@opentelemetry/api";
+import { SpanStatusCode, context, trace } from "@opentelemetry/api";
 import { InMemorySpanExporter, NodeTracerProvider, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-node";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { LangChainLlmClient } from "@/llm/langChainLlmClient.js";
-import { instrumentLangChain } from "@/utils/tracing.js";
+import { guardExporter, instrumentLangChain } from "@/utils/tracing.js";
 import { withSpan } from "@/utils/spans.js";
 
 const Schema = z.object({ name: z.string() });
@@ -45,7 +45,7 @@ afterAll(async () => {
   else process.env.LANGCHAIN_CALLBACKS_BACKGROUND = savedBackground;
 });
 
-describe("LangChain tracing", () => {
+describe("LangChain tracing with content", () => {
   it("keeps each model call in the trace of its own extraction span", async () => {
     const llm = new LangChainLlmClient(options, slowFetch);
     const roots = new Map<string, string>();
@@ -67,6 +67,60 @@ describe("LangChain tracing", () => {
     // Each root owns exactly one ChatOpenAI span.
     for (const [, traceId] of roots) {
       expect(modelSpans.filter((s) => s.spanContext().traceId === traceId)).toHaveLength(1);
+    }
+  });
+});
+
+describe("LangChain tracing without content", () => {
+  const MARKER = "SECRET-MARKER";
+  const memory = new InMemorySpanExporter();
+  const hiddenProvider = new NodeTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(guardExporter(memory, false))],
+  });
+  let hiddenInstrumentation: ReturnType<typeof instrumentLangChain>;
+
+  beforeAll(() => {
+    // The first describe's afterAll has already run by now, so this provider can take over.
+    trace.disable();
+    context.disable();
+    hiddenProvider.register();
+    hiddenInstrumentation = instrumentLangChain(hiddenProvider, false);
+  });
+
+  afterAll(async () => {
+    hiddenInstrumentation.disable();
+    await hiddenProvider.shutdown();
+    trace.disable();
+    context.disable();
+  });
+
+  it("keeps model output out of error spans", async () => {
+    const badFetch = (async () =>
+      new Response(
+        JSON.stringify({
+          id: "c1",
+          object: "chat.completion",
+          created: 0,
+          model: "m",
+          choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: `${MARKER} is not json` } }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )) as typeof fetch;
+    const llm = new LangChainLlmClient(options, badFetch);
+
+    await expect(llm.structured(Schema, messages, { name: "who" })).rejects.toThrow();
+    await hiddenProvider.forceFlush();
+
+    const spans = memory.getFinishedSpans();
+    expect(spans.some((s) => s.status.code === SpanStatusCode.ERROR)).toBe(true);
+    const everything = JSON.stringify(
+      spans.map((s) => ({ name: s.name, attributes: s.attributes, events: s.events, status: s.status })),
+    );
+    expect(everything).not.toContain("SECRET"); // V8 quotes only the first 10 characters of invalid JSON
+    for (const span of spans) {
+      expect(span.events.filter((e) => e.name === "exception")).toEqual([]);
+      expect(span.status.message ?? "").toBe("");
     }
   });
 });

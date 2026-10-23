@@ -3,7 +3,7 @@ import { SEMRESATTRS_PROJECT_NAME } from "@arizeai/openinference-semantic-conven
 import * as CallbackManagerModule from "@langchain/core/callbacks/manager";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import { resourceFromAttributes } from "@opentelemetry/resources";
-import { BatchSpanProcessor, NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
+import { BatchSpanProcessor, NodeTracerProvider, type ReadableSpan, type SpanExporter } from "@opentelemetry/sdk-trace-node";
 import type { Config } from "@/utils/config.js";
 
 const DEFAULT_PROJECT_NAME = "resume-ai";
@@ -21,7 +21,7 @@ export function setupTracing(config: Pick<Config, "tracing">): NodeTracerProvide
   const url = endpoint.replace(/\/+$/, "").endsWith("/v1/traces") ? endpoint : `${endpoint.replace(/\/+$/, "")}/v1/traces`;
   const provider = new NodeTracerProvider({
     resource: resourceFromAttributes({ [SEMRESATTRS_PROJECT_NAME]: projectName ?? DEFAULT_PROJECT_NAME }),
-    spanProcessors: [new BatchSpanProcessor(new OTLPTraceExporter({ url }))],
+    spanProcessors: [new BatchSpanProcessor(guardExporter(new OTLPTraceExporter({ url }), traceContent))],
   });
   provider.register();
 
@@ -40,4 +40,29 @@ export function instrumentLangChain(provider: NodeTracerProvider, traceContent: 
   // @langchain/core has no traditional module structure, so its callback manager is instrumented by hand.
   instrumentation.manuallyInstrument(CallbackManagerModule);
   return instrumentation;
+}
+
+/**
+ * With `traceContent` false, drops what the instrumentation records outside the masked attributes: the
+ * `exception` events and the status message of a failed LangChain run, which can quote the model output.
+ * The status code stays, so an error is still an error. With `traceContent` true the exporter is returned as is.
+ */
+export function guardExporter(exporter: SpanExporter, traceContent: boolean): SpanExporter {
+  if (traceContent) return exporter;
+  return {
+    export: (spans, resultCallback) => exporter.export(spans.map(withoutErrorContent), resultCallback),
+    shutdown: () => exporter.shutdown(),
+    forceFlush: () => exporter.forceFlush?.() ?? Promise.resolve(),
+  };
+}
+
+function withoutErrorContent(span: ReadableSpan): ReadableSpan {
+  return new Proxy(span, {
+    get(target, prop) {
+      if (prop === "events") return [];
+      if (prop === "status") return { code: target.status.code };
+      const value = Reflect.get(target, prop, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }

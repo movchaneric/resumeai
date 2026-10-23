@@ -95,8 +95,12 @@ export class RunsService {
         await store.saveExtraction(id, { cv, jobProfile });
       } catch (error) {
         const code: RunErrorCode = failureCode(error);
-        // Log the cause only: the error messages never carry the CV text.
-        console.error(`Run ${id}: extraction failed (${code})`, error);
+        // Log the code, the error name and the issue count only. Messages and issues can quote CV values or
+        // model output, so they are not logged here (known open item: a safe failure log).
+        const name = error instanceof Error ? error.name : typeof error;
+        const issues = (error as { issues?: unknown } | null)?.issues;
+        const count = Array.isArray(issues) ? `, ${issues.length} issues` : "";
+        console.error(`Run ${id}: extraction failed (${code}) ${name}${count}`);
         await store.markFailed(id, code, FAILURE_MESSAGES[code]);
       }
     } catch (error) {

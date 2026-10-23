@@ -206,17 +206,15 @@ describe("RunsService", () => {
       expect(id).toBeDefined();
     });
 
-    it("logs the cause of a failure with the Run ID and not the CV text", async () => {
+    it("logs the Run ID, the code, the error name and the issue count, never the message or the issues", async () => {
       const ctx = setup();
       const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-      ctx.llm.enqueue("extract_job_profile", new Error("boom"));
+      ctx.llm.enqueue("extract_job_profile", new ExtractionError("quotes Ada Lovelace", ["company Secret Corp not found"]));
       const id = await createExtractableRun(ctx);
       await ctx.settle();
-      const logged = JSON.stringify(spy.mock.calls.map((c) => c.map(String)));
+      const calls = spy.mock.calls.map((c) => c.map(String).join(" "));
       spy.mockRestore();
-      expect(logged).toContain(id);
-      expect(logged).toContain("boom");
-      expect(logged).not.toContain("Ada Lovelace");
+      expect(calls).toEqual([`Run ${id}: extraction failed (EXTRACTION_FAILED) ExtractionError, 1 issues`]);
     });
   });
 });

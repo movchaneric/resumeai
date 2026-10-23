@@ -206,6 +206,35 @@ describe("RunsService", () => {
       expect(id).toBeDefined();
     });
 
+    it("with the default background runner, a store that throws on every write leaves no unhandled rejection", async () => {
+      const store = new FakeStore();
+      store.saveExtraction = async () => {
+        throw new Error("db down");
+      };
+      store.markFailed = async () => {
+        throw new Error("db down");
+      };
+      const llm = new FakeLlmClient();
+      llm.enqueue("extract_job_profile", JOB_PROFILE).enqueue("extract_cv", fullCv());
+      // No runInBackground: this is the production runner.
+      const service = new RunsService({ store: store as unknown as RunStore, config, llm });
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => unhandled.push(reason);
+      process.on("unhandledRejection", onUnhandled);
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const id = await service.createRun({ cv, jobDescription: "Backend developer" });
+        store.rows.set(id, { ...store.rows.get(id)!, cvText: CV_TEXT });
+        // Wait until the detached work has hit the failing store, then give pending rejections a turn to surface.
+        await vi.waitFor(() => expect(spy.mock.calls.some((c) => String(c[0]).includes("could not store"))).toBe(true));
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(unhandled).toEqual([]);
+      } finally {
+        process.off("unhandledRejection", onUnhandled);
+        spy.mockRestore();
+      }
+    });
+
     it("logs the Run ID, the code, the error name and the issue count, never the message or the issues", async () => {
       const ctx = setup();
       const spy = vi.spyOn(console, "error").mockImplementation(() => {});

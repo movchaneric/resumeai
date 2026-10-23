@@ -53,6 +53,39 @@ describe("LangChainLlmClient", () => {
     expect((err as LlmSchemaError).issues[0]).toMatch(/age: /);
   });
 
+  it("maps a reply with no content (a refusal or null content) to LlmSchemaError through the no-structured-output branch", async () => {
+    const reply = (message: object) =>
+      (async () =>
+        new Response(
+          JSON.stringify({
+            id: "c1",
+            object: "chat.completion",
+            created: 0,
+            model: "m",
+            choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", ...message } }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )) as typeof fetch;
+    for (const message of [{ content: null }, { content: null, refusal: "I cannot help with that" }]) {
+      const err = await client(reply(message)).structured(Schema, messages, { name: "who" }).catch((e) => e);
+      expect(err).toBeInstanceOf(LlmSchemaError);
+      expect((err as LlmSchemaError).message).toBe('Model output for "who" could not be parsed');
+      expect((err as LlmSchemaError).issues).toEqual(["the model returned no structured output"]);
+    }
+  });
+
+  it("maps a call that outlives timeoutMs to LlmUnavailableError", async () => {
+    // Honours the abort signal the OpenAI SDK passes, the way a real fetch does.
+    const hanging = ((_url: unknown, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      })) as typeof fetch;
+    const err = await client(hanging, { timeoutMs: 20 }).structured(Schema, messages, { name: "who" }).catch((e) => e);
+    expect(err).toBeInstanceOf(LlmUnavailableError);
+    expect((err as LlmUnavailableError).cause).toBeDefined();
+  });
+
   it("maps an HTTP 400 to LlmUnavailableError and keeps the cause", async () => {
     const llm = client((async () =>
       new Response(JSON.stringify({ error: { message: "bad request" } }), { status: 400, headers: { "content-type": "application/json" } })) as typeof fetch);

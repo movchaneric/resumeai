@@ -36,6 +36,15 @@ One parent span per extraction, named `extract_job_profile` or `extract_cv`, cov
 
 `backend/src/utils/spans.ts`, `backend/src/extraction/extractJobProfile.ts`, `backend/src/extraction/extractCv.ts`, the new test file (and the two extraction test files if you extend them), `backend/package.json` and `pnpm-lock.yaml` (devDependency only).
 
+## Follow-up found in the manual check (08b)
+
+The first manual run after `02d15fa` showed both named roots, but the CV's `RunnableSequence` (the model call) nested under `extract_job_profile`, in the wrong trace.
+
+- Cause: LangChain runs callback handlers in the background by default. `@langchain/core` `dist/callbacks/base.js:65` sets `awaitHandlers` only when `LANGCHAIN_CALLBACKS_BACKGROUND === "false"`. Otherwise `consumeCallback` (`dist/singletons/callbacks.js`) pushes each handler call onto one global `p-queue` with concurrency 1.
+- Queued tasks run in the async context of whatever drained the queue. The job profile's late `handleChainEnd` was still queued when the CV call started, so the CV's `handleChainStart` saw the job profile span as `context.active()`.
+- Fix: `setupTracing` sets `process.env.LANGCHAIN_CALLBACKS_BACKGROUND = "false"` when tracing is on. OpenInference builds a new `LangChainTracer` per call (`instrumentationUtils.js`), and the handler reads the variable in its constructor, so setting it at startup is enough. Inline handlers cost nothing noticeable next to a 60 s model call.
+- Regression test: run two `LangChainLlmClient.structured` calls back to back (fake `fetch`), each inside its own `withSpan`, with the LangChain instrumentation registered on an in-memory exporter. Assert that each `ChatOpenAI` span shares its trace with its own `withSpan` root. The test must fail with the variable unset.
+
 ## Done when
 
 - `pnpm typecheck` passes and `pnpm --filter backend test` is green (Postgres must be up: `docker compose up -d postgres`).

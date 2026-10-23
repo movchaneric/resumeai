@@ -25,11 +25,19 @@ export function setupTracing(config: Pick<Config, "tracing">): NodeTracerProvide
   });
   provider.register();
 
+  instrumentLangChain(provider, traceContent);
+  return provider;
+}
+
+/** Hooks LangChain's callback manager up to `provider`. Exported so a test can use its own provider. */
+export function instrumentLangChain(provider: NodeTracerProvider, traceContent: boolean): LangChainInstrumentation {
+  // Handlers queued in the background run in the wrong OTel context, so spans would get the wrong parent.
+  process.env.LANGCHAIN_CALLBACKS_BACKGROUND = "false";
   const instrumentation = new LangChainInstrumentation({
     tracerProvider: provider,
     traceConfig: { hideInputs: !traceContent, hideOutputs: !traceContent },
   });
   // @langchain/core has no traditional module structure, so its callback manager is instrumented by hand.
   instrumentation.manuallyInstrument(CallbackManagerModule);
-  return provider;
+  return instrumentation;
 }

@@ -32,7 +32,7 @@ Settled in a grilling session before implementation. Scope comes from the slice 
 - **The pattern does real work:** without it the model copied `"March 2021"` verbatim despite the prompt; with it, `"2021-03"`. Keep it in the schema sent to the model.
 - **Decision:** `PartialDateSchema` uses `[0-9]` instead of `\d` (identical matching in JavaScript), with a comment saying why. Keep LangChain's own Zod-to-JSON-schema conversion. The plain-SDK fallback is not needed: the failure was the schema, not LangChain.
 - **Speed:** with `OLLAMA_FLASH_ATTENTION=1` and `OLLAMA_KV_CACHE_TYPE=q8_0` (an 8-bit KV cache, about half the memory), the full CV call dropped from 93 s to 39 s with identical, valid output. Ollama runs with all three settings: `OLLAMA_CONTEXT_LENGTH=16384 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 ollama serve`. `.env.example` and the handoff document this.
-- **Timeout:** `LLM_TIMEOUT_MS` stays at 3 minutes for now. Set the final value from the dev script's timings on the owner's real CV.
+- **Timeout:** `LLM_TIMEOUT_MS` stays at 3 minutes for now. Set the final value from the dev script's timings on the owner's real CV. (Measured and kept: see "After implementation" below.)
 - Switching to a hosted provider later: hosted OpenAI is a config change; Anthropic or Gemini need one new `LlmClient` implementation plus an `LLM_PROVIDER` setting added then.
 
 ## Validation and retries
@@ -111,3 +111,37 @@ backend/src/
 - Add an encrypted-PDF fixture and a parse-timeout test.
 
 Left open: the fixture script location, `TOO_MANY_PAGES` for long DOCX, the expiry sweep and a killable parse worker.
+
+## After implementation (manual runs and review, 2026-10-22 to 2026-10-23)
+
+### Timeout, measured
+- On the owner's real CV with local `qwen3:14b`: the Job Profile call took 63 to 75 s and the CV call 79 to 97 s, over the dev-script and API runs.
+- `LLM_TIMEOUT_MS` stays at **180000**: about 2x headroom over the slowest call. Revisit on a hosted model, where calls should be much shorter.
+- Time a call spends queued in Ollama counts toward the timeout (see the open item on concurrent Runs in `handoff.md`).
+
+### Named extraction spans (ticket 08)
+- Found only in the manual API run: Phoenix showed LangChain's generic root spans (`RunnableSequence`, `StructuredOutputParser`), unnested, and none of the plan's span names or attributes. All seven tickets had missed this promise.
+- `utils/spans.ts` exports `withSpan(name, fn)`. It imports only the OpenTelemetry API and OpenInference semantic conventions, so `extraction/` may use it. Each extraction is wrapped in `extract_job_profile` or `extract_cv` (kind `CHAIN`) with `extraction.retries`, `extraction.soft_mismatches` (CV, on success) and `extraction.failure_reason` (the error's `name` only). No content goes on these spans: no `recordException` and no status message.
+- `CLAUDE.md` now records the import rule: `utils/tracing.ts` is the one file outside `llm/` that imports LangChain.
+
+### LangChain callbacks run inline (ticket 08b)
+- The CV's model call nested under `extract_job_profile`. Cause: LangChain runs callback handlers on one global background queue (`@langchain/core` `callbacks/base.js`, `singletons/callbacks.js`), so a handler runs in the async context of whatever drained the queue, not the call's own.
+- Fix: `instrumentLangChain` sets `LANGCHAIN_CALLBACKS_BACKGROUND=false`. The cost is negligible next to a 60 s model call. Regression test in `test/utils/tracing.test.ts`, shown to fail without the fix.
+- Verified in Phoenix: one Run gives two root traces, `extract_job_profile` (73 s, 1,287 tokens, 0 retries) and `extract_cv` (90 s, 1,791 tokens, 0 retries, 0 soft mismatches), each with its own model call and parser nested under it.
+- Two roots per Run is accepted for slice 2. Grouping a Run's traces is slice 3's tracing decision.
+
+### Review outcome (`review.md`, ticket 09)
+The branch review found 1 must-fix, 8 small items and 4 follow-ups. The owner chose the must-fix plus every small code fix:
+- **`TRACE_CONTENT=false` leaked model output** through LangChain error spans: OpenInference records `run.error` (message plus stack) as an exception event and status message, and masking covers only attributes. With content off, `setupTracing` now wraps the exporter to drop `exception` events and clear status messages. A test proves it with invalid model JSON.
+- **Month and year forms:** the verbatim check now also proves `Jun-2017`, `Jun/2017` and year-first forms, and two-digit years in `MM/YY`, `Mon-YY` and `'YY` (the apostrophe form proves the year only, never a month). This replaces the earlier "four-digit years only" limit. English month names only is still a limit.
+- **Shutdown flushes traces:** `index.ts` keeps the tracer provider and awaits `shutdown()` before disconnecting Prisma.
+- **Failure logs carry no content:** a failed extraction logs only the error code, the error's name and the issue count. The trade-off: debugging a failure needs the dev script or Phoenix with content on.
+- **Tests added** for the default background runner, the model timeout mapped to `LlmUnavailableError`, and the no-structured-output branch.
+- Doc fixes (review items 5 and 8): `CLAUDE.md`, `plan.md` and `handoff.md`.
+- Follow-ups 10 to 13 are open items in `handoff.md`.
+
+### Real CV text removed from history
+- A Sonnet agent had turned the invented-month finding into a test that quoted the owner's real job title and employer. With the owner's approval, the branch history was rewritten before it was ever pushed: the fixed test was folded into the month-check commit (now `aaca51b`), and every later hash changed.
+- A second rewrite was needed because ticket 09's own verify command, written by Opus, contained a fragment of the employer name.
+- The rule for all briefs and docs: reproduce real-CV findings with made-up names, and write `<employer>` where a doc must refer to it. Check before every push: `git log -p master..HEAD` and the working tree must have 0 matches for the names in `local-cvs/`.
+

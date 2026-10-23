@@ -22,12 +22,13 @@ backend/src/
   stores/        data access (Prisma). Only stores import the Prisma client.
   middleware/    cross-cutting HTTP code (error handler, not-found)
   parsing/       CV file parsing (file to text, no model)
-  extraction/    Extraction chains, ID assignment, verbatim check. Imports only `LlmClient`, never LangChain.
-  llm/           the `LlmClient` interface and its LangChain implementation. Only `llm/` imports LangChain.
-  utils/         config, db client, errors, tracing
+  extraction/    Extraction chains, ID assignment, verbatim check. Imports `LlmClient` and `@/utils/spans.js`, never LangChain.
+  llm/           the `LlmClient` interface and its LangChain implementation. Only `llm/` imports LangChain (one exception below).
+  utils/         config, db client, errors, tracing (`tracing.ts`), named spans (`spans.ts`)
 backend/test/    mirrors src (routes/, services/, parsing/, utils/); fixtures live in test/fixtures
 ```
 
+- `utils/tracing.ts` is the one file outside `llm/` that imports LangChain (`@langchain/core/callbacks/manager`, to instrument it). `utils/spans.ts` imports only the OpenTelemetry API and OpenInference semantic conventions, so any layer may use `withSpan`.
 - Routers hold routes and transport middleware (multer) only, with no logic.
 - `app.ts` builds the Express app; `index.ts` starts the server.
 - Dependencies come in through constructors so each layer can be tested alone (a service test uses a fake store; routes are tested with `supertest`).

@@ -6,7 +6,7 @@ Do part A first and alone, because it rewrites history. Then part B, one commit 
 
 ## A. Scrub the real CV line from the branch history (review 6)
 
-`backend/test/extraction/verbatim.test.ts` lines 124 to 161 use the owner's real job title and employer (the company name appears 7 times). It came in with commit `3aa720a`. No later commit touches that file, and the branch is not pushed.
+`backend/test/extraction/verbatim.test.ts` lines 124 to 161 use the owner's real job title and employer (the company name appears 7 times). It came in with commit `3aa720a` (after the scrub, the cleaned commit is `aaca51b`). No later commit touches that file, and the branch is not pushed.
 
 1. Make a local safety ref: `git tag backup/pre-scrub HEAD`. It is local only; never push it.
 2. Replace the company with a made-up one (for example `Acme Labs`) and the title with a generic one (for example `Software Engineer`) everywhere in that file. Keep each test's meaning: the dates and month forms stay exactly as they are. Rename any test label that says "real CV" to describe the case instead (for example "a year range with a spaced dash").

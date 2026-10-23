@@ -93,7 +93,7 @@ export class LlmUnavailableError extends Error {}               // unreachable, 
 
 ### `backend/src/utils/`
 - `config.ts`: `LLM_MODEL` (default `qwen3:14b`), `LLM_CONTEXT_TOKENS` (16384), `LLM_TIMEOUT_MS` (180000), `OPENAI_BASE_URL` (optional), `OPENAI_API_KEY` (required), `TRACE_CONTENT` (boolean, default `false`), `PHOENIX_COLLECTOR_ENDPOINT` and `PHOENIX_PROJECT_NAME` (optional; no endpoint means no tracing), `NODE_ENV`. Refuse to start when `NODE_ENV=production` and `TRACE_CONTENT=true`, with a message naming ADR 0006.
-- `tracing.ts`: `setupTracing(config)` registers OpenInference's LangChain instrumentation with an OTLP exporter to Phoenix. `TRACE_CONTENT=false` hides inputs and outputs. Called once from `index.ts` before anything imports LangChain. Not called in tests.
+- `tracing.ts`: `setupTracing(config)` registers OpenInference's LangChain instrumentation with an OTLP exporter to Phoenix. `TRACE_CONTENT=false` hides inputs and outputs. Called once from `index.ts`. Not called in tests. (Corrected after the review: under ESM the imports of `index.ts` are hoisted, so LangChain is already loaded when `setupTracing` runs. It works because the instrumentation is applied manually to the `CallbackManager` module, not by import hooks.)
 - Extraction spans carry attributes: retry count, failure reason, and `soft_mismatches` for the CV.
 
 ### Wiring and scripts

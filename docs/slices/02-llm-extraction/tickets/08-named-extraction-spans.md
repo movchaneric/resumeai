@@ -38,7 +38,7 @@ One parent span per extraction, named `extract_job_profile` or `extract_cv`, cov
 
 ## Follow-up found in the manual check (08b)
 
-The first manual run after `02d15fa` showed both named roots, but the CV's `RunnableSequence` (the model call) nested under `extract_job_profile`, in the wrong trace.
+The first manual run after `02d15fa` (now `1f25f9f` after the history rewrite) showed both named roots, but the CV's `RunnableSequence` (the model call) nested under `extract_job_profile`, in the wrong trace.
 
 - Cause: LangChain runs callback handlers in the background by default. `@langchain/core` `dist/callbacks/base.js:65` sets `awaitHandlers` only when `LANGCHAIN_CALLBACKS_BACKGROUND === "false"`. Otherwise `consumeCallback` (`dist/singletons/callbacks.js`) pushes each handler call onto one global `p-queue` with concurrency 1.
 - Queued tasks run in the async context of whatever drained the queue. The job profile's late `handleChainEnd` was still queued when the CV call started, so the CV's `handleChainStart` saw the job profile span as `context.active()`.

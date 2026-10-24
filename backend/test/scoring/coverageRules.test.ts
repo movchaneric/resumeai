@@ -129,6 +129,19 @@ describe("applyClaimRule", () => {
     expect(downgrades).toBe(0);
   });
 
+  it("clears Evidence on an unmet verdict and keeps its verdict and reason", () => {
+    const { coverage, downgrades } = applyClaimRule([req("req1")], {
+      verdicts: [verdict("req1", "unmet", ["exp1"], "not shown")],
+    });
+    expect(coverage).toEqual([{ requirementId: "req1", verdict: "unmet", evidenceIds: [], reason: "not shown" }]);
+    expect(downgrades).toBe(0);
+  });
+
+  it("leaves an unmet verdict with no Evidence unchanged", () => {
+    const { coverage } = applyClaimRule([req("req1")], { verdicts: [verdict("req1", "unmet", [], "not shown")] });
+    expect(coverage).toEqual([{ requirementId: "req1", verdict: "unmet", evidenceIds: [], reason: "not shown" }]);
+  });
+
   it("counts downgrades and returns Coverage in Requirement order", () => {
     const requirements = [req("req1"), req("req2"), req("req3")];
     const { coverage, downgrades } = applyClaimRule(requirements, {

@@ -73,8 +73,9 @@ export function coverageIssues(requirements: Requirement[], cv: Cv, answer: Cove
 }
 
 /**
- * The Claim rule: a `met` verdict whose Evidence is all Claims becomes `partially_met` with a fixed reason,
- * unless the Requirement is a language. Returns `Coverage[]` in Requirement order.
+ * Normalizes the model's verdicts. The Claim rule: a `met` verdict whose Evidence is all Claims becomes
+ * `partially_met` with a fixed reason, unless the Requirement is a language. An `unmet` verdict has its Evidence
+ * list cleared (cited Evidence means "supports the Requirement"); its verdict and reason stay. Returns `Coverage[]` in Requirement order.
  * Call it only after `coverageIssues` returned no issues.
  */
 export function applyClaimRule(
@@ -99,7 +100,7 @@ export function applyClaimRule(
     return CoverageSchema.parse({
       requirementId: v.requirementId,
       verdict: v.verdict,
-      evidenceIds: v.evidenceIds,
+      evidenceIds: v.verdict === "unmet" ? [] : v.evidenceIds,
       reason: v.reason,
     });
   });

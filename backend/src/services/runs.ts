@@ -120,7 +120,7 @@ export class RunsService {
         const name = error instanceof Error ? error.name : typeof error;
         const issues = (error as { issues?: unknown } | null)?.issues;
         const count = Array.isArray(issues) ? `, ${issues.length} issues` : "";
-        console.error(`Run ${id}: extraction failed (${code}) ${name}${count}`);
+        console.error(`Run ${id}: pipeline failed (${code}) ${name}${count}`);
         await store.markFailed(id, code, FAILURE_MESSAGES[code]);
       }
     } catch (error) {

@@ -92,21 +92,39 @@ export const CoverageKeySchema = z.array(
 );
 export type CoverageKey = z.infer<typeof CoverageKeySchema>;
 
-const normText = (value: string): string => value.toLowerCase().replace(/\s+/g, " ").trim();
+const STOP_WORDS = new Set("a an and or the of to in on for with like at by from into as is be when needed".split(" "));
+const MATCH_THRESHOLD = 0.6;
+
+/** Lower case, anything but letters, digits, + and # becomes a space; stop words and one-character words are dropped. */
+const words = (value: string): Set<string> =>
+  new Set(
+    value
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}+#]+/gu, " ")
+      .split(" ")
+      .filter((w) => w.length > 1 && !STOP_WORDS.has(w)),
+  );
 
 /**
- * Compares Coverage with the verdict key. A key entry matches a Requirement when one normalized text contains the other;
- * the first Requirement in Job Profile order wins. Returns one warning line per mismatch or unmatched entry.
+ * Compares Coverage with the verdict key. A key entry matches the Requirement that shares the most words with it
+ * (shared words / key words, at least 0.6); on a tie the first Requirement in Job Profile order wins.
+ * Returns one warning line per mismatch or unmatched entry.
  */
 export function compareCoverageToKey(requirements: Requirement[], coverage: Coverage[], key: CoverageKey): string[] {
   const verdictById = new Map(coverage.map((c) => [c.requirementId as string, c.verdict]));
   const out: string[] = [];
   for (const entry of key) {
-    const wanted = normText(entry.requirement);
-    const requirement = requirements.find((r) => {
-      const text = normText(r.text);
-      return text.includes(wanted) || wanted.includes(text);
-    });
+    const wanted = words(entry.requirement);
+    let requirement: Requirement | undefined;
+    let best = 0;
+    for (const r of requirements) {
+      const have = words(r.text);
+      const score = wanted.size === 0 ? 0 : [...wanted].filter((w) => have.has(w)).length / wanted.size;
+      if (score >= MATCH_THRESHOLD && score > best) {
+        best = score;
+        requirement = r;
+      }
+    }
     if (!requirement) {
       out.push(`"${entry.requirement}": no Requirement matches this key entry`);
       continue;

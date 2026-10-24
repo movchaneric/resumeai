@@ -1,8 +1,10 @@
 import {
+  CoverageSchema,
   CvSchema,
   JobProfileSchema,
   RunErrorCodeSchema,
   RunViewSchema,
+  type Coverage,
   type Cv,
   type JobProfile,
   type RunErrorCode,
@@ -24,6 +26,8 @@ export type StoredRun = {
   /** Transitional (ADR 0003, slice 2 extension): the extraction results, dropped in slice 4. */
   cv: Cv | null;
   jobProfile: JobProfile | null;
+  /** Transitional (ADR 0003, slice 3 extension): the Coverage verdicts, dropped in slice 4. */
+  coverage: Coverage[] | null;
   error: { code: RunErrorCode; message: string } | null;
 };
 
@@ -44,6 +48,7 @@ function toStoredRun(row: Run): StoredRun {
     jobDescriptionText: row.jobDescriptionText,
     cv: row.cv === null ? null : CvSchema.parse(row.cv),
     jobProfile: row.jobProfile === null ? null : JobProfileSchema.parse(row.jobProfile),
+    coverage: row.coverage === null ? null : z.array(CoverageSchema).parse(row.coverage),
     error:
       row.errorCode === null
         ? null
@@ -67,6 +72,11 @@ export class RunStore {
   /** Stores both extraction results on a Run. The Run stays `extracting`: later slices move it on. */
   async saveExtraction(id: RunId, { cv, jobProfile }: { cv: Cv; jobProfile: JobProfile }): Promise<void> {
     await this.prisma.run.updateMany({ where: { id }, data: { cv, jobProfile } });
+  }
+
+  /** Stores the Coverage verdicts and moves the Run to `scored`. */
+  async saveCoverage(id: RunId, coverage: Coverage[]): Promise<void> {
+    await this.prisma.run.updateMany({ where: { id }, data: { coverage, status: "scored" } });
   }
 
   async markFailed(id: RunId, code: RunErrorCode, message: string): Promise<void> {

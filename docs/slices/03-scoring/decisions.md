@@ -79,6 +79,15 @@ Settled in a grilling session (2026-10-23 and 24) before implementation. Scope c
 - Rejected for now: the Gemini free tier (Google's pricing page says free-tier content may be used to improve their products, which rules it out for a CV), and Groq (strict JSON-schema output not confirmed).
 - Privacy: the owner's CV now goes to OpenAI's API. This was the owner's informed choice; Ollama stays available through config.
 
+## Coverage model (after the first manual runs, 2026-10-24)
+- The first Coverage run on the owner's CV with gpt-4.1-mini scored **98**: 28 of 29 Requirements were met or partially met. The reasons inferred proof instead of citing it: one invented "based on feedback and data", others reasoned "…, indicating ability to iterate quickly". The Claim rule never fired, because the model cited the skills list plus an unrelated bullet.
+- Ticket 07 made the prompt stricter: `met` needs an Item that states the Requirement; inference gives at most `partially_met`; the reason may not add details; soft skills need a described behaviour; two made-up examples. gpt-4.1-mini then scored **94** and still wrote "indicating…" next to `met`. **Prompt rules alone did not change gpt-4.1-mini's judgement.**
+- With the same prompt, gpt-4.1 scored **65** (15 met, 14 partially met, 4 unmet). It wrote no inference reasons and disagreed with the hand-written verdict key on 6 of 29 Requirements.
+- **Decision: two models for two jobs.** Extraction stays on gpt-4.1-mini: it copies, and our verbatim check verifies the copy. Coverage moves to gpt-4.1: it judges, and code can check only its structure. Setting: `LLM_COVERAGE_MODEL`, defaulting to `LLM_MODEL` (ticket 08). About $0.03 per Run (gpt-4.1 is $2/$8 per 1M tokens), roughly 160 Runs on the current balance.
+- Rejected: everything on gpt-4.1 (about $0.05 per Run, paying more for extraction, which already passes); a code downgrade on words like "indicating" (brittle, and the model can avoid the words while staying lenient).
+- Open: the Job Profile's Requirement count varied (29, 19, 33) across three runs, so part of the score's movement is the list itself. If it stays erratic, move only the Job Profile extraction to gpt-4.1.
+- Open: gpt-5-mini and gpt-6-luna fail with `400 invalid model ID` although the key lists them. Our Chat Completions call probably doesn't suit OpenAI's newer models. Not pursued.
+
 ## Quality check
 - The dev script gains `--coverage`: after extraction it runs Coverage and prints each verdict with its Evidence and reason, then the score.
 - With `--check`, it also compares with a small, hand-written verdict key in `local-cvs/` (not in git), for one real job description.

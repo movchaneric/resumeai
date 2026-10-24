@@ -23,6 +23,7 @@ After wave 1, the owner can run the model comparison (plan, manual check 2) whil
 | 05 | `services/runs.ts` (`runPipeline`, `failureCode`, messages), service and route tests for the pipeline, a pipeline span test, Postman |
 | 06 | `test/extract.ts` (`--coverage`), `test/extractCheck.ts` (or a sibling) and its test |
 | 07 (after the first manual run) | the Coverage prompt, key matching in `test/extractCheck.ts`, the failure log line |
+| 08 | `utils/config.ts`, `services/runs.ts` (`RunsDeps.coverageLlm`, `runPipeline`), `index.ts`, `test/extract.ts`, `.env.example`, config and service tests |
 
 ## Rules for every ticket
 - Follow the root `CLAUDE.md`: layers, `@/` imports with `.js`, constructor injection, no Prisma outside `stores/`, no LangChain outside `llm/` (and the one `utils/tracing.ts` exception).

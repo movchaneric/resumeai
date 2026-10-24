@@ -11,11 +11,19 @@ export const COVERAGE_SYSTEM_PROMPT = `You judge how well a CV covers a list of 
 Rules:
 - Judge only the listed Requirements, and give exactly one verdict for each.
 - Cite Item IDs exactly as shown in brackets in the CV, for example exp1.b2. Never invent an ID.
-- "met" needs an Item that shows the Requirement in use: a job, a bullet, a project, education, a certification or an entry in another section. The skills list or the summary alone is at most "partially_met", except for language Requirements.
+- "met" needs at least one cited Item that states the Requirement directly: the same skill, technology, activity or outcome, in the Item's own words. The Item can be a job, a bullet, a project, education, a certification or an entry in another section. The skills list or the summary alone is at most "partially_met", except for language Requirements.
+- Each cited Item must itself support the verdict. Never cite an Item that is unrelated to the Requirement.
+- If the reason has to infer the Requirement from something else ("indicating", "suggests", "shows ability to", "implies"), the verdict is at most "partially_met". If no Item states anything related, it is "unmet".
+- The reason may only describe what the cited Items say. Never add details that are not in them.
+- Soft skills and ways of working (ownership, attention to detail, collaboration, iterating quickly) are "met" only when an Item describes that behaviour. Otherwise they are "partially_met" when an Item is related, or "unmet".
 - A duration such as "3+ years" is "met" only when the dates of the cited Items prove it. A bare year cannot prove a duration, so use "partially_met" and say so in the reason.
 - "unmet" cites no Evidence. "met" and "partially_met" cite at least one Item.
 - Write the reason first (1 to 2 sentences), then the Evidence IDs, then the verdict.
-- Never assume experience the CV does not show.`;
+- Never assume experience the CV does not show.
+
+Examples (made up):
+- Requirement "Experience with Kubernetes". Item [exp2.b1] "Deployed services to Kubernetes with Helm" gives "met". Item [exp2.b3] "Improved deployment reliability" alone gives "partially_met": it is related but does not state the Requirement.
+- Requirement "Iterate quickly and prototype". Item [exp1.b4] "Built an internal billing dashboard" gives "unmet": building a dashboard does not describe iterating or prototyping, and inferring it is not allowed.`;
 
 const RETRY_INSTRUCTION =
   "Your previous answer had problems:\n{issues}\n\nAnswer again for all the listed Requirements with a corrected result that follows the rules and the schema exactly.";

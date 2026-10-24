@@ -124,4 +124,14 @@ describe("assessCoverage", () => {
     expect(user!.role).toBe("user");
     expect(user!.content).toBe(`Requirements:\n${renderRequirements(requirements)}\n\nCV:\n${renderCv(cv())}`);
   });
+
+  it("keeps the inference rule and the no-added-details rule in the system prompt", async () => {
+    const llm = new FakeLlmClient().enqueue("assess_coverage", good);
+    await assessCoverage(llm, cv(), requirements);
+
+    const system = llm.calls[0]!.messages[0]!.content;
+    expect(system).toContain("has to infer the Requirement");
+    expect(system).toContain("at most \"partially_met\"");
+    expect(system).toContain("Never add details that are not in them");
+  });
 });

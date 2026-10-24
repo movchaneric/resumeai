@@ -26,7 +26,7 @@ describe("loadConfig", () => {
 
   it("applies the LLM and tracing defaults", () => {
     const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" });
-    expect(config.llm).toEqual({ apiKey: "k", baseUrl: undefined, model: "qwen3:14b", contextTokens: 16_384, timeoutMs: 180_000 });
+    expect(config.llm).toEqual({ apiKey: "k", baseUrl: undefined, model: "gpt-4o-mini", contextTokens: 128_000, timeoutMs: 60_000, reasoningEffort: undefined });
     expect(config.tracing).toEqual({ traceContent: false, endpoint: undefined, projectName: undefined });
   });
 
@@ -43,6 +43,11 @@ describe("loadConfig", () => {
     expect(config.llm.baseUrl).toBe("http://localhost:11434/v1");
     expect(config.llm.model).toBe("m");
     expect(config.tracing).toEqual({ traceContent: true, endpoint: "http://localhost:6006", projectName: "p" });
+  });
+
+  it("passes LLM_REASONING_EFFORT through and rejects an empty value", () => {
+    expect(loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", LLM_REASONING_EFFORT: "none" }).llm.reasoningEffort).toBe("none");
+    expect(() => loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", LLM_REASONING_EFFORT: "" })).toThrow(/LLM_REASONING_EFFORT/);
   });
 
   it("fails fast when OPENAI_API_KEY is missing", () => {

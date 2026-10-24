@@ -96,6 +96,8 @@ async function main(): Promise<number> {
   const config = loadConfig();
   const provider = setupTracing(config);
   const llm = new LangChainLlmClient(config.llm);
+  const coverageLlm = new LangChainLlmClient({ ...config.llm, model: config.llm.coverageModel });
+  console.log(`models: extraction ${config.llm.model}, coverage ${config.llm.coverageModel}`);
 
   try {
     const cvText = await parseCv(cvBuffer, config.limits);
@@ -109,7 +111,7 @@ async function main(): Promise<number> {
     console.log(`softMismatches: ${softMismatches}`);
 
     if (coverageFlag) {
-      const { coverage, downgrades } = await timed("assessCoverage", () => assessCoverage(llm, cv as Cv, jobProfile.requirements));
+      const { coverage, downgrades } = await timed("assessCoverage", () => assessCoverage(coverageLlm, cv as Cv, jobProfile.requirements));
       console.log("----- COVERAGE -----");
       for (const requirement of jobProfile.requirements) {
         const c = coverage.find((x) => x.requirementId === requirement.id);

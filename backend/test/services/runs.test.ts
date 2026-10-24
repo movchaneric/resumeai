@@ -64,7 +64,7 @@ const JOB_PROFILE = {
   requirements: [{ text: "Node.js", source: "Node.js", kind: "skill", importance: "must_have" }],
 };
 
-function setup(now = () => new Date()) {
+function setup(now = () => new Date(), coverageLlm?: FakeLlmClient) {
   const store = new FakeStore();
   const llm = new FakeLlmClient();
   // Tasks are held back until `settle`, so a test can change the stored Run before extraction starts.
@@ -72,7 +72,7 @@ function setup(now = () => new Date()) {
   const runInBackground = (task: () => Promise<void>) => {
     tasks.push(task);
   };
-  const service = new RunsService({ store: store as unknown as RunStore, config, llm, now, runInBackground });
+  const service = new RunsService({ store: store as unknown as RunStore, config, llm, coverageLlm, now, runInBackground });
   /** Runs every scheduled task and waits for it. A task that rejected fails the test. */
   const settle = async () => {
     await Promise.all(tasks.map((task) => task()));
@@ -180,6 +180,27 @@ describe("RunsService", () => {
         { key: "parse", state: "done" },
         { key: "extract", state: "running" },
       ]);
+    });
+
+    it("sends Coverage to coverageLlm and extraction to llm", async () => {
+      const coverageLlm = new FakeLlmClient().enqueue("assess_coverage", COVERAGE_ANSWER);
+      const ctx = setup(undefined, coverageLlm);
+      ctx.llm.enqueue("extract_job_profile", JOB_PROFILE).enqueue("extract_cv", fullCv());
+      const id = await createExtractableRun(ctx);
+      await ctx.settle();
+
+      expect(ctx.llm.calls.map((c) => c.name)).toEqual(["extract_job_profile", "extract_cv"]);
+      expect(coverageLlm.calls.map((c) => c.name)).toEqual(["assess_coverage"]);
+      expect(ctx.store.rows.get(id)?.status).toBe("scored");
+    });
+
+    it("uses llm for Coverage when no coverageLlm is given", async () => {
+      const ctx = setup();
+      ctx.llm.enqueue("extract_job_profile", JOB_PROFILE).enqueue("extract_cv", fullCv()).enqueue("assess_coverage", COVERAGE_ANSWER);
+      await createExtractableRun(ctx);
+      await ctx.settle();
+
+      expect(ctx.llm.calls.map((c) => c.name)).toContain("assess_coverage");
     });
 
     it("saves both results and the Coverage, then shows the Run as scored", async () => {

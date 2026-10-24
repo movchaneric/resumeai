@@ -74,7 +74,7 @@ Per `docs/README.md`: LangGraph with a checkpointer, the **Questions** interrupt
 
 Inputs for it:
 - The transitional status `scored` is replaced by `awaiting_answers` or `tailoring`.
-- The transitional columns (`cv`, `job_profile`, `coverage`) move into graph state (ADR 0003).
+- The transitional columns (`cv_text`, `job_description_text`, `cv`, `job_profile`, `coverage`) move into graph state (ADR 0003).
 - Re-judging calls `assessCoverage` with only the Requirements an applied Change addressed; it already takes a list.
 - The exit router compares unrounded scores (`scoring/matchScore.ts`).
 - Later stretches of work (after Answers, after review) get their own root span with the same `session.id`, through `withSessionSpan`.

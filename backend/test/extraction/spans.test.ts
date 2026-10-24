@@ -7,7 +7,7 @@ import {
 } from "@opentelemetry/sdk-trace-node";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { RequirementSchema } from "@resume-ai/shared";
-import type { Cv, ExtractedJobProfile } from "@resume-ai/shared";
+import type { Cv, ExtractedJobProfile, RunId } from "@resume-ai/shared";
 import { assignCvIds } from "@/extraction/assignIds.js";
 import { assessCoverage } from "@/scoring/assessCoverage.js";
 import { CoverageError } from "@/scoring/errors.js";
@@ -15,6 +15,9 @@ import { ExtractionError, NoRequirementsError } from "@/extraction/errors.js";
 import { extractCv } from "@/extraction/extractCv.js";
 import { extractJobProfile } from "@/extraction/extractJobProfile.js";
 import { LlmSchemaError } from "@/llm/llmClient.js";
+import { RunsService } from "@/services/runs.js";
+import type { RunStore } from "@/stores/runs.js";
+import { loadConfig } from "@/utils/config.js";
 import { withSpan } from "@/utils/spans.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
 import { fullCv } from "./cvFixture.js";
@@ -186,5 +189,47 @@ describe("coverage spans", () => {
     expect(span.status.message).toBeUndefined();
     expect(span.events).toHaveLength(0);
     expect(JSON.stringify([span.attributes, span.status, span.events])).not.toContain("secret");
+  });
+});
+
+describe("pipeline span", () => {
+  const COVERAGE_ANSWER = {
+    verdicts: [{ requirementId: "req1", reason: "Built it.", evidenceIds: ["exp1.b1"], verdict: "partially_met" }],
+  };
+
+  /** A minimal in-memory store: the pipeline only reads the Run and saves results. */
+  function fakeStore(id: string) {
+    const run = { id, cvText: cvText, jobDescriptionText: "Backend developer" };
+    return {
+      get: async () => run,
+      saveExtraction: async () => undefined,
+      saveCoverage: async () => undefined,
+      markFailed: async () => undefined,
+    };
+  }
+
+  it("is one root with session.id and a numeric score, and the three chains are its children", async () => {
+    const id = "3f0c1d4e-5b2a-4c8e-9a71-0d6e2f8b7a11";
+    const llm = new FakeLlmClient()
+      .enqueue("extract_job_profile", profile)
+      .enqueue("extract_cv", fullCv())
+      .enqueue("assess_coverage", COVERAGE_ANSWER);
+    const service = new RunsService({
+      store: fakeStore(id) as unknown as RunStore,
+      config: loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" }),
+      llm,
+    });
+    await service.runPipeline(id as RunId);
+
+    const root = finished("pipeline");
+    expect(root.parentSpanContext).toBeUndefined();
+    expect(root.attributes["session.id"]).toBe(id);
+    expect(root.attributes["score"]).toBe(50);
+    expect(root.attributes["openinference.span.kind"]).toBe("CHAIN");
+    for (const name of ["extract_job_profile", "extract_cv", "assess_coverage"]) {
+      const child = finished(name);
+      expect(child.parentSpanContext?.spanId).toBe(root.spanContext().spanId);
+      expect(child.spanContext().traceId).toBe(root.spanContext().traceId);
+    }
   });
 });

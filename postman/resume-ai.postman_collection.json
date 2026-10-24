@@ -86,14 +86,14 @@
       }
     },
     {
-      "name": "Get run (extraction result)",
+      "name": "Get run (scored)",
       "event": [
         {
           "listen": "test",
           "script": {
             "type": "text/javascript",
             "exec": [
-              "pm.test('RunView shows steps and job', () => { pm.response.to.have.status(200); const v = pm.response.json(); pm.expect(v.steps).to.be.an('array'); const extract = v.steps.find(s => s.key === 'extract').state; console.log('status', v.status, 'extract', extract, 'job', JSON.stringify(v.job), 'error', JSON.stringify(v.error)); pm.expect(extract, 'extraction still running: send again').to.eql('done'); });"
+              "pm.test('RunView is scored or failed', () => { pm.response.to.have.status(200); const v = pm.response.json(); console.log('status', v.status, 'steps', JSON.stringify(v.steps), 'job', JSON.stringify(v.job), 'error', JSON.stringify(v.error)); pm.expect(['scored', 'failed'], 'pipeline still running: send again').to.include(v.status); if (v.status === 'scored') { pm.expect(v.score).to.be.a('number'); pm.expect(v.requirements).to.be.an('array').that.is.not.empty; } });"
             ]
           }
         }
@@ -101,7 +101,7 @@
       "request": {
         "method": "GET",
         "header": [],
-        "description": "Manual check, needs Ollama running. Extraction runs in the background after the upload, so this may need re-sending until `extract` is `done`. Then `job` holds the title and company from the job description, or `status` is `failed` with an `error` code.",
+        "description": "Manual check, needs the model reachable (see backend/.env). The pipeline (extraction, then Coverage) runs in the background after the upload, so this may need re-sending until `status` is `scored` or `failed`. When `scored`, `score` is a number and `requirements` lists each Requirement with its verdict and Evidence; when `failed`, `error` holds the code.",
         "url": {
           "raw": "{{baseUrl}}/runs/{{runId}}",
           "host": [

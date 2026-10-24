@@ -1,6 +1,6 @@
-import type { Cv } from "@resume-ai/shared";
+import type { Coverage, Cv, Requirement } from "@resume-ai/shared";
 import { describe, expect, it } from "vitest";
-import { compareToExpected, ExpectedSchema, type Expected } from "./extractCheck.js";
+import { compareToExpected, compareCoverageToKey, CoverageKeySchema, ExpectedSchema, type Expected } from "./extractCheck.js";
 
 const range = (start: string | null, end: string | null, current = false) => ({ start, end, current });
 const bullets = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `b${i}`, text: `bullet ${i}` }));
@@ -53,5 +53,78 @@ describe("compareToExpected", () => {
 describe("ExpectedSchema", () => {
   it("rejects a malformed answer key", () => {
     expect(ExpectedSchema.safeParse({ experience: "x" }).success).toBe(false);
+  });
+});
+
+describe("compareCoverageToKey", () => {
+  const reqs = [
+    { id: "req1", importance: "must_have", text: "Experience with TypeScript" },
+    { id: "req2", importance: "nice_to_have", text: "Knowledge of  Kubernetes" },
+  ] as unknown as Requirement[];
+  const cov = (...verdicts: string[]) =>
+    verdicts.map((verdict, i) => ({ requirementId: `req${i + 1}`, verdict, evidenceIds: [], reason: "r" })) as unknown as Coverage[];
+
+  it("returns nothing when every entry matches", () => {
+    const key = [
+      { requirement: "experience with typescript", verdict: "met" as const },
+      { requirement: "Knowledge of Kubernetes", verdict: "unmet" as const },
+    ];
+    expect(compareCoverageToKey(reqs, cov("met", "unmet"), key)).toEqual([]);
+  });
+
+  it("reports a verdict mismatch with both verdicts and the Requirement id", () => {
+    const key = [{ requirement: "Experience with TypeScript", verdict: "met" as const }];
+    expect(compareCoverageToKey(reqs, cov("partially_met", "unmet"), key)).toEqual([
+      '"Experience with TypeScript": expected met, got partially_met (req1)',
+    ]);
+  });
+
+  it("matches reordered words", () => {
+    const r = [{ id: "req1", importance: "must_have", text: "Strong frontend development experience" }] as unknown as Requirement[];
+    const key = [{ requirement: "Strong experience frontend development", verdict: "met" as const }];
+    expect(compareCoverageToKey(r, cov("met"), key)).toEqual([]);
+  });
+
+  it("matches despite punctuation and extra Requirement words", () => {
+    const r = [
+      { id: "req1", importance: "must_have", text: "Build, maintain and scale modern web applications, frontend and backend" },
+    ] as unknown as Requirement[];
+    const key = [{ requirement: "Build, maintain, and scale modern web applications", verdict: "met" as const }];
+    expect(compareCoverageToKey(r, cov("met"), key)).toEqual([]);
+  });
+
+  it("reports an entry whose best score is below 0.6", () => {
+    const key = [{ requirement: "Strong knowledge of Kubernetes in production", verdict: "met" as const }];
+    expect(compareCoverageToKey(reqs, cov("met", "met"), key)).toEqual([
+      '"Strong knowledge of Kubernetes in production": no Requirement matches this key entry',
+    ]);
+  });
+
+  it("picks the highest score over an earlier, weaker match", () => {
+    const r = [
+      { id: "req1", importance: "must_have", text: "Deploy services to cloud platforms" },
+      { id: "req2", importance: "must_have", text: "Deploy services to cloud platforms with Terraform" },
+    ] as unknown as Requirement[];
+    const key = [{ requirement: "Deploy services cloud platforms Terraform", verdict: "unmet" as const }];
+    expect(compareCoverageToKey(r, cov("met", "met"), key)).toEqual([
+      '"Deploy services cloud platforms Terraform": expected unmet, got met (req2)',
+    ]);
+  });
+
+  it("reports a key entry that matches no Requirement", () => {
+    const key = [{ requirement: "Fluent Klingon", verdict: "met" as const }];
+    expect(compareCoverageToKey(reqs, cov("met", "met"), key)).toEqual(['"Fluent Klingon": no Requirement matches this key entry']);
+  });
+
+  it("uses the first matching Requirement in Job Profile order", () => {
+    const two = [...reqs, { id: "req3", importance: "must_have", text: "TypeScript experience with Experience with TypeScript" }] as unknown as Requirement[];
+    const key = [{ requirement: "Experience with TypeScript", verdict: "unmet" as const }];
+    expect(compareCoverageToKey(two, cov("met", "met", "met"), key)).toEqual(['"Experience with TypeScript": expected unmet, got met (req1)']);
+  });
+});
+
+describe("CoverageKeySchema", () => {
+  it("rejects an unknown verdict", () => {
+    expect(CoverageKeySchema.safeParse([{ requirement: "x", verdict: "maybe" }]).success).toBe(false);
   });
 });

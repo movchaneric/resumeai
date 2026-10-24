@@ -9,6 +9,8 @@ export type LangChainLlmOptions = {
   model: string;
   contextTokens: number;
   timeoutMs: number;
+  /** Sent as `reasoning_effort` when set. Leave unset for models that reject it (gpt-4o-mini, gpt-4.1-*). */
+  reasoningEffort?: string;
 };
 
 type RawStructured = { raw?: unknown; parsed?: unknown; parsingError?: unknown };
@@ -39,11 +41,15 @@ export class LangChainLlmClient implements LlmClient {
     this.model = new ChatOpenAI({
       apiKey: options.apiKey,
       model: options.model,
-      temperature: 0,
+      // OpenAI rejects `temperature` once reasoning is on, so send it only when reasoning is unset or "none".
+      ...(!options.reasoningEffort || options.reasoningEffort === "none" ? { temperature: 0 } : {}),
       timeout: options.timeoutMs,
       maxRetries: 0,
-      // LangChain's own `reasoning` option is dropped for non-OpenAI model names; modelKwargs reaches the request body.
-      modelKwargs: { reasoning_effort: "none" },
+      // Two rules. `reasoning_effort` is sent only when configured, because non-reasoning models (gpt-4o-mini,
+      // gpt-4.1-*) reject it. `temperature: 0` is sent only when it is unset or "none", because reasoning efforts
+      // above "none" reject temperature. LangChain's own `reasoning` option is dropped for non-OpenAI model names;
+      // modelKwargs reaches the request body.
+      ...(options.reasoningEffort ? { modelKwargs: { reasoning_effort: options.reasoningEffort } } : {}),
       configuration: { baseURL: options.baseUrl, ...(fetchImpl ? { fetch: fetchImpl } : {}) },
     });
   }

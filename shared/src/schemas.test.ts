@@ -221,6 +221,29 @@ describe("run view", () => {
     const completed = { ...base, status: "completed", ...review, download: { docx: "/runs/x/cv.docx", pdf: null } };
     expect(RunViewSchema.safeParse(completed).success).toBe(true);
   });
+  it("parses scored with a whole-number score and the requirement rows", () => {
+    const scored = {
+      ...base,
+      status: "scored",
+      job: { title: "Engineer", company: "Acme" },
+      score: 64,
+      requirements: [
+        { id: "req1", text: "Node.js", importance: "must_have", verdict: "met", evidenceIds: ["exp1.b1"], reason: "Used it at Acme." },
+      ],
+    };
+    expect(RunViewSchema.safeParse(scored).success).toBe(true);
+    expect(RunViewSchema.safeParse({ ...scored, score: 101 }).success).toBe(false);
+    expect(RunViewSchema.safeParse({ ...scored, requirements: undefined }).success).toBe(false);
+    expect(RunViewSchema.safeParse({ ...scored, requirements: [{ id: "req1", text: "Node.js" }] }).success).toBe(false);
+  });
+  it("accepts the failed step state", () => {
+    const steps = [{ key: "coverage", state: "failed" }];
+    expect(RunViewSchema.safeParse({ ...base, steps, status: "parsing" }).success).toBe(true);
+    expect(RunViewSchema.safeParse({ ...base, steps: [{ key: "coverage", state: "broken" }], status: "parsing" }).success).toBe(false);
+  });
+  it("accepts the COVERAGE_FAILED error code", () => {
+    expect(RunViewSchema.safeParse({ ...base, status: "failed", error: { code: "COVERAGE_FAILED", message: "m" } }).success).toBe(true);
+  });
   it("requires status-specific data and a UUID run id", () => {
     expect(RunViewSchema.safeParse({ ...base, status: "awaiting_answers" }).success).toBe(false);
     expect(RunViewSchema.safeParse({ ...base, status: "awaiting_review" }).success).toBe(false);

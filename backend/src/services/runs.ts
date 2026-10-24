@@ -5,14 +5,19 @@ import {
   StepKeySchema,
   type RunErrorCode,
   type RunId,
+  type StepState,
   type RunView,
 } from "@resume-ai/shared";
+import { assessCoverage } from "@/scoring/assessCoverage.js";
+import { CoverageError } from "@/scoring/errors.js";
+import { matchScore } from "@/scoring/matchScore.js";
 import { ExtractionError, NoRequirementsError } from "@/extraction/errors.js";
 import { extractCv } from "@/extraction/extractCv.js";
 import { extractJobProfile } from "@/extraction/extractJobProfile.js";
 import type { LlmClient } from "@/llm/llmClient.js";
 import type { Config } from "@/utils/config.js";
 import { ApiError } from "@/utils/errors.js";
+import { withSessionSpan } from "@/utils/spans.js";
 import { parseCv, stripNul } from "@/parsing/parseCv.js";
 import type { RunStore, StoredRun } from "@/stores/runs.js";
 
@@ -20,6 +25,8 @@ export type RunsDeps = {
   store: RunStore;
   config: Config;
   llm: LlmClient;
+  /** Judges Coverage. Falls back to `llm` when unset. */
+  coverageLlm?: LlmClient;
   now?: () => Date;
   /** Starts a task without awaiting it. Tests pass a version that collects the promises. */
   runInBackground?: (task: () => Promise<void>) => void;
@@ -31,15 +38,17 @@ function defaultRunInBackground(task: () => Promise<void>): void {
 }
 
 /** User-facing failure messages (plan, "Failure codes"). The real cause is logged, never shown. */
-const FAILURE_MESSAGES: Record<"EXTRACTION_FAILED" | "NO_REQUIREMENTS" | "INTERNAL", string> = {
+const FAILURE_MESSAGES: Record<Extract<RunErrorCode, "EXTRACTION_FAILED" | "NO_REQUIREMENTS" | "COVERAGE_FAILED" | "INTERNAL">, string> = {
   EXTRACTION_FAILED: "We couldn't read the structure of your CV or job description. Try again, or upload a DOCX.",
   NO_REQUIREMENTS: "We couldn't find any requirements in this job description. Paste the full posting.",
+  COVERAGE_FAILED: "We couldn't assess your CV against this job. Try again.",
   INTERNAL: "Something went wrong. Try again.",
 };
 
 function failureCode(error: unknown): keyof typeof FAILURE_MESSAGES {
   if (error instanceof NoRequirementsError) return "NO_REQUIREMENTS";
   if (error instanceof ExtractionError) return "EXTRACTION_FAILED";
+  if (error instanceof CoverageError) return "COVERAGE_FAILED";
   return "INTERNAL";
 }
 
@@ -75,24 +84,33 @@ export class RunsService {
       cvText,
       jobDescriptionText,
     });
-    this.runInBackground(() => this.extractRun(run.id));
+    this.runInBackground(() => this.runPipeline(run.id));
     return run.id;
   }
 
   /**
-   * Extracts the Job Profile, then the CV, and stores the result or the failure on the Run.
+   * The background pipeline: extracts the Job Profile, then the CV, then assesses Coverage, storing each result
+   * as it arrives, or the failure on the Run. It runs under one `pipeline` root span (`session.id` = the Run id,
+   * `score` = the unrounded match score when it finishes).
    * It never throws: it runs detached from the request, so a failure has nowhere else to go.
    */
-  async extractRun(id: RunId): Promise<void> {
+  async runPipeline(id: RunId): Promise<void> {
     const { store, llm } = this.deps;
+    // Two clients: extraction is copying (checked by code), Coverage is judgement and may use a stronger model.
+    const coverageLlm = this.deps.coverageLlm ?? llm;
     try {
       const run = await store.get(id);
       if (!run) return;
       try {
-        const jobProfile = await extractJobProfile(llm, run.jobDescriptionText);
-        const { cv, softMismatches } = await extractCv(llm, run.cvText);
-        console.debug(`Run ${id}: extraction done, ${softMismatches} soft mismatches`);
-        await store.saveExtraction(id, { cv, jobProfile });
+        await withSessionSpan("pipeline", id, async (span) => {
+          const jobProfile = await extractJobProfile(llm, run.jobDescriptionText);
+          const { cv, softMismatches } = await extractCv(llm, run.cvText);
+          console.debug(`Run ${id}: extraction done, ${softMismatches} soft mismatches`);
+          await store.saveExtraction(id, { cv, jobProfile });
+          const { coverage } = await assessCoverage(coverageLlm, cv, jobProfile.requirements);
+          await store.saveCoverage(id, coverage);
+          span.setAttribute("score", matchScore(jobProfile.requirements, coverage));
+        });
       } catch (error) {
         const code: RunErrorCode = failureCode(error);
         // Log the code, the error name and the issue count only. Messages and issues can quote CV values or
@@ -100,11 +118,11 @@ export class RunsService {
         const name = error instanceof Error ? error.name : typeof error;
         const issues = (error as { issues?: unknown } | null)?.issues;
         const count = Array.isArray(issues) ? `, ${issues.length} issues` : "";
-        console.error(`Run ${id}: extraction failed (${code}) ${name}${count}`);
+        console.error(`Run ${id}: pipeline failed (${code}) ${name}${count}`);
         await store.markFailed(id, code, FAILURE_MESSAGES[code]);
       }
     } catch (error) {
-      console.error(`Run ${id}: could not store the extraction outcome`, error);
+      console.error(`Run ${id}: could not store the pipeline outcome`, error);
     }
   }
 
@@ -122,8 +140,10 @@ export class RunsService {
 
 /**
  * Derives the view from what is stored (plan, "Behaviour seen from outside"). The status stays
- * `extracting` until both results exist, and a failed Run shows its `extract` step as done because the
- * step states have no `failed`. Validating against the schema keeps the response honest as the view grows.
+ * `extracting` until Coverage is stored; the Coverage step runs once both extraction results exist.
+ * A failed Run marks the step that broke as `failed`: `coverage` when the extraction results are stored,
+ * otherwise `extract`. The score is computed here from the stored verdicts, never stored. Validating
+ * against the schema keeps the response honest as the view grows.
  */
 function toRunView(run: StoredRun): RunView {
   const common = {
@@ -131,20 +151,49 @@ function toRunView(run: StoredRun): RunView {
     createdAt: run.createdAt.toISOString(),
     expiresAt: run.expiresAt.toISOString(),
   };
-  const steps = (extract: "running" | "done") =>
+  const { cv, jobProfile, coverage } = run;
+  const extracted = cv !== null && jobProfile !== null;
+  const job = extracted ? { title: jobProfile.title, company: jobProfile.company } : null;
+  const steps = (extract: StepState, coverageState: StepState) =>
     StepKeySchema.options.map((key) => ({
       key,
-      state: key === "parse" ? "done" : key === "extract" ? extract : "pending",
+      state: key === "parse" ? "done" : key === "extract" ? extract : key === "coverage" ? coverageState : "pending",
     }));
 
   if (run.status === "failed" && run.error) {
-    return RunViewSchema.parse({ ...common, status: "failed", job: null, steps: steps("done"), error: run.error });
+    return RunViewSchema.parse({
+      ...common,
+      status: "failed",
+      job,
+      steps: extracted ? steps("done", "failed") : steps("failed", "pending"),
+      error: run.error,
+    });
   }
-  const extracted = run.cv !== null && run.jobProfile !== null;
+  if (run.status === "scored" && extracted && coverage !== null) {
+    const verdictById = new Map(coverage.map((c) => [c.requirementId as string, c]));
+    return RunViewSchema.parse({
+      ...common,
+      status: "scored",
+      job,
+      steps: steps("done", "done"),
+      score: Math.round(matchScore(jobProfile.requirements, coverage)),
+      requirements: jobProfile.requirements.map((requirement) => {
+        const verdict = verdictById.get(requirement.id);
+        return {
+          id: requirement.id,
+          text: requirement.text,
+          importance: requirement.importance,
+          verdict: verdict?.verdict ?? "unmet",
+          evidenceIds: verdict?.evidenceIds ?? [],
+          reason: verdict?.reason ?? "",
+        };
+      }),
+    });
+  }
   return RunViewSchema.parse({
     ...common,
     status: "extracting",
-    job: extracted ? { title: run.jobProfile!.title, company: run.jobProfile!.company } : null,
-    steps: steps(extracted ? "done" : "running"),
+    job,
+    steps: extracted ? steps("done", "running") : steps("running", "pending"),
   });
 }

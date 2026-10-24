@@ -10,7 +10,9 @@ const config = loadConfig();
 // Registers the LangChain instrumentation; keep it ahead of anything that builds a model.
 const tracingProvider = setupTracing(config);
 const prisma = createPrisma(config.databaseUrl);
-const app = createApp({ store: new RunStore(prisma), config, llm: new LangChainLlmClient(config.llm) });
+const llm = new LangChainLlmClient(config.llm);
+const coverageLlm = new LangChainLlmClient({ ...config.llm, model: config.llm.coverageModel });
+const app = createApp({ store: new RunStore(prisma), config, llm, coverageLlm });
 
 const server = app.listen(config.port, () => {
   console.log(`backend listening on :${config.port}`);

@@ -1,15 +1,16 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { RunErrorCode, RunId } from "@resume-ai/shared";
+import type { Coverage, RunErrorCode, RunId } from "@resume-ai/shared";
 import { describe, expect, it, vi } from "vitest";
 import { loadConfig } from "@/utils/config.js";
 import { ApiError } from "@/utils/errors.js";
 import type { NewRun, RunStore, StoredRun } from "@/stores/runs.js";
 import { RunsService } from "@/services/runs.js";
 import { ExtractionError, NoRequirementsError } from "@/extraction/errors.js";
-import { LlmUnavailableError } from "@/llm/llmClient.js";
+import { LlmSchemaError, LlmUnavailableError } from "@/llm/llmClient.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
+import { assignCvIds } from "@/extraction/assignIds.js";
 import { fullCv } from "../extraction/cvFixture.js";
 
 const cv = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf"));
@@ -19,7 +20,7 @@ const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" });
 class FakeStore {
   rows = new Map<string, StoredRun>();
   async create(run: NewRun): Promise<StoredRun> {
-    const stored = { ...run, exportPath: null, cv: null, jobProfile: null, error: null };
+    const stored = { ...run, exportPath: null, cv: null, jobProfile: null, coverage: null, error: null };
     this.rows.set(run.id, stored);
     return stored;
   }
@@ -28,6 +29,9 @@ class FakeStore {
   }
   async saveExtraction(id: RunId, { cv, jobProfile }: Pick<StoredRun, "cv" | "jobProfile">): Promise<void> {
     this.rows.set(id, { ...this.rows.get(id)!, cv, jobProfile });
+  }
+  async saveCoverage(id: RunId, coverage: Coverage[]): Promise<void> {
+    this.rows.set(id, { ...this.rows.get(id)!, coverage, status: "scored" });
   }
   async markFailed(id: RunId, code: RunErrorCode, message: string): Promise<void> {
     this.rows.set(id, { ...this.rows.get(id)!, status: "failed", error: { code, message } });
@@ -49,13 +53,18 @@ Proj Shipped
 AWS 2021
 Experience Volunteer a Volunteer b`;
 
+/** What a model would answer for `JOB_PROFILE` (one Requirement, `req1`) against `fullCv()`. */
+const COVERAGE_ANSWER = {
+  verdicts: [{ requirementId: "req1", reason: "Built it.", evidenceIds: ["exp1.b1"], verdict: "met" }],
+};
+
 const JOB_PROFILE = {
   title: "Backend Engineer",
   company: "Acme",
   requirements: [{ text: "Node.js", source: "Node.js", kind: "skill", importance: "must_have" }],
 };
 
-function setup(now = () => new Date()) {
+function setup(now = () => new Date(), coverageLlm?: FakeLlmClient) {
   const store = new FakeStore();
   const llm = new FakeLlmClient();
   // Tasks are held back until `settle`, so a test can change the stored Run before extraction starts.
@@ -63,7 +72,7 @@ function setup(now = () => new Date()) {
   const runInBackground = (task: () => Promise<void>) => {
     tasks.push(task);
   };
-  const service = new RunsService({ store: store as unknown as RunStore, config, llm, now, runInBackground });
+  const service = new RunsService({ store: store as unknown as RunStore, config, llm, coverageLlm, now, runInBackground });
   /** Runs every scheduled task and waits for it. A task that rejected fails the test. */
   const settle = async () => {
     await Promise.all(tasks.map((task) => task()));
@@ -77,6 +86,33 @@ async function createExtractableRun(ctx: ReturnType<typeof setup>) {
   ctx.store.rows.set(id, { ...ctx.store.rows.get(id)!, cvText: CV_TEXT });
   return id;
 }
+
+/** A made-up Job Profile and CV, stored as if extraction had finished. */
+const STORED_JOB_PROFILE = {
+  title: "Backend Engineer",
+  company: "Acme",
+  requirements: [
+    { id: "req1", text: "Node.js", source: "Node.js", kind: "skill", importance: "must_have" },
+    { id: "req2", text: "PostgreSQL", source: "PostgreSQL", kind: "skill", importance: "must_have" },
+    { id: "req3", text: "Docker", source: "Docker", kind: "skill", importance: "nice_to_have" },
+  ],
+} as unknown as NonNullable<StoredRun["jobProfile"]>;
+
+const STORED_COVERAGE = [
+  { requirementId: "req3", verdict: "unmet", evidenceIds: [], reason: "No Docker." },
+  { requirementId: "req1", verdict: "met", evidenceIds: ["exp1.b1"], reason: "Built Node.js services." },
+  { requirementId: "req2", verdict: "partially_met", evidenceIds: ["skill1"], reason: "Listed only." },
+] as unknown as Coverage[];
+
+/** Creates a Run and overwrites its stored state, to test the view without running the pipeline. */
+async function createRunWith(ctx: ReturnType<typeof setup>, patch: Partial<StoredRun>) {
+  const id = await ctx.service.createRun({ cv, jobDescription: "Backend developer" });
+  ctx.store.rows.set(id, { ...ctx.store.rows.get(id)!, ...patch });
+  return id;
+}
+
+const stepStates = (view: { steps: { key: string; state: string }[] }) =>
+  view.steps.filter((s) => s.state !== "pending").map((s) => `${s.key}:${s.state}`);
 
 const code = (error: unknown) => (error instanceof ApiError ? error.code : error);
 
@@ -128,7 +164,7 @@ describe("RunsService", () => {
   describe("extraction", () => {
     it("schedules extraction when a Run is created", async () => {
       const ctx = setup();
-      ctx.llm.enqueue("extract_job_profile", JOB_PROFILE).enqueue("extract_cv", fullCv());
+      ctx.llm.enqueue("extract_job_profile", JOB_PROFILE).enqueue("extract_cv", fullCv()).enqueue("assess_coverage", COVERAGE_ANSWER);
       await createExtractableRun(ctx);
       expect(ctx.tasks).toHaveLength(1);
       await ctx.settle();
@@ -146,21 +182,96 @@ describe("RunsService", () => {
       ]);
     });
 
-    it("saves both results and shows extract done with the job", async () => {
-      const ctx = setup();
+    it("sends Coverage to coverageLlm and extraction to llm", async () => {
+      const coverageLlm = new FakeLlmClient().enqueue("assess_coverage", COVERAGE_ANSWER);
+      const ctx = setup(undefined, coverageLlm);
       ctx.llm.enqueue("extract_job_profile", JOB_PROFILE).enqueue("extract_cv", fullCv());
       const id = await createExtractableRun(ctx);
+      await ctx.settle();
+
+      expect(ctx.llm.calls.map((c) => c.name)).toEqual(["extract_job_profile", "extract_cv"]);
+      expect(coverageLlm.calls.map((c) => c.name)).toEqual(["assess_coverage"]);
+      expect(ctx.store.rows.get(id)?.status).toBe("scored");
+    });
+
+    it("uses llm for Coverage when no coverageLlm is given", async () => {
+      const ctx = setup();
+      ctx.llm.enqueue("extract_job_profile", JOB_PROFILE).enqueue("extract_cv", fullCv()).enqueue("assess_coverage", COVERAGE_ANSWER);
+      await createExtractableRun(ctx);
+      await ctx.settle();
+
+      expect(ctx.llm.calls.map((c) => c.name)).toContain("assess_coverage");
+    });
+
+    it("saves both results and the Coverage, then shows the Run as scored", async () => {
+      const ctx = setup();
+      ctx.llm.enqueue("extract_job_profile", JOB_PROFILE).enqueue("extract_cv", fullCv()).enqueue("assess_coverage", COVERAGE_ANSWER);
+      const id = await createExtractableRun(ctx);
+      const order: string[] = [];
+      const { saveExtraction, saveCoverage } = ctx.store;
+      ctx.store.saveExtraction = async (...args) => {
+        order.push("saveExtraction");
+        return saveExtraction.apply(ctx.store, args);
+      };
+      ctx.store.saveCoverage = async (...args) => {
+        order.push("saveCoverage");
+        return saveCoverage.apply(ctx.store, args);
+      };
       await ctx.settle();
 
       const row = ctx.store.rows.get(id)!;
       expect(row.cv?.experience[0]?.id).toBe("exp1");
       expect(row.jobProfile?.requirements[0]?.id).toBe("req1");
-      expect(ctx.llm.calls.map((c) => c.name)).toEqual(["extract_job_profile", "extract_cv"]);
+      expect(row.coverage).toHaveLength(1);
+      expect(order).toEqual(["saveExtraction", "saveCoverage"]);
+      expect(ctx.llm.calls.map((c) => c.name)).toEqual(["extract_job_profile", "extract_cv", "assess_coverage"]);
 
       const view = await ctx.service.getRunView(id);
-      expect(view.status).toBe("extracting");
+      expect(view.status).toBe("scored");
+      if (view.status !== "scored") return;
+      expect(view.score).toBe(100);
       expect(view.job).toEqual({ title: "Backend Engineer", company: "Acme" });
-      expect(view.steps.find((s) => s.key === "extract")?.state).toBe("done");
+      expect(stepStates(view)).toEqual(["parse:done", "extract:done", "coverage:done"]);
+    });
+
+    it("fails with COVERAGE_FAILED after two invalid Coverage answers, keeping the stored extraction", async () => {
+      const ctx = setup();
+      ctx.llm
+        .enqueue("extract_job_profile", JOB_PROFILE)
+        .enqueue("extract_cv", fullCv())
+        .enqueue("assess_coverage", new LlmSchemaError("bad", ["a: wrong"]), new LlmSchemaError("bad", ["b: wrong"]));
+      const id = await createExtractableRun(ctx);
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      await ctx.settle();
+      const logged = spy.mock.calls.map((c) => c.map(String).join(" "));
+      spy.mockRestore();
+
+      const row = ctx.store.rows.get(id)!;
+      expect(row.cv).not.toBeNull();
+      expect(row.jobProfile).not.toBeNull();
+      expect(row.coverage).toBeNull();
+      const view = await ctx.service.getRunView(id);
+      expect(view.status).toBe("failed");
+      if (view.status !== "failed") return;
+      expect(view.error.code).toBe("COVERAGE_FAILED");
+      expect(stepStates(view)).toEqual(["parse:done", "extract:done", "coverage:failed"]);
+      expect(logged).toEqual([`Run ${id}: pipeline failed (COVERAGE_FAILED) CoverageError, 1 issues`]);
+    });
+
+    it("turns LlmUnavailableError during Coverage into INTERNAL", async () => {
+      const ctx = setup();
+      ctx.llm
+        .enqueue("extract_job_profile", JOB_PROFILE)
+        .enqueue("extract_cv", fullCv())
+        .enqueue("assess_coverage", new LlmUnavailableError("model down"));
+      const id = await createExtractableRun(ctx);
+      await ctx.settle();
+
+      const view = await ctx.service.getRunView(id);
+      expect(view.status).toBe("failed");
+      if (view.status !== "failed") return;
+      expect(view.error.code).toBe("INTERNAL");
+      expect(stepStates(view)).toEqual(["parse:done", "extract:done", "coverage:failed"]);
     });
 
     it.each([
@@ -180,7 +291,7 @@ describe("RunsService", () => {
       expect(view.error.code).toBe(expected);
       expect(view.error.message).not.toContain("boom");
       expect(view.job).toBeNull();
-      expect(view.steps.find((s) => s.key === "extract")?.state).toBe("done");
+      expect(view.steps.find((s) => s.key === "extract")?.state).toBe("failed");
       expect(ctx.llm.calls.map((c) => c.name)).toEqual(["extract_job_profile"]);
     });
 
@@ -193,6 +304,18 @@ describe("RunsService", () => {
       expect((await ctx.service.getRunView(id)).status).toBe("failed");
     });
 
+    it("never throws when saving the Coverage fails", async () => {
+      const ctx = setup();
+      ctx.llm.enqueue("extract_job_profile", JOB_PROFILE).enqueue("extract_cv", fullCv()).enqueue("assess_coverage", COVERAGE_ANSWER);
+      await createExtractableRun(ctx);
+      ctx.store.saveCoverage = async () => {
+        throw new Error("db down");
+      };
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      await expect(ctx.settle()).resolves.toBeUndefined();
+      spy.mockRestore();
+    });
+
     it("never throws, even when the store fails or the Run is gone", async () => {
       const ctx = setup();
       ctx.llm.enqueue("extract_job_profile", new Error("boom"));
@@ -202,7 +325,7 @@ describe("RunsService", () => {
       };
       await expect(ctx.settle()).resolves.toBeUndefined();
 
-      await expect(ctx.service.extractRun("00000000-0000-4000-8000-000000000000" as RunId)).resolves.toBeUndefined();
+      await expect(ctx.service.runPipeline("00000000-0000-4000-8000-000000000000" as RunId)).resolves.toBeUndefined();
       expect(id).toBeDefined();
     });
 
@@ -243,7 +366,70 @@ describe("RunsService", () => {
       await ctx.settle();
       const calls = spy.mock.calls.map((c) => c.map(String).join(" "));
       spy.mockRestore();
-      expect(calls).toEqual([`Run ${id}: extraction failed (EXTRACTION_FAILED) ExtractionError, 1 issues`]);
+      expect(calls).toEqual([`Run ${id}: pipeline failed (EXTRACTION_FAILED) ExtractionError, 1 issues`]);
+    });
+  });
+
+  describe("run view", () => {
+    const failure = { code: "COVERAGE_FAILED", message: "m" } as const;
+
+    it("extracting, no results: extract running, no job", async () => {
+      const ctx = setup();
+      const view = await ctx.service.getRunView(await createRunWith(ctx, {}));
+      expect(view.status).toBe("extracting");
+      expect(view.job).toBeNull();
+      expect(stepStates(view)).toEqual(["parse:done", "extract:running"]);
+    });
+
+    it("extracting, results stored: extract done, coverage running, job shown", async () => {
+      const ctx = setup();
+      const id = await createRunWith(ctx, { cv: assignCvIds(fullCv()), jobProfile: STORED_JOB_PROFILE });
+      const view = await ctx.service.getRunView(id);
+      expect(view.status).toBe("extracting");
+      expect(view.job).toEqual({ title: "Backend Engineer", company: "Acme" });
+      expect(stepStates(view)).toEqual(["parse:done", "extract:done", "coverage:running"]);
+    });
+
+    it("scored: all three steps done, rounded score, requirements in Job Profile order", async () => {
+      const ctx = setup();
+      const id = await createRunWith(ctx, {
+        status: "scored",
+        cv: assignCvIds(fullCv()),
+        jobProfile: STORED_JOB_PROFILE,
+        coverage: STORED_COVERAGE,
+      });
+      const view = await ctx.service.getRunView(id);
+      expect(view.status).toBe("scored");
+      if (view.status !== "scored") return;
+      // 100 x (3 + 1.5 + 0) / 7 = 64.28...
+      expect(view.score).toBe(64);
+      expect(view.job).toEqual({ title: "Backend Engineer", company: "Acme" });
+      expect(stepStates(view)).toEqual(["parse:done", "extract:done", "coverage:done"]);
+      expect(view.requirements).toEqual([
+        { id: "req1", text: "Node.js", importance: "must_have", verdict: "met", evidenceIds: ["exp1.b1"], reason: "Built Node.js services." },
+        { id: "req2", text: "PostgreSQL", importance: "must_have", verdict: "partially_met", evidenceIds: ["skill1"], reason: "Listed only." },
+        { id: "req3", text: "Docker", importance: "nice_to_have", verdict: "unmet", evidenceIds: [], reason: "No Docker." },
+      ]);
+    });
+
+    it("failed before extraction was stored: extract failed, no job", async () => {
+      const ctx = setup();
+      const id = await createRunWith(ctx, { status: "failed", error: { code: "EXTRACTION_FAILED", message: "m" } });
+      const view = await ctx.service.getRunView(id);
+      expect(view.status).toBe("failed");
+      expect(view.job).toBeNull();
+      expect(stepStates(view)).toEqual(["parse:done", "extract:failed"]);
+    });
+
+    it("failed with extraction stored: coverage failed, extract done", async () => {
+      const ctx = setup();
+      const id = await createRunWith(ctx, { status: "failed", cv: assignCvIds(fullCv()), jobProfile: STORED_JOB_PROFILE, error: failure });
+      const view = await ctx.service.getRunView(id);
+      expect(view.status).toBe("failed");
+      if (view.status !== "failed") return;
+      expect(view.error.code).toBe("COVERAGE_FAILED");
+      expect(view.job).toEqual({ title: "Backend Engineer", company: "Acme" });
+      expect(stepStates(view)).toEqual(["parse:done", "extract:done", "coverage:failed"]);
     });
   });
 });

@@ -8,8 +8,8 @@ datasource db {
   schemas  = ["app"]
 }
 
-// Run metadata only (ADR 0003). cv_text, job_description_text, cv, job_profile, error_code and error_message are
-// transitional (ADR 0003, slice 2 extension): slice 4 moves the data into the graph state and drops them.
+// Run metadata only (ADR 0003). cv_text, job_description_text, cv, job_profile, coverage, error_code and error_message are
+// transitional (ADR 0003, slice 2 and 3 extensions): slice 4 moves the data into the graph state and drops them.
 model Run {
   id                 String   @id @db.Uuid
   status             String
@@ -20,6 +20,7 @@ model Run {
   jobDescriptionText String   @map("job_description_text")
   cv                 Json?    @db.JsonB
   jobProfile         Json?    @map("job_profile") @db.JsonB
+  coverage           Json?    @db.JsonB
   errorCode          String?  @map("error_code")
   errorMessage       String?  @map("error_message")
 

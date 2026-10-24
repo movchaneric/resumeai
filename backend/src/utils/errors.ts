@@ -10,9 +10,10 @@ const STATUS: Record<ApiErrorCode, number> = {
   TOO_MANY_PAGES: 422,
   SCANNED_PDF: 422,
   UNREADABLE_FILE: 422,
-  // The next two are Run failures, never HTTP responses; STATUS is keyed by every code.
+  // The next three are Run failures, never HTTP responses; STATUS is keyed by every code.
   EXTRACTION_FAILED: 422,
   NO_REQUIREMENTS: 422,
+  COVERAGE_FAILED: 422,
   INTERNAL: 500,
   BAD_REQUEST: 400,
   RUN_NOT_FOUND: 404,

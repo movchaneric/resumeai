@@ -26,6 +26,8 @@ export type RunsDeps = {
   store: RunStore;
   config: Config;
   llm: LlmClient;
+  /** Judges Coverage. Falls back to `llm` when unset. */
+  coverageLlm?: LlmClient;
   now?: () => Date;
   /** Starts a task without awaiting it. Tests pass a version that collects the promises. */
   runInBackground?: (task: () => Promise<void>) => void;
@@ -100,6 +102,8 @@ export class RunsService {
    */
   async runPipeline(id: RunId): Promise<void> {
     const { store, llm } = this.deps;
+    // Two clients: extraction is copying (checked by code), Coverage is judgement and may use a stronger model.
+    const coverageLlm = this.deps.coverageLlm ?? llm;
     try {
       const run = await store.get(id);
       if (!run) return;
@@ -109,7 +113,7 @@ export class RunsService {
           const { cv, softMismatches } = await extractCv(llm, run.cvText);
           console.debug(`Run ${id}: extraction done, ${softMismatches} soft mismatches`);
           await store.saveExtraction(id, { cv, jobProfile });
-          const { coverage } = await assessCoverage(llm, cv, jobProfile.requirements);
+          const { coverage } = await assessCoverage(coverageLlm, cv, jobProfile.requirements);
           await store.saveCoverage(id, coverage);
           span.setAttribute("score", matchScore(jobProfile.requirements, coverage));
         });

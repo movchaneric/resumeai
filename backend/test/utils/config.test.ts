@@ -26,7 +26,7 @@ describe("loadConfig", () => {
 
   it("applies the LLM and tracing defaults", () => {
     const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" });
-    expect(config.llm).toEqual({ apiKey: "k", baseUrl: undefined, model: "gpt-4o-mini", contextTokens: 128_000, timeoutMs: 60_000, reasoningEffort: undefined });
+    expect(config.llm).toEqual({ apiKey: "k", baseUrl: undefined, model: "gpt-4.1-mini", coverageModel: "gpt-4.1-mini", contextTokens: 128_000, timeoutMs: 60_000, reasoningEffort: undefined });
     expect(config.tracing).toEqual({ traceContent: false, endpoint: undefined, projectName: undefined });
   });
 
@@ -48,6 +48,13 @@ describe("loadConfig", () => {
   it("passes LLM_REASONING_EFFORT through and rejects an empty value", () => {
     expect(loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", LLM_REASONING_EFFORT: "none" }).llm.reasoningEffort).toBe("none");
     expect(() => loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", LLM_REASONING_EFFORT: "" })).toThrow(/LLM_REASONING_EFFORT/);
+  });
+
+  it("defaults coverageModel to LLM_MODEL, lets LLM_COVERAGE_MODEL override it, and rejects an empty value", () => {
+    const base = { DATABASE_URL: "x", OPENAI_API_KEY: "k" };
+    expect(loadConfig({ ...base, LLM_MODEL: "m" }).llm.coverageModel).toBe("m");
+    expect(loadConfig({ ...base, LLM_MODEL: "m", LLM_COVERAGE_MODEL: "big" }).llm).toMatchObject({ model: "m", coverageModel: "big" });
+    expect(() => loadConfig({ ...base, LLM_COVERAGE_MODEL: "" })).toThrow(/LLM_COVERAGE_MODEL/);
   });
 
   it("fails fast when OPENAI_API_KEY is missing", () => {

@@ -27,7 +27,7 @@ describe("collectItemIds", () => {
     expect([...collectItemIds(cv())].sort()).toEqual(
       [
         "contact", "summary", "exp1", "exp1.b1", "exp1.b2", "exp2", "exp2.b1", "edu1", "edu1.b1",
-        "skill1", "skill2", "proj1", "proj1.b1", "cert1", "sec1", "sec1.i1", "sec1.i2",
+        "skill1", "skill2", "proj1", "proj1.b1", "cert1", "sec1.i1", "sec1.i2",
       ].sort(),
     );
   });
@@ -67,6 +67,13 @@ describe("coverageIssues", () => {
       verdicts: [verdict("req1", "met", ["exp9.b1"]), verdict("req2", "unmet", [])],
     };
     expect(coverageIssues(requirements, cv(), answer)).toEqual(["req1: Evidence ID exp9.b1 does not exist in the CV"]);
+  });
+
+  it("rejects a section ID as Evidence but accepts its items", () => {
+    const answer: CoverageAnswer = {
+      verdicts: [verdict("req1", "met", ["sec1"]), verdict("req2", "met", ["sec1.i1"])],
+    };
+    expect(coverageIssues(requirements, cv(), answer)).toEqual(["req1: Evidence ID sec1 does not exist in the CV"]);
   });
 
   it("flags met and partially_met with no Evidence, but not unmet", () => {

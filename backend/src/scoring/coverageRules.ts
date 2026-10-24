@@ -19,7 +19,10 @@ export function isClaimId(id: string): boolean {
   return id === "summary" || /^skill[0-9]+$/.test(id);
 }
 
-/** Every Item ID in the CV: the contact, the summary, each Item and each bullet. */
+/**
+ * Every Item ID in the CV: the contact, the summary, each Item and each bullet.
+ * An additional section's own ID (`secN`) is left out: `renderCv` prints only item lines, so the model never sees it.
+ */
 export function collectItemIds(cv: Cv): Set<string> {
   const ids = new Set<string>([cv.contact.id]);
   if (cv.summary) ids.add(cv.summary.id);
@@ -32,7 +35,6 @@ export function collectItemIds(cv: Cv): Set<string> {
   for (const skill of cv.skills) ids.add(skill.id);
   for (const cert of cv.certifications) ids.add(cert.id);
   for (const section of cv.additionalSections) {
-    ids.add(section.id);
     for (const item of section.items) ids.add(item.id);
   }
   return ids;

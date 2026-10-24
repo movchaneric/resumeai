@@ -66,6 +66,15 @@ Settled in a grilling session (2026-10-23 and 24) before implementation. Scope c
 - **The model is chosen by measuring:** run the dev script's `--check` with gpt-4o-mini, gpt-4.1-mini and gpt-6-luna on the owner's CV (about 2 cents in total), and keep the cheapest that passes the answer key. gpt-4.1-mini is the safe fallback.
 - Prices from OpenAI's pricing page (2026-10-24), per 1M input/output tokens: gpt-4.1-nano $0.10/$0.40, gpt-6-luna $0.10/$0.50, gpt-4o-mini $0.15/$0.60, gpt-4.1-mini $0.40/$1.60.
 - Estimated cost per Run: about 6k input and 3k output tokens, under $0.01 on any of these. Recheck it against Phoenix's token counts after the first Runs. Slice 4's tailoring loop will multiply it.
+- **Measured (2026-10-24), owner's CV, `--check` against the answer key:**
+
+  | Model | `--check` | Job Profile + CV time |
+  |---|---|---|
+  | gpt-4o-mini | 2 mismatches in each of 2 runs, different each time; one run dropped the current job's start date and lost an education entry | about 12 s |
+  | gpt-4.1-mini | 1 mismatch in both runs: an education degree shortened to a substring that still appears in the CV (no fact lost) | about 9 s |
+  | gpt-6-luna | `400 invalid model ID` on Chat Completions, although the key lists the model (likely Responses-API only); not pursued | |
+
+  **Chosen: gpt-4.1-mini**, about $0.007 per Run and about 18x faster than local Qwen. gpt-4o-mini is rejected for losing facts.
 - `LLM_TIMEOUT_MS` drops to about 60 s for hosted models; Ollama keeps 180 s in its `.env.example` block.
 - Rejected for now: the Gemini free tier (Google's pricing page says free-tier content may be used to improve their products, which rules it out for a CV), and Groq (strict JSON-schema output not confirmed).
 - Privacy: the owner's CV now goes to OpenAI's API. This was the owner's informed choice; Ollama stays available through config.

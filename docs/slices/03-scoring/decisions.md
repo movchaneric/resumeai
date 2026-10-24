@@ -43,6 +43,8 @@ Settled in a grilling session (2026-10-23 and 24) before implementation. Scope c
 - Additional sections count as shown in use because they hold real activity (service, volunteering). A section that is really a second skills list is accepted for now.
 - Language Requirements are exempt because a listed language is how a CV normally proves one.
 
+**Unmet cites nothing (added after the Postman run).** Two `unmet` verdicts still cited Evidence (the job, a skills entry). Our code clears the Evidence list on every `unmet` verdict and leaves the verdict, the reason and the score unchanged. No retry, for the same reason as the downgrade: it's free, while a retry costs a full call. Unknown Evidence IDs on an `unmet` are still a retry issue (ticket 09).
+
 **Durations.** A Requirement such as "3+ years" is met only when the dates of the cited Items prove the duration. When the dates are years only, or don't add up, the verdict is partially met with that reason. This lives in the prompt only, with no code check. It settles slice 2's bare-year item: partially met gives no Question (Questions are for unmet must-haves), which is the intended outcome.
 
 ## Match Score

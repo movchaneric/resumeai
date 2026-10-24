@@ -4,10 +4,10 @@ import { ChangeSchema } from "./change.js";
 import { CoverageSchema, CoverageVerdictSchema } from "./coverage.js";
 import { CvSchema } from "./cv.js";
 import { QuestionSchema, UserEvidenceSchema } from "./evidence.js";
-import { ImportanceSchema } from "./job-profile.js";
+import { ImportanceSchema, RequirementSchema } from "./job-profile.js";
 
 export const StepKeySchema = z.enum(["parse", "extract", "coverage", "questions", "tailor", "review", "export"]);
-export const StepStateSchema = z.enum(["pending", "running", "done"]);
+export const StepStateSchema = z.enum(["pending", "running", "done", "failed"]);
 
 export const ExitReasonSchema = z.enum(["ceiling", "plateau", "max_iterations", "target_reached"]);
 export type ExitReason = z.infer<typeof ExitReasonSchema>;
@@ -21,6 +21,7 @@ export const RunErrorCodeSchema = z.enum([
   "UNREADABLE_FILE",
   "EXTRACTION_FAILED",
   "NO_REQUIREMENTS",
+  "COVERAGE_FAILED",
   "INTERNAL",
 ]);
 export type RunErrorCode = z.infer<typeof RunErrorCodeSchema>;
@@ -47,6 +48,15 @@ export const RequirementCoverageSummarySchema = z.object({
 });
 export type RequirementCoverageSummary = z.infer<typeof RequirementCoverageSummarySchema>;
 
+/**
+ * One row of the `scored` Run: a Requirement with its Coverage verdict, evidence and reason.
+ * Transitional until slice 4 replaces `scored` with the questions and tailoring statuses.
+ */
+export const ScoredRequirementSchema = RequirementSchema.pick({ id: true, text: true, importance: true }).extend(
+  CoverageSchema.pick({ verdict: true, evidenceIds: true, reason: true }).shape,
+);
+export type ScoredRequirement = z.infer<typeof ScoredRequirementSchema>;
+
 /** Data shared by `awaiting_review` and `completed`. */
 const reviewSummaryFields = {
   score: beforeAfter(ScoreSchema),
@@ -61,6 +71,13 @@ const reviewSummaryFields = {
 export const RunViewSchema = z.discriminatedUnion("status", [
   z.object({ ...runViewCommon, status: z.literal("parsing") }),
   z.object({ ...runViewCommon, status: z.literal("extracting") }),
+  // Transitional (ADR 0003, slice 3): Coverage is done and the Match Score is shown; slice 4 replaces this status.
+  z.object({
+    ...runViewCommon,
+    status: z.literal("scored"),
+    score: ScoreSchema,
+    requirements: z.array(ScoredRequirementSchema),
+  }),
   z.object({ ...runViewCommon, status: z.literal("awaiting_answers"), questions: z.array(QuestionSchema) }),
   z.object({
     ...runViewCommon,

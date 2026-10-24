@@ -8,6 +8,7 @@ import { ImportanceSchema, RequirementSchema } from "./job-profile.js";
 
 export const StepKeySchema = z.enum(["parse", "extract", "coverage", "questions", "tailor", "review", "export"]);
 export const StepStateSchema = z.enum(["pending", "running", "done", "failed"]);
+export type StepState = z.infer<typeof StepStateSchema>;
 
 export const ExitReasonSchema = z.enum(["ceiling", "plateau", "max_iterations", "target_reached"]);
 export type ExitReason = z.infer<typeof ExitReasonSchema>;

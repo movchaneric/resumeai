@@ -5,6 +5,7 @@ import {
   StepKeySchema,
   type RunErrorCode,
   type RunId,
+  type StepState,
   type RunView,
 } from "@resume-ai/shared";
 import { assessCoverage } from "@/scoring/assessCoverage.js";
@@ -37,7 +38,7 @@ function defaultRunInBackground(task: () => Promise<void>): void {
 }
 
 /** User-facing failure messages (plan, "Failure codes"). The real cause is logged, never shown. */
-const FAILURE_MESSAGES: Record<"EXTRACTION_FAILED" | "NO_REQUIREMENTS" | "COVERAGE_FAILED" | "INTERNAL", string> = {
+const FAILURE_MESSAGES: Record<Extract<RunErrorCode, "EXTRACTION_FAILED" | "NO_REQUIREMENTS" | "COVERAGE_FAILED" | "INTERNAL">, string> = {
   EXTRACTION_FAILED: "We couldn't read the structure of your CV or job description. Try again, or upload a DOCX.",
   NO_REQUIREMENTS: "We couldn't find any requirements in this job description. Paste the full posting.",
   COVERAGE_FAILED: "We couldn't assess your CV against this job. Try again.",
@@ -153,8 +154,7 @@ function toRunView(run: StoredRun): RunView {
   const { cv, jobProfile, coverage } = run;
   const extracted = cv !== null && jobProfile !== null;
   const job = extracted ? { title: jobProfile.title, company: jobProfile.company } : null;
-  type State = "pending" | "running" | "done" | "failed";
-  const steps = (extract: State, coverageState: State) =>
+  const steps = (extract: StepState, coverageState: StepState) =>
     StepKeySchema.options.map((key) => ({
       key,
       state: key === "parse" ? "done" : key === "extract" ? extract : key === "coverage" ? coverageState : "pending",

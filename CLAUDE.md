@@ -24,7 +24,7 @@ backend/src/
   parsing/       CV file parsing (file to text, no model)
   extraction/    Extraction chains, ID assignment, verbatim check. Imports `LlmClient` and `@/utils/spans.js`, never LangChain.
   scoring/       Coverage chain, Match Score, weights. Imports `LlmClient` and `@/utils/spans.js`, never LangChain.
-  prompts/       pure renderers that turn the CV and Requirements into prompt text with IDs
+  prompts/       pure renderers that turn the CV and Requirements into prompt text with IDs. Imports only shared types (`@resume-ai/shared`).
   llm/           the `LlmClient` interface and its LangChain implementation. Only `llm/` imports LangChain (one exception below).
   utils/         config, db client, errors, tracing (`tracing.ts`), named spans (`spans.ts`)
 backend/test/    mirrors src (routes/, services/, parsing/, prompts/, scoring/, utils/); fixtures live in test/fixtures

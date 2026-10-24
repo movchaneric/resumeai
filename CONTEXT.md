@@ -69,9 +69,13 @@ A single skill, qualification, or responsibility extracted from the Job Descript
 _Avoid_: Keyword, criterion
 
 **Requirement Coverage**:
-A judgment of how well the CV satisfies one Requirement (met, partially met, unmet), with the CV evidence cited.
+A judgment of how well the CV satisfies one Requirement (met, partially met, unmet), with the CV evidence cited. A Requirement is met only when an Item shows it in use; a Claim alone makes it partially met at most, except for a language, which a Claim can meet. A duration ("3+ years") that the cited Items' dates cannot prove is partially met.
 _Avoid_: Match, hit
 
+**Claim**:
+A mention of a skill or quality in the candidate's skills list or summary, without an Item that shows it in use (a job, project, education entry, certification, or an entry in another section).
+_Avoid_: Keyword, buzzword, self-reported skill
+
 **Match Score**:
-A reproducible number aggregated deterministically from all Requirement Coverage verdicts, weighting must-haves above nice-to-haves. It is not an ATS score and is not keyword-based.
+A reproducible number from 0 to 100, aggregated deterministically from all Requirement Coverage verdicts, weighting must-haves above nice-to-haves. It is not an ATS score and is not keyword-based.
 _Avoid_: ATS score, rating, fit

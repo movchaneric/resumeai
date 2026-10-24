@@ -1,6 +1,4 @@
-import type { Span } from "@opentelemetry/api";
 import { randomUUID } from "node:crypto";
-import { SemanticConventions } from "@arizeai/openinference-semantic-conventions";
 import {
   RunIdSchema,
   RunViewSchema,
@@ -18,7 +16,7 @@ import { extractJobProfile } from "@/extraction/extractJobProfile.js";
 import type { LlmClient } from "@/llm/llmClient.js";
 import type { Config } from "@/utils/config.js";
 import { ApiError } from "@/utils/errors.js";
-import { withSpan } from "@/utils/spans.js";
+import { withSessionSpan } from "@/utils/spans.js";
 import { parseCv, stripNul } from "@/parsing/parseCv.js";
 import type { RunStore, StoredRun } from "@/stores/runs.js";
 
@@ -51,11 +49,6 @@ function failureCode(error: unknown): keyof typeof FAILURE_MESSAGES {
   if (error instanceof ExtractionError) return "EXTRACTION_FAILED";
   if (error instanceof CoverageError) return "COVERAGE_FAILED";
   return "INTERNAL";
-}
-
-/** Opens the `pipeline` root span for a Run; every chain span started inside nests under it. */
-function withPipelineSpan(id: RunId, fn: (span: Span) => Promise<void>): Promise<void> {
-  return withSpan("pipeline", fn, { attributes: { [SemanticConventions.SESSION_ID]: id } });
 }
 
 export type CreateRunInput = { cv: Buffer; jobDescription: unknown };
@@ -108,7 +101,7 @@ export class RunsService {
       const run = await store.get(id);
       if (!run) return;
       try {
-        await withPipelineSpan(id, async (span) => {
+        await withSessionSpan("pipeline", id, async (span) => {
           const jobProfile = await extractJobProfile(llm, run.jobDescriptionText);
           const { cv, softMismatches } = await extractCv(llm, run.cvText);
           console.debug(`Run ${id}: extraction done, ${softMismatches} soft mismatches`);

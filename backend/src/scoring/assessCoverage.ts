@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CoverageVerdictSchema } from "@resume-ai/shared";
 import type { Coverage, Cv, Requirement } from "@resume-ai/shared";
 import { LlmSchemaError, type LlmClient, type LlmMessage } from "@/llm/llmClient.js";
 import { renderCv, renderRequirements } from "@/prompts/renderCv.js";
@@ -37,7 +38,7 @@ const CoverageAnswerSchema = z.object({
       requirementId: z.string(),
       reason: z.string().describe("1 to 2 sentences, written before deciding"),
       evidenceIds: z.string().array().describe("Item IDs exactly as shown in brackets"),
-      verdict: z.enum(["met", "partially_met", "unmet"]),
+      verdict: CoverageVerdictSchema,
     }),
   ),
 }) satisfies z.ZodType<CoverageAnswer>;
@@ -83,7 +84,7 @@ export async function assessCoverage(
 
     const { coverage, downgrades } = applyClaimRule(requirements, result.answer);
     span.setAttribute("coverage.downgrades", downgrades);
-    for (const verdict of ["met", "partially_met", "unmet"] as const) {
+    for (const verdict of CoverageVerdictSchema.options) {
       span.setAttribute(`coverage.${verdict}`, coverage.filter((c) => c.verdict === verdict).length);
     }
     return { coverage, downgrades };

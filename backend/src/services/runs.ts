@@ -1,12 +1,11 @@
-import type { Span } from "@opentelemetry/api";
 import { randomUUID } from "node:crypto";
-import { SemanticConventions } from "@arizeai/openinference-semantic-conventions";
 import {
   RunIdSchema,
   RunViewSchema,
   StepKeySchema,
   type RunErrorCode,
   type RunId,
+  type StepState,
   type RunView,
 } from "@resume-ai/shared";
 import { assessCoverage } from "@/scoring/assessCoverage.js";
@@ -18,7 +17,7 @@ import { extractJobProfile } from "@/extraction/extractJobProfile.js";
 import type { LlmClient } from "@/llm/llmClient.js";
 import type { Config } from "@/utils/config.js";
 import { ApiError } from "@/utils/errors.js";
-import { withSpan } from "@/utils/spans.js";
+import { withSessionSpan } from "@/utils/spans.js";
 import { parseCv, stripNul } from "@/parsing/parseCv.js";
 import type { RunStore, StoredRun } from "@/stores/runs.js";
 
@@ -39,7 +38,7 @@ function defaultRunInBackground(task: () => Promise<void>): void {
 }
 
 /** User-facing failure messages (plan, "Failure codes"). The real cause is logged, never shown. */
-const FAILURE_MESSAGES: Record<"EXTRACTION_FAILED" | "NO_REQUIREMENTS" | "COVERAGE_FAILED" | "INTERNAL", string> = {
+const FAILURE_MESSAGES: Record<Extract<RunErrorCode, "EXTRACTION_FAILED" | "NO_REQUIREMENTS" | "COVERAGE_FAILED" | "INTERNAL">, string> = {
   EXTRACTION_FAILED: "We couldn't read the structure of your CV or job description. Try again, or upload a DOCX.",
   NO_REQUIREMENTS: "We couldn't find any requirements in this job description. Paste the full posting.",
   COVERAGE_FAILED: "We couldn't assess your CV against this job. Try again.",
@@ -51,11 +50,6 @@ function failureCode(error: unknown): keyof typeof FAILURE_MESSAGES {
   if (error instanceof ExtractionError) return "EXTRACTION_FAILED";
   if (error instanceof CoverageError) return "COVERAGE_FAILED";
   return "INTERNAL";
-}
-
-/** Opens the `pipeline` root span for a Run; every chain span started inside nests under it. */
-function withPipelineSpan(id: RunId, fn: (span: Span) => Promise<void>): Promise<void> {
-  return withSpan("pipeline", fn, { attributes: { [SemanticConventions.SESSION_ID]: id } });
 }
 
 export type CreateRunInput = { cv: Buffer; jobDescription: unknown };
@@ -108,7 +102,7 @@ export class RunsService {
       const run = await store.get(id);
       if (!run) return;
       try {
-        await withPipelineSpan(id, async (span) => {
+        await withSessionSpan("pipeline", id, async (span) => {
           const jobProfile = await extractJobProfile(llm, run.jobDescriptionText);
           const { cv, softMismatches } = await extractCv(llm, run.cvText);
           console.debug(`Run ${id}: extraction done, ${softMismatches} soft mismatches`);
@@ -160,8 +154,7 @@ function toRunView(run: StoredRun): RunView {
   const { cv, jobProfile, coverage } = run;
   const extracted = cv !== null && jobProfile !== null;
   const job = extracted ? { title: jobProfile.title, company: jobProfile.company } : null;
-  type State = "pending" | "running" | "done" | "failed";
-  const steps = (extract: State, coverageState: State) =>
+  const steps = (extract: StepState, coverageState: StepState) =>
     StepKeySchema.options.map((key) => ({
       key,
       state: key === "parse" ? "done" : key === "extract" ? extract : key === "coverage" ? coverageState : "pending",

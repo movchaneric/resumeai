@@ -234,7 +234,7 @@ describe("RunsService", () => {
       if (view.status !== "failed") return;
       expect(view.error.code).toBe("COVERAGE_FAILED");
       expect(stepStates(view)).toEqual(["parse:done", "extract:done", "coverage:failed"]);
-      expect(logged).toEqual([`Run ${id}: extraction failed (COVERAGE_FAILED) CoverageError, 1 issues`]);
+      expect(logged).toEqual([`Run ${id}: pipeline failed (COVERAGE_FAILED) CoverageError, 1 issues`]);
     });
 
     it("turns LlmUnavailableError during Coverage into INTERNAL", async () => {
@@ -345,7 +345,7 @@ describe("RunsService", () => {
       await ctx.settle();
       const calls = spy.mock.calls.map((c) => c.map(String).join(" "));
       spy.mockRestore();
-      expect(calls).toEqual([`Run ${id}: extraction failed (EXTRACTION_FAILED) ExtractionError, 1 issues`]);
+      expect(calls).toEqual([`Run ${id}: pipeline failed (EXTRACTION_FAILED) ExtractionError, 1 issues`]);
     });
   });
 

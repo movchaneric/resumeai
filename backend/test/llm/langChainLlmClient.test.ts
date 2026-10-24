@@ -21,7 +21,7 @@ function completion(content: string) {
   );
 }
 
-function client(fetchImpl: typeof fetch, overrides: Partial<typeof options> = {}) {
+function client(fetchImpl: typeof fetch, overrides: Partial<typeof options> & { reasoningEffort?: string } = {}) {
   return new LangChainLlmClient({ ...options, ...overrides }, fetchImpl);
 }
 
@@ -36,8 +36,30 @@ describe("LangChainLlmClient", () => {
     expect(body.response_format.type).toBe("json_schema");
     expect(body.response_format.json_schema.strict).toBe(true);
     expect(body.response_format.json_schema.name).toBe("who");
+    expect(body).not.toHaveProperty("reasoning_effort");
+    expect(body.temperature).toBe(0);
+  });
+
+  async function requestBody(overrides: Partial<{ reasoningEffort: string }>) {
+    let body: any;
+    const llm = client((async (_url: unknown, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      return completion('{"name":"Ada","age":36}');
+    }) as typeof fetch, overrides);
+    await llm.structured(Schema, messages, { name: "who" });
+    return body;
+  }
+
+  it('sends reasoning_effort "none" together with temperature 0', async () => {
+    const body = await requestBody({ reasoningEffort: "none" });
     expect(body.reasoning_effort).toBe("none");
     expect(body.temperature).toBe(0);
+  });
+
+  it("sends a reasoning effort other than none without temperature", async () => {
+    const body = await requestBody({ reasoningEffort: "low" });
+    expect(body.reasoning_effort).toBe("low");
+    expect(body).not.toHaveProperty("temperature");
   });
 
   it("maps invalid JSON to LlmSchemaError", async () => {

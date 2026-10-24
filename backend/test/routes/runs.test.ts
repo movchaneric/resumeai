@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RunIdSchema, RunViewSchema, type ExtractedCv, type ItemId, type RequirementId } from "@resume-ai/shared";
+import { RunIdSchema, RunViewSchema, type ExtractedCv } from "@resume-ai/shared";
 import request from "supertest";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "@/app.js";
@@ -9,6 +9,7 @@ import { loadConfig } from "@/utils/config.js";
 import { createPrisma } from "@/utils/db.js";
 import { RunStore } from "@/stores/runs.js";
 import { ExtractionError } from "@/extraction/errors.js";
+import { LlmSchemaError } from "@/llm/llmClient.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "../fixtures");
@@ -55,6 +56,11 @@ const extractedJob = {
   title: "Backend Developer",
   company: "Initech",
   requirements: [{ text: "Node.js", source: "Node.js", kind: "skill", importance: "must_have" }],
+};
+
+/** What a model would answer for `extractedJob` (one Requirement, `req1`) against `extractedCv`. */
+const coverageAnswer = {
+  verdicts: [{ requirementId: "req1", reason: "Built Node.js services.", evidenceIds: ["exp1.b1"], verdict: "met" }],
 };
 
 const JOB_DESCRIPTION = "We are hiring a backend developer with Node.js and PostgreSQL experience.";
@@ -143,22 +149,45 @@ describe("GET /runs/:id", () => {
     expect(view.job).toBeNull();
   });
 
-  it("shows the extracted state once the background task has finished", async () => {
-    llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv);
+  it("shows the Run as scored, with its score and requirements, once the pipeline has finished", async () => {
+    llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueue("assess_coverage", coverageAnswer);
     const { body } = await upload("cv.pdf");
     await settle();
 
     const res = await request(app).get(`/runs/${body.id}`);
     expect(res.status).toBe(200);
     const view = RunViewSchema.parse(res.body);
-    expect(view.status).toBe("extracting");
     expect(view.id).toBe(body.id);
-    expect(view.steps.find((s) => s.key === "parse")?.state).toBe("done");
-    expect(view.steps.find((s) => s.key === "extract")?.state).toBe("done");
+    expect(view.status).toBe("scored");
+    if (view.status !== "scored") return;
+    expect(view.score).toBe(100);
     expect(view.job).toEqual({ title: "Backend Developer", company: "Initech" });
+    expect(view.steps.map((s) => `${s.key}:${s.state}`)).toContain("coverage:done");
+    expect(view.requirements).toEqual([
+      { id: "req1", text: "Node.js", importance: "must_have", verdict: "met", evidenceIds: ["exp1.b1"], reason: "Built Node.js services." },
+    ]);
     const row = await store.get(RunIdSchema.parse(body.id));
     expect(row?.cv?.experience[0]?.id).toBe("exp1");
     expect(row?.jobProfile?.requirements[0]?.id).toBe("req1");
+  });
+
+  it("shows a failed Run with coverage failed when the Coverage answer stays invalid", async () => {
+    llm
+      .enqueue("extract_job_profile", extractedJob)
+      .enqueue("extract_cv", extractedCv)
+      .enqueue("assess_coverage", new LlmSchemaError("bad", ["a: wrong"]), new LlmSchemaError("bad", ["b: wrong"]));
+    const { body } = await upload("cv.pdf");
+    await settle();
+
+    const view = RunViewSchema.parse((await request(app).get(`/runs/${body.id}`)).body);
+    expect(view.status).toBe("failed");
+    if (view.status === "failed") expect(view.error.code).toBe("COVERAGE_FAILED");
+    expect(view.job).toEqual({ title: "Backend Developer", company: "Initech" });
+    expect(view.steps.filter((s) => s.state !== "pending").map((s) => `${s.key}:${s.state}`)).toEqual([
+      "parse:done",
+      "extract:done",
+      "coverage:failed",
+    ]);
   });
 
   it("shows a failed Run with the error code when extraction fails", async () => {
@@ -172,43 +201,6 @@ describe("GET /runs/:id", () => {
     if (view.status === "failed") expect(view.error.code).toBe("EXTRACTION_FAILED");
     expect(view.job).toBeNull();
     expect(view.steps.find((s) => s.key === "extract")?.state).toBe("failed");
-  });
-
-  it("shows a Run with coverage saved through the store as scored", async () => {
-    llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv);
-    const { body } = await upload("cv.pdf");
-    await settle();
-    const id = RunIdSchema.parse(body.id);
-    await store.saveCoverage(id, [
-      { requirementId: "req1" as RequirementId, verdict: "partially_met", evidenceIds: ["skill2" as ItemId], reason: "Listed only." },
-    ]);
-
-    const view = RunViewSchema.parse((await request(app).get(`/runs/${id}`)).body);
-    expect(view.status).toBe("scored");
-    if (view.status !== "scored") return;
-    expect(view.score).toBe(50);
-    expect(view.steps.find((s) => s.key === "coverage")?.state).toBe("done");
-    expect(view.requirements).toEqual([
-      { id: "req1", text: "Node.js", importance: "must_have", verdict: "partially_met", evidenceIds: ["skill2"], reason: "Listed only." },
-    ]);
-  });
-
-  it("shows a failed Run with extraction stored as coverage failed", async () => {
-    llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv);
-    const { body } = await upload("cv.pdf");
-    await settle();
-    const id = RunIdSchema.parse(body.id);
-    await store.markFailed(id, "COVERAGE_FAILED", "We couldn't assess your CV against this job. Try again.");
-
-    const view = RunViewSchema.parse((await request(app).get(`/runs/${id}`)).body);
-    expect(view.status).toBe("failed");
-    if (view.status === "failed") expect(view.error.code).toBe("COVERAGE_FAILED");
-    expect(view.job).toEqual({ title: "Backend Developer", company: "Initech" });
-    expect(view.steps.filter((s) => s.state !== "pending").map((s) => `${s.key}:${s.state}`)).toEqual([
-      "parse:done",
-      "extract:done",
-      "coverage:failed",
-    ]);
   });
 
   it("returns 404 for an unknown ID", async () => {

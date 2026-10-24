@@ -1,4 +1,6 @@
+import type { Span } from "@opentelemetry/api";
 import { randomUUID } from "node:crypto";
+import { SemanticConventions } from "@arizeai/openinference-semantic-conventions";
 import {
   RunIdSchema,
   RunViewSchema,
@@ -7,6 +9,8 @@ import {
   type RunId,
   type RunView,
 } from "@resume-ai/shared";
+import { assessCoverage } from "@/scoring/assessCoverage.js";
+import { CoverageError } from "@/scoring/errors.js";
 import { matchScore } from "@/scoring/matchScore.js";
 import { ExtractionError, NoRequirementsError } from "@/extraction/errors.js";
 import { extractCv } from "@/extraction/extractCv.js";
@@ -14,6 +18,7 @@ import { extractJobProfile } from "@/extraction/extractJobProfile.js";
 import type { LlmClient } from "@/llm/llmClient.js";
 import type { Config } from "@/utils/config.js";
 import { ApiError } from "@/utils/errors.js";
+import { withSpan } from "@/utils/spans.js";
 import { parseCv, stripNul } from "@/parsing/parseCv.js";
 import type { RunStore, StoredRun } from "@/stores/runs.js";
 
@@ -42,7 +47,13 @@ const FAILURE_MESSAGES: Record<"EXTRACTION_FAILED" | "NO_REQUIREMENTS" | "COVERA
 function failureCode(error: unknown): keyof typeof FAILURE_MESSAGES {
   if (error instanceof NoRequirementsError) return "NO_REQUIREMENTS";
   if (error instanceof ExtractionError) return "EXTRACTION_FAILED";
+  if (error instanceof CoverageError) return "COVERAGE_FAILED";
   return "INTERNAL";
+}
+
+/** Opens the `pipeline` root span for a Run; every chain span started inside nests under it. */
+function withPipelineSpan(id: RunId, fn: (span: Span) => Promise<void>): Promise<void> {
+  return withSpan("pipeline", fn, { attributes: { [SemanticConventions.SESSION_ID]: id } });
 }
 
 export type CreateRunInput = { cv: Buffer; jobDescription: unknown };
@@ -77,24 +88,31 @@ export class RunsService {
       cvText,
       jobDescriptionText,
     });
-    this.runInBackground(() => this.extractRun(run.id));
+    this.runInBackground(() => this.runPipeline(run.id));
     return run.id;
   }
 
   /**
-   * Extracts the Job Profile, then the CV, and stores the result or the failure on the Run.
+   * The background pipeline: extracts the Job Profile, then the CV, then assesses Coverage, storing each result
+   * as it arrives, or the failure on the Run. It runs under one `pipeline` root span (`session.id` = the Run id,
+   * `score` = the unrounded match score when it finishes).
    * It never throws: it runs detached from the request, so a failure has nowhere else to go.
    */
-  async extractRun(id: RunId): Promise<void> {
+  async runPipeline(id: RunId): Promise<void> {
     const { store, llm } = this.deps;
     try {
       const run = await store.get(id);
       if (!run) return;
       try {
-        const jobProfile = await extractJobProfile(llm, run.jobDescriptionText);
-        const { cv, softMismatches } = await extractCv(llm, run.cvText);
-        console.debug(`Run ${id}: extraction done, ${softMismatches} soft mismatches`);
-        await store.saveExtraction(id, { cv, jobProfile });
+        await withPipelineSpan(id, async (span) => {
+          const jobProfile = await extractJobProfile(llm, run.jobDescriptionText);
+          const { cv, softMismatches } = await extractCv(llm, run.cvText);
+          console.debug(`Run ${id}: extraction done, ${softMismatches} soft mismatches`);
+          await store.saveExtraction(id, { cv, jobProfile });
+          const { coverage } = await assessCoverage(llm, cv, jobProfile.requirements);
+          await store.saveCoverage(id, coverage);
+          span.setAttribute("score", matchScore(jobProfile.requirements, coverage));
+        });
       } catch (error) {
         const code: RunErrorCode = failureCode(error);
         // Log the code, the error name and the issue count only. Messages and issues can quote CV values or
@@ -106,7 +124,7 @@ export class RunsService {
         await store.markFailed(id, code, FAILURE_MESSAGES[code]);
       }
     } catch (error) {
-      console.error(`Run ${id}: could not store the extraction outcome`, error);
+      console.error(`Run ${id}: could not store the pipeline outcome`, error);
     }
   }
 

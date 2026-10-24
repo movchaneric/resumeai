@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Cv } from "@resume-ai/shared";
+import type { Coverage, Cv, Requirement } from "@resume-ai/shared";
 
 const PartialDate = z.string().nullable();
 
@@ -83,5 +83,36 @@ export function compareToExpected(cv: Cv, expected: Expected): string[] {
     (w) => w,
     (g) => g.name,
   );
+  return out;
+}
+
+/** Hand-written verdict key for one job description. Matched to Requirements by text, never by id. */
+export const CoverageKeySchema = z.array(
+  z.object({ requirement: z.string(), verdict: z.enum(["met", "partially_met", "unmet"]) }),
+);
+export type CoverageKey = z.infer<typeof CoverageKeySchema>;
+
+const normText = (value: string): string => value.toLowerCase().replace(/\s+/g, " ").trim();
+
+/**
+ * Compares Coverage with the verdict key. A key entry matches a Requirement when one normalized text contains the other;
+ * the first Requirement in Job Profile order wins. Returns one warning line per mismatch or unmatched entry.
+ */
+export function compareCoverageToKey(requirements: Requirement[], coverage: Coverage[], key: CoverageKey): string[] {
+  const verdictById = new Map(coverage.map((c) => [c.requirementId as string, c.verdict]));
+  const out: string[] = [];
+  for (const entry of key) {
+    const wanted = normText(entry.requirement);
+    const requirement = requirements.find((r) => {
+      const text = normText(r.text);
+      return text.includes(wanted) || wanted.includes(text);
+    });
+    if (!requirement) {
+      out.push(`"${entry.requirement}": no Requirement matches this key entry`);
+      continue;
+    }
+    const got = verdictById.get(requirement.id) ?? "missing";
+    if (got !== entry.verdict) out.push(`"${entry.requirement}": expected ${entry.verdict}, got ${got} (${requirement.id})`);
+  }
   return out;
 }

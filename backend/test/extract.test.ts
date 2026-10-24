@@ -79,9 +79,36 @@ describe("compareCoverageToKey", () => {
     ]);
   });
 
-  it("matches when the Requirement text is contained in the key text", () => {
+  it("matches reordered words", () => {
+    const r = [{ id: "req1", importance: "must_have", text: "Strong frontend development experience" }] as unknown as Requirement[];
+    const key = [{ requirement: "Strong experience frontend development", verdict: "met" as const }];
+    expect(compareCoverageToKey(r, cov("met"), key)).toEqual([]);
+  });
+
+  it("matches despite punctuation and extra Requirement words", () => {
+    const r = [
+      { id: "req1", importance: "must_have", text: "Build, maintain and scale modern web applications, frontend and backend" },
+    ] as unknown as Requirement[];
+    const key = [{ requirement: "Build, maintain, and scale modern web applications", verdict: "met" as const }];
+    expect(compareCoverageToKey(r, cov("met"), key)).toEqual([]);
+  });
+
+  it("reports an entry whose best score is below 0.6", () => {
     const key = [{ requirement: "Strong knowledge of Kubernetes in production", verdict: "met" as const }];
-    expect(compareCoverageToKey(reqs, cov("met", "met"), key)).toEqual([]);
+    expect(compareCoverageToKey(reqs, cov("met", "met"), key)).toEqual([
+      '"Strong knowledge of Kubernetes in production": no Requirement matches this key entry',
+    ]);
+  });
+
+  it("picks the highest score over an earlier, weaker match", () => {
+    const r = [
+      { id: "req1", importance: "must_have", text: "Deploy services to cloud platforms" },
+      { id: "req2", importance: "must_have", text: "Deploy services to cloud platforms with Terraform" },
+    ] as unknown as Requirement[];
+    const key = [{ requirement: "Deploy services cloud platforms Terraform", verdict: "unmet" as const }];
+    expect(compareCoverageToKey(r, cov("met", "met"), key)).toEqual([
+      '"Deploy services cloud platforms Terraform": expected unmet, got met (req2)',
+    ]);
   });
 
   it("reports a key entry that matches no Requirement", () => {

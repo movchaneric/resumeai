@@ -7,6 +7,7 @@ import {
   type RunId,
   type RunView,
 } from "@resume-ai/shared";
+import { matchScore } from "@/scoring/matchScore.js";
 import { ExtractionError, NoRequirementsError } from "@/extraction/errors.js";
 import { extractCv } from "@/extraction/extractCv.js";
 import { extractJobProfile } from "@/extraction/extractJobProfile.js";
@@ -31,9 +32,10 @@ function defaultRunInBackground(task: () => Promise<void>): void {
 }
 
 /** User-facing failure messages (plan, "Failure codes"). The real cause is logged, never shown. */
-const FAILURE_MESSAGES: Record<"EXTRACTION_FAILED" | "NO_REQUIREMENTS" | "INTERNAL", string> = {
+const FAILURE_MESSAGES: Record<"EXTRACTION_FAILED" | "NO_REQUIREMENTS" | "COVERAGE_FAILED" | "INTERNAL", string> = {
   EXTRACTION_FAILED: "We couldn't read the structure of your CV or job description. Try again, or upload a DOCX.",
   NO_REQUIREMENTS: "We couldn't find any requirements in this job description. Paste the full posting.",
+  COVERAGE_FAILED: "We couldn't assess your CV against this job. Try again.",
   INTERNAL: "Something went wrong. Try again.",
 };
 
@@ -122,8 +124,10 @@ export class RunsService {
 
 /**
  * Derives the view from what is stored (plan, "Behaviour seen from outside"). The status stays
- * `extracting` until both results exist, and a failed Run shows its `extract` step as done because the
- * step states have no `failed`. Validating against the schema keeps the response honest as the view grows.
+ * `extracting` until Coverage is stored; the Coverage step runs once both extraction results exist.
+ * A failed Run marks the step that broke as `failed`: `coverage` when the extraction results are stored,
+ * otherwise `extract`. The score is computed here from the stored verdicts, never stored. Validating
+ * against the schema keeps the response honest as the view grows.
  */
 function toRunView(run: StoredRun): RunView {
   const common = {
@@ -131,20 +135,50 @@ function toRunView(run: StoredRun): RunView {
     createdAt: run.createdAt.toISOString(),
     expiresAt: run.expiresAt.toISOString(),
   };
-  const steps = (extract: "running" | "done") =>
+  const { cv, jobProfile, coverage } = run;
+  const extracted = cv !== null && jobProfile !== null;
+  const job = extracted ? { title: jobProfile.title, company: jobProfile.company } : null;
+  type State = "pending" | "running" | "done" | "failed";
+  const steps = (extract: State, coverageState: State) =>
     StepKeySchema.options.map((key) => ({
       key,
-      state: key === "parse" ? "done" : key === "extract" ? extract : "pending",
+      state: key === "parse" ? "done" : key === "extract" ? extract : key === "coverage" ? coverageState : "pending",
     }));
 
   if (run.status === "failed" && run.error) {
-    return RunViewSchema.parse({ ...common, status: "failed", job: null, steps: steps("done"), error: run.error });
+    return RunViewSchema.parse({
+      ...common,
+      status: "failed",
+      job,
+      steps: extracted ? steps("done", "failed") : steps("failed", "pending"),
+      error: run.error,
+    });
   }
-  const extracted = run.cv !== null && run.jobProfile !== null;
+  if (run.status === "scored" && extracted && coverage !== null) {
+    const verdictById = new Map(coverage.map((c) => [c.requirementId as string, c]));
+    return RunViewSchema.parse({
+      ...common,
+      status: "scored",
+      job,
+      steps: steps("done", "done"),
+      score: Math.round(matchScore(jobProfile.requirements, coverage)),
+      requirements: jobProfile.requirements.map((requirement) => {
+        const verdict = verdictById.get(requirement.id);
+        return {
+          id: requirement.id,
+          text: requirement.text,
+          importance: requirement.importance,
+          verdict: verdict?.verdict ?? "unmet",
+          evidenceIds: verdict?.evidenceIds ?? [],
+          reason: verdict?.reason ?? "",
+        };
+      }),
+    });
+  }
   return RunViewSchema.parse({
     ...common,
     status: "extracting",
-    job: extracted ? { title: run.jobProfile!.title, company: run.jobProfile!.company } : null,
-    steps: steps(extracted ? "done" : "running"),
+    job,
+    steps: extracted ? steps("done", "running") : steps("running", "pending"),
   });
 }

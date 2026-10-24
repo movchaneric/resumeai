@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RunIdSchema, RunViewSchema, type ExtractedCv } from "@resume-ai/shared";
+import { RunIdSchema, RunViewSchema, type ExtractedCv, type ItemId, type RequirementId } from "@resume-ai/shared";
 import request from "supertest";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "@/app.js";
@@ -171,6 +171,44 @@ describe("GET /runs/:id", () => {
     expect(view.status).toBe("failed");
     if (view.status === "failed") expect(view.error.code).toBe("EXTRACTION_FAILED");
     expect(view.job).toBeNull();
+    expect(view.steps.find((s) => s.key === "extract")?.state).toBe("failed");
+  });
+
+  it("shows a Run with coverage saved through the store as scored", async () => {
+    llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv);
+    const { body } = await upload("cv.pdf");
+    await settle();
+    const id = RunIdSchema.parse(body.id);
+    await store.saveCoverage(id, [
+      { requirementId: "req1" as RequirementId, verdict: "partially_met", evidenceIds: ["skill2" as ItemId], reason: "Listed only." },
+    ]);
+
+    const view = RunViewSchema.parse((await request(app).get(`/runs/${id}`)).body);
+    expect(view.status).toBe("scored");
+    if (view.status !== "scored") return;
+    expect(view.score).toBe(50);
+    expect(view.steps.find((s) => s.key === "coverage")?.state).toBe("done");
+    expect(view.requirements).toEqual([
+      { id: "req1", text: "Node.js", importance: "must_have", verdict: "partially_met", evidenceIds: ["skill2"], reason: "Listed only." },
+    ]);
+  });
+
+  it("shows a failed Run with extraction stored as coverage failed", async () => {
+    llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv);
+    const { body } = await upload("cv.pdf");
+    await settle();
+    const id = RunIdSchema.parse(body.id);
+    await store.markFailed(id, "COVERAGE_FAILED", "We couldn't assess your CV against this job. Try again.");
+
+    const view = RunViewSchema.parse((await request(app).get(`/runs/${id}`)).body);
+    expect(view.status).toBe("failed");
+    if (view.status === "failed") expect(view.error.code).toBe("COVERAGE_FAILED");
+    expect(view.job).toEqual({ title: "Backend Developer", company: "Initech" });
+    expect(view.steps.filter((s) => s.state !== "pending").map((s) => `${s.key}:${s.state}`)).toEqual([
+      "parse:done",
+      "extract:done",
+      "coverage:failed",
+    ]);
   });
 
   it("returns 404 for an unknown ID", async () => {

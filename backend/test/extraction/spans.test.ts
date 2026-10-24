@@ -79,7 +79,7 @@ describe("extraction spans", () => {
 
     const span = finished("extract_job_profile");
     expect(span.status.code).toBe(SpanStatusCode.ERROR);
-    expect(span.attributes["extraction.failure_reason"]).toBe("NoRequirementsError");
+    expect(span.attributes["failure_reason"]).toBe("NoRequirementsError");
   });
 
   it("records the soft mismatch count on a CV extraction span", async () => {
@@ -103,10 +103,18 @@ describe("extraction spans", () => {
     const span = finished("extract_cv");
     expect(span.attributes["extraction.retries"]).toBe(1);
     expect(span.status.code).toBe(SpanStatusCode.ERROR);
-    expect(span.attributes["extraction.failure_reason"]).toBe("ExtractionError");
+    expect(span.attributes["failure_reason"]).toBe("ExtractionError");
     expect(span.status.message).toBeUndefined();
     expect(span.events).toHaveLength(0);
     expect(JSON.stringify([span.attributes, span.status, span.events])).not.toContain("secret-issue");
+  });
+
+  it("puts attributes passed to withSpan on the span", async () => {
+    await withSpan("with_attrs", async () => undefined, { attributes: { "session.id": "run-1", count: 3 } });
+
+    const span = finished("with_attrs");
+    expect(span.attributes["session.id"]).toBe("run-1");
+    expect(span.attributes["count"]).toBe(3);
   });
 
   it("nests spans started inside fn under the extraction span", async () => {

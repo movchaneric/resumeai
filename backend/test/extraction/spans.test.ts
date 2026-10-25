@@ -206,7 +206,24 @@ describe("pipeline span", () => {
     const llm = new FakeLlmClient()
       .enqueue("extract_job_profile", profile)
       .enqueue("extract_cv", fullCv())
-      .enqueue("assess_coverage", COVERAGE_ANSWER);
+      .enqueue("assess_coverage", COVERAGE_ANSWER, {
+        verdicts: [{ requirementId: "req1", reason: "Built it.", evidenceIds: ["exp1.b1"], verdict: "met" }],
+      })
+      .enqueue("tailor", {
+        changes: [
+          {
+            op: "add",
+            targetItemId: null,
+            parentId: "skills",
+            text: "Node.js",
+            orderedItemIds: null,
+            evidenceIds: ["exp1.b1"],
+            requirementIds: ["req1"],
+            rationale: "Shows the skill",
+          },
+        ],
+      })
+      .enqueue("claim_check", { verdicts: [{ id: "r1.c1", reason: "ok", verdict: "supported" }] });
     const store = fakeStore();
     const service = new RunsService({
       store: store as unknown as RunStore,
@@ -219,14 +236,60 @@ describe("pipeline span", () => {
     expect(root.parentSpanContext).toBeUndefined();
     expect(root.attributes["session.id"]).toBe(id);
     expect(root.attributes["score.before"]).toBe(50);
-    expect(root.attributes["score.after"]).toBe(50);
-    expect(root.attributes["rounds"]).toBe(0);
-    expect(root.attributes["exit_reason"]).toBe("ceiling");
+    expect(root.attributes["score.after"]).toBe(100);
+    expect(root.attributes["rounds"]).toBe(1);
+    expect(root.attributes["exit_reason"]).toBe("target_reached");
     expect(root.attributes["openinference.span.kind"]).toBe("CHAIN");
     for (const name of ["extract_job_profile", "extract_cv", "assess_coverage"]) {
-      const child = finished(name);
+      const child = exporter.getFinishedSpans().find((span) => span.name === name)!;
       expect(child.parentSpanContext?.spanId).toBe(root.spanContext().spanId);
       expect(child.spanContext().traceId).toBe(root.spanContext().traceId);
     }
+  });
+
+  it("nests the round's tailor, validate, claim_check and assess_coverage spans under the root, each with its round", async () => {
+    const id = "3f0c1d4e-5b2a-4c8e-9a71-0d6e2f8b7a12";
+    const llm = new FakeLlmClient()
+      .enqueue("extract_job_profile", profile)
+      .enqueue("extract_cv", fullCv())
+      .enqueue("assess_coverage", COVERAGE_ANSWER, {
+        verdicts: [{ requirementId: "req1", reason: "Built it.", evidenceIds: ["exp1.b1"], verdict: "met" }],
+      })
+      .enqueue("tailor", {
+        changes: [
+          { op: "add", targetItemId: null, parentId: "skills", text: "Node.js", orderedItemIds: null, evidenceIds: ["exp1.b1"], requirementIds: ["req1"], rationale: "Shows the skill" },
+        ],
+      })
+      .enqueue("claim_check", { verdicts: [{ id: "r1.c1", reason: "ok", verdict: "supported" }] });
+    const store = fakeStore();
+    const service = new RunsService({
+      store: store as unknown as RunStore,
+      config: loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" }),
+      graphRunner: makeGraphRunner(store, llm),
+    });
+    await service.runPipeline({ runId: id as RunId, cvText, jobDescriptionText: "Backend developer" });
+
+    const root = finished("pipeline");
+    const rootId = root.spanContext().spanId;
+    const spans = exporter.getFinishedSpans();
+    const byName = (name: string) => spans.filter((s) => s.name === name);
+    const ancestors = (span: (typeof spans)[number]) => {
+      const names: string[] = [];
+      for (let p = span.parentSpanContext?.spanId; p; ) {
+        const parent = spans.find((s) => s.spanContext().spanId === p);
+        if (!parent) break;
+        names.push(parent.name);
+        p = parent.parentSpanContext?.spanId;
+      }
+      return names;
+    };
+    for (const name of ["tailor", "validate", "claim_check"]) {
+      const [span] = byName(name);
+      expect(span!.attributes["round"]).toBe(1);
+      expect(ancestors(span!)).toContain("pipeline");
+    }
+    expect(byName("assess_coverage").map((s) => s.attributes["round"])).toEqual([0, 1]);
+    expect(ancestors(byName("claim_check")[0]!)[0]).toBe("validate");
+    expect(byName("validate")[0]!.parentSpanContext?.spanId).toBe(rootId);
   });
 });

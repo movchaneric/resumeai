@@ -49,8 +49,10 @@ export async function assessCoverage(
   llm: LlmClient,
   cv: Cv,
   requirements: Requirement[],
+  options: { round?: number } = {},
 ): Promise<{ coverage: Coverage[]; downgrades: number }> {
   return withSpan(CALL_NAME, async (span) => {
+    if (options.round !== undefined) span.setAttribute("round", options.round);
     const messages: LlmMessage[] = [
       { role: "system", content: COVERAGE_SYSTEM_PROMPT },
       { role: "user", content: `Requirements:\n${renderRequirements(requirements)}\n\nCV:\n${renderCv(cv)}` },

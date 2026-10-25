@@ -139,7 +139,7 @@ describe("GET /runs/:id", () => {
     expect(view.changes).toEqual([]);
     expect(view.userEvidence).toEqual([]);
     expect(view.iterations).toEqual({ used: 0, max: 3 });
-    expect(view.exitReason).toBe("ceiling");
+    expect(view.exitReason).toBe("target_reached");
     expect(view.requirements).toEqual([
       {
         id: "req1",

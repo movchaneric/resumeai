@@ -13,6 +13,8 @@ import {
   type StepState,
   type RunView,
 } from "@resume-ai/shared";
+import { applyChanges } from "@/tailoring/applyChanges.js";
+import type { RecordedRejection } from "@/tailoring/validateChanges.js";
 import { CoverageError } from "@/scoring/errors.js";
 import { ExtractionError, NoRequirementsError } from "@/extraction/errors.js";
 import type { Config } from "@/utils/config.js";
@@ -31,6 +33,8 @@ export type RunSnapshot = {
   /** Unrounded Match Scores, before tailoring and after the last kept round. */
   scoreBefore: number | null;
   scoreAfter: number | null;
+  /** Changes rejected by stage 1 or the claim check, across rounds. */
+  rejections: RecordedRejection[];
   /** Tailoring rounds started. */
   rounds: number;
   exitReason: ExitReason | null;
@@ -208,11 +212,22 @@ function toRunView(run: StoredRun, state: RunSnapshot | null): RunView {
           confirmedGap: false,
         };
       }),
-      cv,
+      // The Tailored CV: the original plus the kept Changes.
+      cv: applyChanges(cv, state.changes),
       changes: state.changes,
       userEvidence: [],
       iterations: { used: state.rounds, max: MAX_ROUNDS },
       exitReason: state.exitReason,
+    });
+  }
+  if (run.status === "tailoring" && extracted && state) {
+    return RunViewSchema.parse({
+      ...common,
+      status: "tailoring",
+      job,
+      steps: steps({ parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "running" }),
+      iterations: { used: state.rounds, max: MAX_ROUNDS },
+      score: { before: Math.round(state.scoreBefore ?? 0), after: state.scoreAfter === null ? null : Math.round(state.scoreAfter) },
     });
   }
   return RunViewSchema.parse({

@@ -2,7 +2,7 @@ import type { RunId, RunStatus } from "@resume-ai/shared";
 import type { GraphRunner, RunSnapshot, StartRunInput } from "@/services/runs.js";
 import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import type { LlmClient } from "@/llm/llmClient.js";
-import { NODE_STATUS, buildRunGraph, type RunGraph } from "@/graph/runGraph.js";
+import { NODE_STATUS, buildRunGraph, type RoundSummary, type RunGraph } from "@/graph/runGraph.js";
 import type { RunStateValues } from "@/graph/state.js";
 
 /** The part of the runs store the graph runner needs. */
@@ -38,7 +38,7 @@ export class LangGraphRunner implements GraphRunner {
   private readonly lastWritten = new Map<string, RunStatus>();
 
   constructor(
-    deps: { llm: LlmClient; judgeLlm: LlmClient; checkpointer: BaseCheckpointSaver },
+    deps: { llm: LlmClient; judgeLlm: LlmClient; checkpointer: BaseCheckpointSaver; onRound?: (summary: RoundSummary) => void },
     private readonly statuses: StatusWriter,
   ) {
     this.graph = buildRunGraph({

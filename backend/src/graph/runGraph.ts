@@ -11,6 +11,8 @@ import { routeAfterRound, shouldSkipTailoring } from "@/scoring/exitRouter.js";
 import { assessCoverage } from "@/scoring/assessCoverage.js";
 import { matchScore } from "@/scoring/matchScore.js";
 import { RunState } from "@/graph/state.js";
+import type { RecordedRejection } from "@/tailoring/validateChanges.js";
+import type { Change } from "@resume-ai/shared";
 
 /** The Run status a node writes when the graph enters it (decisions record, "Storage and status"). */
 export const NODE_STATUS = {
@@ -23,6 +25,24 @@ export const NODE_STATUS = {
   review: "awaiting_review",
 } as const;
 
+/** What one finished round did, for an observer such as the dev script. Plain data; the graph never reads it back. */
+export type RoundSummary = {
+  round: number;
+  /** The tailor's output, before validation. */
+  proposed: Change[];
+  /** The Changes that passed stage 1 and the claim check. */
+  valid: Change[];
+  /** The Changes of this round that stage 1 or the claim check rejected. */
+  rejections: RecordedRejection[];
+  /** The score after re-judging this round, or null when it did not get that far. */
+  roundScore: number | null;
+  /** Whether the exit router kept the round. */
+  kept: boolean;
+  /** The kept score after the round (unrounded). */
+  keptScore: number;
+  failed: boolean;
+};
+
 export type RunGraphDeps = {
   /** Extraction. */
   llm: LlmClient;
@@ -31,6 +51,8 @@ export type RunGraphDeps = {
   checkpointer: BaseCheckpointSaver;
   /** Called first thing in each node, so the Run's status is written before the node's work starts. */
   onEnter: (runId: string, node: keyof typeof NODE_STATUS) => Promise<void>;
+  /** Called by `route` once per round, after the decision. Optional; it must not throw. */
+  onRound?: (summary: RoundSummary) => void;
 };
 
 /**
@@ -51,7 +73,7 @@ function logRoundFailure(runId: string, round: number, error: unknown): void {
  * and returns a state update. `begin_round` counts the round as started; the `route` node is the only place that
  * commits the pending round.
  */
-export function buildRunGraph({ llm, judgeLlm, checkpointer, onEnter }: RunGraphDeps) {
+export function buildRunGraph({ llm, judgeLlm, checkpointer, onEnter, onRound }: RunGraphDeps) {
   return new StateGraph(RunState)
     .addNode("extract", async (state) => {
       await onEnter(state.runId, "extract");
@@ -144,6 +166,16 @@ export function buildRunGraph({ llm, judgeLlm, checkpointer, onEnter }: RunGraph
       });
       // `null` means another round: the edge after `route` loops back while no exit reason is set.
       const exitReason = decision.next === "review" ? decision.exitReason : null;
+      onRound?.({
+        round: pending.round,
+        proposed: pending.proposed,
+        valid: pending.valid,
+        rejections: state.rejections.filter((r) => r.round === pending.round),
+        roundScore: pending.score,
+        kept: decision.keepRound,
+        keptScore: decision.keepRound ? pending.score! : previousScore,
+        failed: pending.failed,
+      });
       if (!decision.keepRound) return { pending: null, exitReason };
       return {
         pending: null,

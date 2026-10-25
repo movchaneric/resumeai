@@ -82,6 +82,8 @@ export function formatOutcome(s: { exitReason: ExitReason | null; rounds: number
 
 /** Runs the whole Run graph in memory: no database, no status writes. `llm` does extraction, `judgeLlm` the rest. */
 export async function runTailorInMemory(input: {
+  /** The graph's `thread_id`; the dev script gives the `pipeline` session the same id. */
+  runId: RunId;
   llm: LlmClient;
   judgeLlm: LlmClient;
   cvText: string;
@@ -92,10 +94,10 @@ export async function runTailorInMemory(input: {
     { llm: input.llm, judgeLlm: input.judgeLlm, checkpointer: createMemoryCheckpointer(), onRound: input.onRound },
     { setStatus: async () => {} },
   );
-  return runner.start({ runId: randomUUID() as RunId, cvText: input.cvText, jobDescriptionText: input.jobDescriptionText });
+  return runner.start({ runId: input.runId, cvText: input.cvText, jobDescriptionText: input.jobDescriptionText });
 }
 
-/** One `pipeline` root span for the whole script run, so Phoenix groups its chains as one trace. */
-export function runInPipelineSpan<T>(fn: () => Promise<T>): Promise<T> {
-  return withSessionSpan("pipeline", randomUUID(), fn);
+/** One `pipeline` root span for the whole script run, so Phoenix groups its chains as one trace. The session is the Run id. */
+export function runInPipelineSpan<T>(runId: RunId, fn: () => Promise<T>): Promise<T> {
+  return withSessionSpan("pipeline", runId, fn);
 }

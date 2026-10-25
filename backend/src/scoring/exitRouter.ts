@@ -16,7 +16,7 @@ export interface RouteInput {
   round: number;
   outcome: RoundOutcome;
   /** Rounds with no valid Changes immediately before this one (0 when the previous round had some, or this is round 1). */
-  consecutiveEmptyRounds?: number;
+  consecutiveEmptyRounds: number;
 }
 
 export type RouteDecision =
@@ -26,7 +26,7 @@ export type RouteDecision =
 const stop = (exitReason: ExitReason, keepRound: boolean): RouteDecision => ({ next: "review", exitReason, keepRound });
 
 /** Decides after each round whether to loop or stop for review, and whether the pending round is kept. */
-export function routeAfterRound({ previousScore, round, outcome, consecutiveEmptyRounds = 0 }: RouteInput): RouteDecision {
+export function routeAfterRound({ previousScore, round, outcome, consecutiveEmptyRounds }: RouteInput): RouteDecision {
   if (outcome.failed) return stop("error", false);
   if (outcome.validChanges === 0) {
     // An empty round is never kept. It gets one second chance (its tailor sees the rejections), within the round cap.

@@ -21,14 +21,14 @@ describe("exit constants", () => {
 
 describe("routeAfterRound", () => {
   it("continues and keeps the round when nothing stops it", () => {
-    expect(routeAfterRound({ previousScore: 50, round: 1, outcome: ok(2, 60) })).toEqual({
+    expect(routeAfterRound({ consecutiveEmptyRounds: 0, previousScore: 50, round: 1, outcome: ok(2, 60) })).toEqual({
       next: "another_round",
       keepRound: true,
     });
   });
 
   it("discards a failed round and exits with error", () => {
-    expect(routeAfterRound({ previousScore: 50, round: 1, outcome: { failed: true } })).toEqual({
+    expect(routeAfterRound({ consecutiveEmptyRounds: 0, previousScore: 50, round: 1, outcome: { failed: true } })).toEqual({
       next: "review",
       exitReason: "error",
       keepRound: false,
@@ -74,7 +74,7 @@ describe("routeAfterRound", () => {
   });
 
   it("discards a round that lowers the score and exits with plateau", () => {
-    expect(routeAfterRound({ previousScore: 50, round: 1, outcome: ok(1, 49.5) })).toEqual({
+    expect(routeAfterRound({ consecutiveEmptyRounds: 0, previousScore: 50, round: 1, outcome: ok(1, 49.5) })).toEqual({
       next: "review",
       exitReason: "plateau",
       keepRound: false,
@@ -82,7 +82,7 @@ describe("routeAfterRound", () => {
   });
 
   it("keeps the round and exits with target_reached at 90 or more", () => {
-    expect(routeAfterRound({ previousScore: 80, round: 1, outcome: ok(1, 90) })).toEqual({
+    expect(routeAfterRound({ consecutiveEmptyRounds: 0, previousScore: 80, round: 1, outcome: ok(1, 90) })).toEqual({
       next: "review",
       exitReason: "target_reached",
       keepRound: true,
@@ -90,7 +90,7 @@ describe("routeAfterRound", () => {
   });
 
   it("keeps the round and exits with plateau when the gain is below 2", () => {
-    expect(routeAfterRound({ previousScore: 50, round: 1, outcome: ok(1, 51.99) })).toEqual({
+    expect(routeAfterRound({ consecutiveEmptyRounds: 0, previousScore: 50, round: 1, outcome: ok(1, 51.99) })).toEqual({
       next: "review",
       exitReason: "plateau",
       keepRound: true,
@@ -98,21 +98,21 @@ describe("routeAfterRound", () => {
   });
 
   it("continues when the gain is exactly 2", () => {
-    expect(routeAfterRound({ previousScore: 50, round: 1, outcome: ok(1, 52) })).toEqual({
+    expect(routeAfterRound({ consecutiveEmptyRounds: 0, previousScore: 50, round: 1, outcome: ok(1, 52) })).toEqual({
       next: "another_round",
       keepRound: true,
     });
   });
 
   it("keeps a zero-gain round as plateau (not discarded)", () => {
-    expect(routeAfterRound({ previousScore: 50, round: 1, outcome: ok(1, 50) })).toMatchObject({
+    expect(routeAfterRound({ consecutiveEmptyRounds: 0, previousScore: 50, round: 1, outcome: ok(1, 50) })).toMatchObject({
       exitReason: "plateau",
       keepRound: true,
     });
   });
 
   it("exits with max_iterations after the third round, keeping it", () => {
-    expect(routeAfterRound({ previousScore: 50, round: 3, outcome: ok(1, 60) })).toEqual({
+    expect(routeAfterRound({ consecutiveEmptyRounds: 0, previousScore: 50, round: 3, outcome: ok(1, 60) })).toEqual({
       next: "review",
       exitReason: "max_iterations",
       keepRound: true,
@@ -121,7 +121,7 @@ describe("routeAfterRound", () => {
 
   describe("order of the rules", () => {
     it("failure beats everything", () => {
-      expect(routeAfterRound({ previousScore: 50, round: 3, outcome: { failed: true } })).toMatchObject({
+      expect(routeAfterRound({ consecutiveEmptyRounds: 0, previousScore: 50, round: 3, outcome: { failed: true } })).toMatchObject({
         exitReason: "error",
       });
     });
@@ -131,18 +131,18 @@ describe("routeAfterRound", () => {
       });
     });
     it("a lower score beats target_reached", () => {
-      expect(routeAfterRound({ previousScore: 95, round: 1, outcome: ok(1, 92) })).toMatchObject({
+      expect(routeAfterRound({ consecutiveEmptyRounds: 0, previousScore: 95, round: 1, outcome: ok(1, 92) })).toMatchObject({
         exitReason: "plateau",
         keepRound: false,
       });
     });
     it("target_reached beats a small gain", () => {
-      expect(routeAfterRound({ previousScore: 89, round: 1, outcome: ok(1, 90) })).toMatchObject({
+      expect(routeAfterRound({ consecutiveEmptyRounds: 0, previousScore: 89, round: 1, outcome: ok(1, 90) })).toMatchObject({
         exitReason: "target_reached",
       });
     });
     it("a small gain beats max_iterations", () => {
-      expect(routeAfterRound({ previousScore: 50, round: 3, outcome: ok(1, 51) })).toMatchObject({
+      expect(routeAfterRound({ consecutiveEmptyRounds: 0, previousScore: 50, round: 3, outcome: ok(1, 51) })).toMatchObject({
         exitReason: "plateau",
       });
     });

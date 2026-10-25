@@ -114,6 +114,29 @@ describe("tailorCv", () => {
     expect(TAILOR_SYSTEM_PROMPT).toContain("no new technologies, numbers, scope, roles or achievements");
   });
 
+  it("forbids appending unstated qualities, even when the job asks for them", () => {
+    for (const word of ["qualities", "adjectives", "soft skills", "ways of working", "collaboration", "ownership", "independence", "impact"]) {
+      expect(TAILOR_SYSTEM_PROMPT).toContain(word);
+    }
+    expect(TAILOR_SYSTEM_PROMPT).toContain("even when the job asks for them");
+    expect(TAILOR_SYSTEM_PROMPT).toContain("propose nothing for it");
+  });
+
+  it("lists what is allowed", () => {
+    expect(TAILOR_SYSTEM_PROMPT).toContain("Allowed:");
+    expect(TAILOR_SYSTEM_PROMPT).toContain("the job's term for the same thing");
+    expect(TAILOR_SYSTEM_PROMPT).toContain("a technology or fact that a cited Item already states");
+    expect(TAILOR_SYSTEM_PROMPT).toContain("Reorder a list so relevant Items come first");
+    expect(TAILOR_SYSTEM_PROMPT).toContain("using only facts from cited Items");
+    expect(TAILOR_SYSTEM_PROMPT).toContain("shows it in use");
+  });
+
+  it("gives one rejected and one accepted example", () => {
+    expect(TAILOR_SYSTEM_PROMPT).toContain("Rejected (made up)");
+    expect(TAILOR_SYSTEM_PROMPT).toContain(", ensuring attention to detail");
+    expect(TAILOR_SYSTEM_PROMPT).toContain("Accepted (made up)");
+  });
+
   it.each([
     ["no Evidence", m({ evidenceIds: [] }), "no Evidence"],
     ["no Requirements", m({ requirementIds: [] }), "no Requirement"],

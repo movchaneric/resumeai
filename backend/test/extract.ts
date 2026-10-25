@@ -1,9 +1,13 @@
 // Dev script: runs Job Profile and CV extraction on local files against the configured model.
-// No HTTP, no database. Run with `pnpm --filter backend extract <cv-file> <job-description-file> [--coverage] [--check]`.
+// No HTTP, no database. Run with `pnpm --filter backend extract <cv-file> <job-description-file> [--coverage] [--tailor] [--check]`.
+// All the work runs under one `pipeline` span, so its chains group as one trace in Phoenix.
 import "dotenv/config";
 import { readFileSync } from "node:fs";
 import { basename, extname, resolve } from "node:path";
-import type { Cv } from "@resume-ai/shared";
+import { randomUUID } from "node:crypto";
+import type { Coverage, Cv, JobProfile, RunId } from "@resume-ai/shared";
+import type { z } from "zod";
+import type { RunSnapshot } from "@/services/runs.js";
 import { ExtractionError, NoRequirementsError } from "@/extraction/errors.js";
 import { extractCv } from "@/extraction/extractCv.js";
 import { extractJobProfile } from "@/extraction/extractJobProfile.js";
@@ -17,12 +21,16 @@ import { parseCv } from "@/parsing/parseCv.js";
 import { loadConfig } from "@/utils/config.js";
 import { setupTracing } from "@/utils/tracing.js";
 import { CoverageKeySchema, ExpectedSchema, compareCoverageToKey, compareToExpected } from "./extractCheck.js";
+import { formatCoverage, formatOutcome, formatRound, parseDevArgs, runInPipelineSpan, runTailorInMemory } from "./extractReport.js";
 
-const USAGE = `Usage: pnpm --filter backend extract <cv-file> <job-description-file> [--coverage] [--check]
+const USAGE = `Usage: pnpm --filter backend extract <cv-file> <job-description-file> [--coverage] [--tailor] [--check]
 
   <cv-file>               PDF or DOCX
   <job-description-file>  plain text
-  --coverage              after extraction, judge how well the CV covers each Requirement and print the score
+  --coverage              after extraction, judge how well the CV covers each Requirement (with its kind) and print the score
+  --tailor                implies --coverage; run the whole Run graph in memory (no HTTP, no database) and print each
+                          round: proposed Changes, rejections with stage and reason, the kept score, then the exit
+                          reason and the score before and after. CV extraction uses LLM_MODEL, the rest (Job Profile included) LLM_JUDGE_MODEL.
   --check                 compare protected CV facts with <cv path without extension>.expected.json;
                           with --coverage, also compare verdicts with <job-description path without extension>.coverage.json
                           (a list of { "requirement": text, "verdict": "met" | "partially_met" | "unmet" }).
@@ -51,13 +59,12 @@ function describeError(error: unknown): string {
 
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
-  const check = args.includes("--check");
-  const coverageFlag = args.includes("--coverage");
-  const [cvArg, jdArg, ...rest] = args.filter((a) => a !== "--check" && a !== "--coverage");
-  if (!cvArg || !jdArg || rest.length > 0) {
+  const parsed = parseDevArgs(args);
+  if (!parsed.ok) {
     console.error(USAGE);
     return 1;
   }
+  const { cvArg, jdArg, check, tailor, coverage: coverageFlag } = parsed;
   const cvPath = resolve(base, cvArg);
   const jdPath = resolve(base, jdArg);
 
@@ -70,7 +77,7 @@ async function main(): Promise<number> {
     console.error(`Cannot read input: ${(error as Error).message}`);
     return 1;
   }
-  let expected;
+  let expected: z.infer<typeof ExpectedSchema> | undefined;
   if (check) {
     const expectedPath = resolve(cvPath, "..", `${basename(cvPath, extname(cvPath))}.expected.json`);
     try {
@@ -81,7 +88,7 @@ async function main(): Promise<number> {
     }
   }
 
-  let coverageKey;
+  let coverageKey: z.infer<typeof CoverageKeySchema> | undefined;
   if (check && coverageFlag) {
     const keyPath = resolve(jdPath, "..", `${basename(jdPath, extname(jdPath))}.coverage.json`);
     try {
@@ -96,48 +103,80 @@ async function main(): Promise<number> {
   const config = loadConfig();
   const provider = setupTracing(config);
   const llm = new LangChainLlmClient(config.llm);
-  const coverageLlm = new LangChainLlmClient({ ...config.llm, model: config.llm.coverageModel });
-  console.log(`models: extraction ${config.llm.model}, coverage ${config.llm.coverageModel}`);
+  const judgeLlm = new LangChainLlmClient({ ...config.llm, model: config.llm.judgeModel });
+  console.log(`models: extraction ${config.llm.model} (Job Profile ${config.llm.judgeModel}), judge ${config.llm.judgeModel}`);
 
   try {
-    const cvText = await parseCv(cvBuffer, config.limits);
-    console.log(`----- CV TEXT (${cvText.length} chars) -----\n${cvText}\n----- END CV TEXT -----\n`);
+    const runId = randomUUID() as RunId;
+    return await runInPipelineSpan(runId, async () => {
+      const cvText = await parseCv(cvBuffer, config.limits);
+      console.log(`----- CV TEXT (${cvText.length} chars) -----\n${cvText}\n----- END CV TEXT -----\n`);
 
-    const jobProfile = await timed("extractJobProfile", () => extractJobProfile(llm, jdText));
-    console.log(`----- JOB PROFILE -----\n${JSON.stringify(jobProfile, null, 2)}\n`);
+      let jobProfile: JobProfile;
+      let cv: Cv;
+      let coverage: Coverage[] | undefined;
+      let score: number | undefined;
+      let tailored: RunSnapshot | undefined;
+      if (tailor) {
+        tailored = await timed("run graph", () =>
+          runTailorInMemory({
+            runId,
+            llm,
+            judgeLlm,
+            cvText,
+            jobDescriptionText: jdText,
+            onRound: (round) => console.log(`${formatRound(round).join("\n")}\n`),
+          }),
+        );
+        jobProfile = tailored.jobProfile!;
+        cv = tailored.cv!;
+        coverage = tailored.coverageBefore!;
+        score = tailored.scoreBefore!;
+        console.log(`----- JOB PROFILE -----\n${JSON.stringify(jobProfile, null, 2)}\n`);
+        console.log(`----- CV -----\n${JSON.stringify(cv, null, 2)}\n`);
+      } else {
+        jobProfile = await timed("extractJobProfile", () => extractJobProfile(judgeLlm, jdText));
+        console.log(`----- JOB PROFILE -----\n${JSON.stringify(jobProfile, null, 2)}\n`);
 
-    const { cv, softMismatches } = await timed("extractCv", () => extractCv(llm, cvText));
-    console.log(`----- CV -----\n${JSON.stringify(cv, null, 2)}\n`);
-    console.log(`softMismatches: ${softMismatches}`);
+        const extracted = await timed("extractCv", () => extractCv(llm, cvText));
+        cv = extracted.cv as Cv;
+        console.log(`----- CV -----\n${JSON.stringify(cv, null, 2)}\n`);
+        console.log(`softMismatches: ${extracted.softMismatches}`);
 
-    if (coverageFlag) {
-      const { coverage, downgrades } = await timed("assessCoverage", () => assessCoverage(coverageLlm, cv as Cv, jobProfile.requirements));
-      console.log("----- COVERAGE -----");
-      for (const requirement of jobProfile.requirements) {
-        const c = coverage.find((x) => x.requirementId === requirement.id);
-        console.log(`${requirement.id} [${requirement.importance}] ${requirement.text}`);
-        console.log(`  verdict: ${c?.verdict ?? "missing"}  evidence: ${c && c.evidenceIds.length > 0 ? c.evidenceIds.join(", ") : "none"}`);
-        console.log(`  reason: ${c?.reason ?? ""}`);
+        if (coverageFlag) {
+          const assessed = await timed("assessCoverage", () => assessCoverage(judgeLlm, cv, jobProfile.requirements));
+          coverage = assessed.coverage;
+          score = matchScore(jobProfile.requirements, coverage);
+          console.log(`downgrades: ${assessed.downgrades}`);
+        }
       }
-      const score = matchScore(jobProfile.requirements, coverage);
-      console.log(`downgrades: ${downgrades}`);
-      console.log(`score: ${Math.round(score)} (unrounded ${score})\n`);
-      if (coverageKey) {
-        const warnings = compareCoverageToKey(jobProfile.requirements, coverage, coverageKey);
-        if (warnings.length === 0) console.log("--check: coverage verdicts match the key");
-        else console.warn(`--check: ${warnings.length} coverage warning(s)\n${warnings.map((m) => `  ${m}`).join("\n")}`);
-      }
-    }
 
-    if (expected) {
-      const mismatches = compareToExpected(cv as Cv, expected);
-      if (mismatches.length === 0) console.log("--check: all protected facts match");
-      else {
-        console.error(`--check: ${mismatches.length} mismatch(es)\n${mismatches.map((m) => `  ${m}`).join("\n")}`);
-        return 1;
+      if (coverage && score !== undefined) {
+        console.log(`----- COVERAGE${tailor ? " (before tailoring)" : ""} -----`);
+        console.log(formatCoverage(jobProfile.requirements, coverage).join("\n"));
+        console.log(`score: ${Math.round(score)} (unrounded ${score})\n`);
+        if (coverageKey) {
+          const warnings = compareCoverageToKey(jobProfile.requirements, coverage, coverageKey);
+          if (warnings.length === 0) console.log("--check: coverage verdicts match the key");
+          else console.warn(`--check: ${warnings.length} coverage warning(s)\n${warnings.map((m) => `  ${m}`).join("\n")}`);
+        }
       }
-    }
-    return 0;
+
+      if (tailored) {
+        console.log(formatOutcome(tailored).join("\n") + "\n");
+        console.log(`----- COVERAGE (after tailoring) -----\n${formatCoverage(jobProfile.requirements, tailored.coverage ?? []).join("\n")}\n`);
+      }
+
+      if (expected) {
+        const mismatches = compareToExpected(cv, expected);
+        if (mismatches.length === 0) console.log("--check: all protected facts match");
+        else {
+          console.error(`--check: ${mismatches.length} mismatch(es)\n${mismatches.map((m) => `  ${m}`).join("\n")}`);
+          return 1;
+        }
+      }
+      return 0;
+    });
   } catch (error) {
     console.error(describeError(error));
     return 1;

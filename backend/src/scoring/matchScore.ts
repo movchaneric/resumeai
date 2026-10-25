@@ -1,5 +1,5 @@
 import type { Coverage, Requirement } from "@resume-ai/shared";
-import { IMPORTANCE_WEIGHTS, VERDICT_CREDITS } from "@/scoring/weights.js";
+import { VERDICT_CREDITS, requirementWeight } from "@/scoring/weights.js";
 
 /**
  * `100 × Σ(weight × credit) / Σ(weight)`, unrounded (the caller rounds for display).
@@ -10,7 +10,7 @@ export function matchScore(requirements: Requirement[], coverage: Coverage[]): n
   let earned = 0;
   let total = 0;
   for (const requirement of requirements) {
-    const weight = IMPORTANCE_WEIGHTS[requirement.importance];
+    const weight = requirementWeight(requirement);
     const verdict = verdictById.get(requirement.id);
     earned += weight * (verdict === undefined ? 0 : VERDICT_CREDITS[verdict]);
     total += weight;

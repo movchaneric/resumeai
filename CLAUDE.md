@@ -23,11 +23,13 @@ backend/src/
   middleware/    cross-cutting HTTP code (error handler, not-found)
   parsing/       CV file parsing (file to text, no model)
   extraction/    Extraction chains, ID assignment, verbatim check. Imports `LlmClient` and `@/utils/spans.js`, never LangChain.
-  scoring/       Coverage chain, Match Score, weights. Imports `LlmClient` and `@/utils/spans.js`, never LangChain.
+  scoring/       Coverage chain, Match Score, weights, exit router (`exitRouter.ts`). Imports `LlmClient` and `@/utils/spans.js`, never LangChain.
+  tailoring/     Tailor chain, claim-check chain, stage-1 checks, `applyChanges`. Imports `LlmClient` and `@/utils/spans.js`, never LangChain or LangGraph.
   prompts/       pure renderers that turn the CV and Requirements into prompt text with IDs. Imports only shared types (`@resume-ai/shared`).
-  llm/           the `LlmClient` interface and its LangChain implementation. Only `llm/` imports LangChain (one exception below).
+  graph/         the LangGraph Run graph, its thin nodes, the graph runner and the Postgres checkpointer. The only importer of LangGraph (`@langchain/langgraph*`); nodes call `extraction/`, `scoring/` and `tailoring/`, and the service sees the runner only through the `GraphRunner` interface it defines.
+  llm/           the `LlmClient` interface and its LangChain implementation. Only `llm/` imports LangChain models (one exception below).
   utils/         config, db client, errors, tracing (`tracing.ts`), named spans (`spans.ts`)
-backend/test/    mirrors src (routes/, services/, parsing/, prompts/, scoring/, utils/); fixtures live in test/fixtures
+backend/test/    mirrors src (routes/, services/, graph/, parsing/, prompts/, scoring/, tailoring/, utils/); fixtures live in test/fixtures
 ```
 
 - `utils/tracing.ts` is the one file outside `llm/` that imports LangChain (`@langchain/core/callbacks/manager`, to instrument it). `utils/spans.ts` imports only the OpenTelemetry API and OpenInference semantic conventions, so any layer may use `withSpan`.
@@ -45,5 +47,19 @@ backend/test/    mirrors src (routes/, services/, parsing/, prompts/, scoring/, 
 ## Workflow
 
 - One branch and one PR per slice. Commit messages end with the Co-Authored-By line.
-- Plans, handoffs and reviews go under `docs/slices/<NN>-<name>/`.
+- Specs and tickets are GitHub issues (see `docs/agents/issue-tracker.md`); decisions, reviews, handoffs and retrospectives go under `docs/slices/<NN>-<name>/`, and `decisions.md` links the slice's spec issue.
 - Run `pnpm typecheck` and `pnpm --filter backend test` (needs `docker compose up -d postgres`) before committing.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `movchaneric/resumeai`, through the `gh` CLI. Specs and tickets are issues; slice docs stay in `docs/slices/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` and `docs/adr/` at the root. See `docs/agents/domain.md`.

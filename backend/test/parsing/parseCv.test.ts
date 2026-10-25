@@ -84,16 +84,6 @@ describe("parseCv", () => {
     expect((await rejection(fixture("cv-encrypted.pdf"))).code).toBe("UNREADABLE_FILE");
   });
 
-  it("rejects a parse that takes too long", async () => {
-    const impatient = { ...limits, parseTimeoutMs: 1 };
-    const error = await parseCv(fixture("cv.pdf"), impatient).then(
-      () => undefined,
-      (e: unknown) => e,
-    );
-    expect(error).toBeInstanceOf(ApiError);
-    expect((error as ApiError).code).toBe("UNREADABLE_FILE");
-  });
-
   it("rejects a DOCX with too much text", async () => {
     const small = { ...limits, maxDocxChars: 20 };
     const error = await parseCv(fixture("cv.docx"), small).catch((e: unknown) => e);

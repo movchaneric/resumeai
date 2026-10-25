@@ -45,7 +45,7 @@ A new CV generated from the candidate's CV, adjusted to fit one Job Description 
 _Avoid_: Improved CV, optimized CV, rewritten CV
 
 **Change**:
-One proposed modification to a single text Item of the CV (reword it, add a new Item, or reorder a list), linked to the Evidence that supports it. Dates, companies, titles and degrees are never changed. The user can accept, reject, or revise each Change; a revised Change carries the user's own text, is trusted, and is locked against further rewriting.
+One proposed modification to a single text Item of the CV (reword it, add a new Item, or reorder a list), linked to the Evidence that supports it. Its text may reword the Evidence and use the Job Description's wording, but states nothing the Evidence does not state: no new technologies, numbers, scope, roles or achievements. Dates, companies, titles and degrees are never changed. The user can accept, reject, or revise each Change; a revised Change carries the user's own text, is trusted, and is locked against further rewriting.
 _Avoid_: Suggestion, edit (edit means the user's own revision of a Change)
 
 **Evidence**:
@@ -77,5 +77,5 @@ A mention of a skill or quality in the candidate's skills list or summary, witho
 _Avoid_: Keyword, buzzword, self-reported skill
 
 **Match Score**:
-A reproducible number from 0 to 100, aggregated deterministically from all Requirement Coverage verdicts, weighting must-haves above nice-to-haves. It is not an ATS score and is not keyword-based.
+A reproducible number from 0 to 100, aggregated deterministically from all Requirement Coverage verdicts, weighting must-haves above nice-to-haves and responsibilities below the other kinds of Requirement. It is not an ATS score and is not keyword-based.
 _Avoid_: ATS score, rating, fit

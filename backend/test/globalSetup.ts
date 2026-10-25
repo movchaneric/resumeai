@@ -5,8 +5,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 
-/** Read by `vitest.config.ts` too: `test.env` is not visible here, because global setup runs in the main process. */
-export const TEST_DATABASE_URL = "postgresql://resume:resume@localhost:15432/resume_ai_test";
+/** Override with `TEST_DATABASE_URL` to use a separate database (parallel worktrees). Read by `vitest.config.ts` too: `test.env` is not visible here, because global setup runs in the main process. */
+export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL ?? "postgresql://resume:resume@localhost:15432/resume_ai_test";
 
 const backendDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 

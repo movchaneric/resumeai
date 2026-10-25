@@ -9,6 +9,7 @@ import {
   ItemIdSchema,
   PartialDateSchema,
   RequirementIdSchema,
+  ExitReasonSchema,
   RunIdSchema,
   RunViewSchema,
   normalizeDateRange,
@@ -200,6 +201,12 @@ describe("run view", () => {
     exitReason: "plateau",
   };
 
+  it("accepts every exit reason, including error", () => {
+    for (const reason of ["ceiling", "plateau", "max_iterations", "target_reached", "error"]) {
+      expect(ExitReasonSchema.safeParse(reason).success).toBe(true);
+    }
+    expect(ExitReasonSchema.safeParse("other").success).toBe(false);
+  });
   it("discriminates on status", () => {
     expect(RunViewSchema.safeParse({ ...base, status: "parsing" }).success).toBe(true);
     expect(RunViewSchema.safeParse({ ...base, status: "interrupted" }).success).toBe(true);
@@ -221,20 +228,8 @@ describe("run view", () => {
     const completed = { ...base, status: "completed", ...review, download: { docx: "/runs/x/cv.docx", pdf: null } };
     expect(RunViewSchema.safeParse(completed).success).toBe(true);
   });
-  it("parses scored with a whole-number score and the requirement rows", () => {
-    const scored = {
-      ...base,
-      status: "scored",
-      job: { title: "Engineer", company: "Acme" },
-      score: 64,
-      requirements: [
-        { id: "req1", text: "Node.js", importance: "must_have", verdict: "met", evidenceIds: ["exp1.b1"], reason: "Used it at Acme." },
-      ],
-    };
-    expect(RunViewSchema.safeParse(scored).success).toBe(true);
-    expect(RunViewSchema.safeParse({ ...scored, score: 101 }).success).toBe(false);
-    expect(RunViewSchema.safeParse({ ...scored, requirements: undefined }).success).toBe(false);
-    expect(RunViewSchema.safeParse({ ...scored, requirements: [{ id: "req1", text: "Node.js" }] }).success).toBe(false);
+  it("no longer parses the retired scored status", () => {
+    expect(RunViewSchema.safeParse({ ...base, status: "scored", score: 64, requirements: [] }).success).toBe(false);
   });
   it("accepts the failed step state", () => {
     const steps = [{ key: "coverage", state: "failed" }];

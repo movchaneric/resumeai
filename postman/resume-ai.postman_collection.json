@@ -86,14 +86,14 @@
       }
     },
     {
-      "name": "Get run (scored)",
+      "name": "Get run (awaiting_review)",
       "event": [
         {
           "listen": "test",
           "script": {
             "type": "text/javascript",
             "exec": [
-              "pm.test('RunView is scored or failed', () => { pm.response.to.have.status(200); const v = pm.response.json(); console.log('status', v.status, 'steps', JSON.stringify(v.steps), 'job', JSON.stringify(v.job), 'error', JSON.stringify(v.error)); pm.expect(['scored', 'failed'], 'pipeline still running: send again').to.include(v.status); if (v.status === 'scored') { pm.expect(v.score).to.be.a('number'); pm.expect(v.requirements).to.be.an('array').that.is.not.empty; } });"
+              "pm.test('RunView is awaiting_review or failed', () => { pm.response.to.have.status(200); const v = pm.response.json(); console.log('status', v.status, 'steps', JSON.stringify(v.steps), 'job', JSON.stringify(v.job), 'error', JSON.stringify(v.error)); pm.expect(['awaiting_review', 'failed'], 'pipeline still running: send again').to.include(v.status); if (v.status === 'awaiting_review') { pm.expect(v.score.before).to.be.a('number'); pm.expect(v.score.after).to.be.a('number'); pm.expect(v.score.after).to.be.at.least(v.score.before); pm.expect(['ceiling', 'plateau', 'max_iterations', 'target_reached', 'error']).to.include(v.exitReason); pm.expect(v.iterations.used).to.be.at.most(3); pm.expect(v.requirements).to.be.an('array').that.is.not.empty; v.requirements.forEach(r => pm.expect(r.confirmedGap).to.eql(false)); v.changes.forEach(c => pm.expect(c.status).to.eql('proposed')); pm.expect(v.userEvidence).to.be.an('array').that.is.empty; } });"
             ]
           }
         }
@@ -101,7 +101,7 @@
       "request": {
         "method": "GET",
         "header": [],
-        "description": "Manual check, needs the model reachable (see backend/.env). The pipeline (extraction, then Coverage) runs in the background after the upload, so this may need re-sending until `status` is `scored` or `failed`. When `scored`, `score` is a number and `requirements` lists each Requirement with its verdict and Evidence; when `failed`, `error` holds the code.",
+        "description": "Manual check, needs the model reachable (see backend/.env). The graph (extraction, first Coverage, then the pause before review) runs in the background after the upload, so this may need re-sending until `status` is `awaiting_review` or `failed`. When `awaiting_review`, `score` has `before` and `after` (after is at least before), `exitReason` is a known reason, `iterations.used` is at most 3, `requirements` lists each Requirement with its verdict before and after, every Change is `proposed`, `userEvidence` is empty and every `confirmedGap` is false; when `failed`, `error` holds the code.",
         "url": {
           "raw": "{{baseUrl}}/runs/{{runId}}",
           "host": [

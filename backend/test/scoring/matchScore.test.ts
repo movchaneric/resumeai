@@ -3,8 +3,8 @@ import { CoverageSchema, RequirementSchema } from "@resume-ai/shared";
 import type { Coverage, CoverageVerdict, Importance, Requirement } from "@resume-ai/shared";
 import { matchScore } from "@/scoring/matchScore.js";
 
-const req = (id: string, importance: Importance): Requirement =>
-  RequirementSchema.parse({ id, text: id, source: id, kind: "skill", importance });
+const req = (id: string, importance: Importance, kind: Requirement["kind"] = "skill"): Requirement =>
+  RequirementSchema.parse({ id, text: id, source: id, kind, importance });
 const cov = (requirementId: string, verdict: CoverageVerdict): Coverage =>
   CoverageSchema.parse({ requirementId, verdict, evidenceIds: [], reason: "r" });
 
@@ -44,5 +44,16 @@ describe("matchScore", () => {
   it("returns the score unrounded", () => {
     const coverage = [cov("req1", "met")];
     expect(matchScore(requirements, coverage)).toBeCloseTo(27.2727272727, 8);
+  });
+
+  it("weighs responsibilities half as much as other kinds", () => {
+    const mixed = [
+      req("req1", "must_have"),
+      req("req2", "must_have"),
+      req("req3", "must_have", "responsibility"),
+      req("req4", "must_have", "responsibility"),
+    ];
+    const coverage = [cov("req1", "met"), cov("req2", "met"), cov("req3", "unmet"), cov("req4", "unmet")];
+    expect(matchScore(mixed, coverage)).toBeCloseTo(66.6667, 4);
   });
 });

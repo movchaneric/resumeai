@@ -12,4 +12,6 @@ Decisions made while reviewing the first `shared/` schemas that a reader of the 
 
 **Scoring constants live in the backend.** The Requirement weights (must-have 3, nice-to-have 1) and the verdict credits (met 1, partially met 0.5, unmet 0) are initial, tunable values in `backend/src/scoring/weights.ts`, not part of the schema contract.
 
+**Match Score weights (slice 4).** A kind factor multiplies the importance weight: responsibilities ×0.5, all other kinds ×1, so a must-have responsibility weighs 1.5 and a nice-to-have responsibility 0.5. About half the Requirements are responsibilities and a CV rarely proves them. A factor of 0 was rejected because a responsibility is still part of the job and the tailor needs a reason to target it. See `docs/slices/04-tailoring-loop/decisions.md`.
+
 **Still open.** The run view's step keys, error codes, and exit reasons were chosen while writing the schemas and are easy to change.

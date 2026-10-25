@@ -15,18 +15,25 @@ export interface RouteInput {
   /** Number of the round that just finished, starting at 1. */
   round: number;
   outcome: RoundOutcome;
+  /** Rounds with no valid Changes immediately before this one (0 when the previous round had some, or this is round 1). */
+  consecutiveEmptyRounds?: number;
 }
 
 export type RouteDecision =
-  | { next: "another_round"; keepRound: true }
+  | { next: "another_round"; keepRound: boolean }
   | { next: "review"; exitReason: ExitReason; keepRound: boolean };
 
 const stop = (exitReason: ExitReason, keepRound: boolean): RouteDecision => ({ next: "review", exitReason, keepRound });
 
 /** Decides after each round whether to loop or stop for review, and whether the pending round is kept. */
-export function routeAfterRound({ previousScore, round, outcome }: RouteInput): RouteDecision {
+export function routeAfterRound({ previousScore, round, outcome, consecutiveEmptyRounds = 0 }: RouteInput): RouteDecision {
   if (outcome.failed) return stop("error", false);
-  if (outcome.validChanges === 0) return stop("ceiling", false);
+  if (outcome.validChanges === 0) {
+    // An empty round is never kept. It gets one second chance (its tailor sees the rejections), within the round cap.
+    if (consecutiveEmptyRounds >= 1) return stop("ceiling", false);
+    if (round >= MAX_ROUNDS) return stop("max_iterations", false);
+    return { next: "another_round", keepRound: false };
+  }
   if (outcome.newScore < previousScore) return stop("plateau", false);
   if (outcome.newScore >= TARGET_SCORE) return stop("target_reached", true);
   if (outcome.newScore - previousScore < MIN_GAIN) return stop("plateau", true);

@@ -29,7 +29,7 @@ const USAGE = `Usage: pnpm --filter backend extract <cv-file> <job-description-f
   --coverage              after extraction, judge how well the CV covers each Requirement (with its kind) and print the score
   --tailor                implies --coverage; run the whole Run graph in memory (no HTTP, no database) and print each
                           round: proposed Changes, rejections with stage and reason, the kept score, then the exit
-                          reason and the score before and after. Extraction uses LLM_MODEL, the rest LLM_JUDGE_MODEL.
+                          reason and the score before and after. CV extraction uses LLM_MODEL, the rest (Job Profile included) LLM_JUDGE_MODEL.
   --check                 compare protected CV facts with <cv path without extension>.expected.json;
                           with --coverage, also compare verdicts with <job-description path without extension>.coverage.json
                           (a list of { "requirement": text, "verdict": "met" | "partially_met" | "unmet" }).
@@ -103,7 +103,7 @@ async function main(): Promise<number> {
   const provider = setupTracing(config);
   const llm = new LangChainLlmClient(config.llm);
   const judgeLlm = new LangChainLlmClient({ ...config.llm, model: config.llm.judgeModel });
-  console.log(`models: extraction ${config.llm.model}, judge ${config.llm.judgeModel}`);
+  console.log(`models: extraction ${config.llm.model} (Job Profile ${config.llm.judgeModel}), judge ${config.llm.judgeModel}`);
 
   try {
     return await runInPipelineSpan(async () => {
@@ -132,7 +132,7 @@ async function main(): Promise<number> {
         console.log(`----- JOB PROFILE -----\n${JSON.stringify(jobProfile, null, 2)}\n`);
         console.log(`----- CV -----\n${JSON.stringify(cv, null, 2)}\n`);
       } else {
-        jobProfile = await timed("extractJobProfile", () => extractJobProfile(llm, jdText));
+        jobProfile = await timed("extractJobProfile", () => extractJobProfile(judgeLlm, jdText));
         console.log(`----- JOB PROFILE -----\n${JSON.stringify(jobProfile, null, 2)}\n`);
 
         const extracted = await timed("extractCv", () => extractCv(llm, cvText));

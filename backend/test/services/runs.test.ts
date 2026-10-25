@@ -136,15 +136,15 @@ describe("RunsService", () => {
       expect(stepStates(view)).toEqual(["parse:done", "extract:running"]);
     });
 
-    it("sends Coverage to judgeLlm and extraction to llm", async () => {
-      const judgeLlm = new FakeLlmClient().enqueue("assess_coverage", COVERAGE_ANSWER);
+    it("sends the Job Profile extraction and Coverage to judgeLlm and the CV extraction to llm", async () => {
+      const judgeLlm = new FakeLlmClient().enqueue("extract_job_profile", JOB_PROFILE).enqueue("assess_coverage", COVERAGE_ANSWER);
       const ctx = setup(undefined, judgeLlm);
-      ctx.llm.enqueue("extract_job_profile", JOB_PROFILE).enqueue("extract_cv", extractedCv);
+      ctx.llm.enqueue("extract_cv", extractedCv);
       await createExtractableRun(ctx);
       await ctx.settle();
 
-      expect(ctx.llm.calls.map((c) => c.name)).toEqual(["extract_job_profile", "extract_cv"]);
-      expect(judgeLlm.calls.map((c) => c.name)).toEqual(["assess_coverage"]);
+      expect(ctx.llm.calls.map((c) => c.name)).toEqual(["extract_cv"]);
+      expect(judgeLlm.calls.map((c) => c.name)).toEqual(["extract_job_profile", "assess_coverage"]);
     });
 
     it("uses llm for Coverage when no judge client is given", async () => {
@@ -420,8 +420,8 @@ describe("RunsService tailoring round", () => {
 
   function tailoringSetup(judge = new FakeLlmClient()) {
     const ctx = setup(undefined, judge);
-    ctx.llm.enqueue("extract_job_profile", THREE_REQS).enqueue("extract_cv", extractedCv);
-    judge.enqueue("assess_coverage", firstCoverage);
+    ctx.llm.enqueue("extract_cv", extractedCv);
+    judge.enqueue("extract_job_profile", THREE_REQS).enqueue("assess_coverage", firstCoverage);
     return { ...ctx, judge };
   }
   const finish = async (ctx: ReturnType<typeof tailoringSetup>) => {
@@ -438,12 +438,12 @@ describe("RunsService tailoring round", () => {
       .enqueue("tailor", { changes: [reword, addSkill] })
       .enqueue("claim_check", { verdicts: [verdict("r1.c1", "supported"), verdict("r1.c2", "supported")] })
       .enqueue("assess_coverage", { verdicts: [{ requirementId: "req2", reason: "Shown now.", evidenceIds: ["exp1.b1"], verdict: "met" }] })
-      .enqueue("tailor", { changes: [] });
+      .enqueue("tailor", { changes: [] }, { changes: [] });
     const view = await finish(ctx);
 
-    // Round 1 gained 43 points; round 2 found nothing more to propose.
+    // Round 1 gained 43 points; rounds 2 and 3 found nothing more to propose.
     expect(view.exitReason).toBe("ceiling");
-    expect(view.iterations).toEqual({ used: 2, max: 3 });
+    expect(view.iterations).toEqual({ used: 3, max: 3 });
     expect(view.changes.map((c) => c.id)).toEqual(["r1.c1", "r1.c2"]);
     expect(view.cv.skills.map((s) => [s.id, s.text])).toEqual([["skill1", "TypeScript"], ["skill2", "Node.js"], ["skill3", "PostgreSQL"]]);
     expect(view.cv.experience[0]!.bullets[0]!.text).toBe("Designed and maintained Node.js services backed by PostgreSQL databases.");
@@ -462,10 +462,10 @@ describe("RunsService tailoring round", () => {
       .enqueue("tailor", { changes: [addSkill] })
       .enqueue("claim_check", { verdicts: [verdict("r1.c1", "supported")] })
       .enqueue("assess_coverage", { verdicts: [{ requirementId: "req2", reason: "Shown now.", evidenceIds: ["exp1.b1"], verdict: "met" }] })
-      .enqueue("tailor", { changes: [] });
+      .enqueue("tailor", { changes: [] }, { changes: [] });
     await finish(ctx);
-    expect(ctx.llm.calls.map((c) => c.name)).toEqual(["extract_job_profile", "extract_cv"]);
-    expect(ctx.judge.calls.map((c) => c.name)).toEqual(["assess_coverage", "tailor", "claim_check", "assess_coverage", "tailor"]);
+    expect(ctx.llm.calls.map((c) => c.name)).toEqual(["extract_cv"]);
+    expect(ctx.judge.calls.map((c) => c.name)).toEqual(["extract_job_profile", "assess_coverage", "tailor", "claim_check", "assess_coverage", "tailor", "tailor"]);
   });
 
   it("re-judges only the Requirements the valid Changes list", async () => {
@@ -474,9 +474,9 @@ describe("RunsService tailoring round", () => {
       .enqueue("tailor", { changes: [addSkill] })
       .enqueue("claim_check", { verdicts: [verdict("r1.c1", "supported")] })
       .enqueue("assess_coverage", { verdicts: [{ requirementId: "req2", reason: "Shown now.", evidenceIds: ["exp1.b1"], verdict: "met" }] })
-      .enqueue("tailor", { changes: [] });
+      .enqueue("tailor", { changes: [] }, { changes: [] });
     await finish(ctx);
-    const rejudge = JSON.stringify(ctx.judge.calls[3]!.messages);
+    const rejudge = JSON.stringify(ctx.judge.calls[4]!.messages);
     expect(rejudge).toContain("req2");
     expect(rejudge).not.toContain("req1");
     expect(rejudge).not.toContain("req3");
@@ -484,26 +484,27 @@ describe("RunsService tailoring round", () => {
     expect(rejudge).not.toContain("Docker");
   });
 
-  it("ends with ceiling and no Changes when the claim check rejects every Change, without a re-judge", async () => {
+  it("ends with ceiling and no Changes when the claim check rejects every Change and round 2 is empty too, without a re-judge", async () => {
     const ctx = tailoringSetup();
     ctx.judge
       .enqueue("tailor", { changes: [reword, addSkill] })
-      .enqueue("claim_check", { verdicts: [verdict("r1.c1", "not_supported"), verdict("r1.c2", "not_supported")] });
+      .enqueue("claim_check", { verdicts: [verdict("r1.c1", "not_supported"), verdict("r1.c2", "not_supported")] })
+      .enqueue("tailor", { changes: [] });
     const view = await finish(ctx);
     expect(view.exitReason).toBe("ceiling");
     expect(view.changes).toEqual([]);
     expect(view.score.after).toBe(view.score.before);
     expect(view.cv.skills).toHaveLength(2);
-    expect(view.iterations.used).toBe(1);
-    expect(ctx.judge.calls.map((c) => c.name)).toEqual(["assess_coverage", "tailor", "claim_check"]);
+    expect(view.iterations.used).toBe(2);
+    expect(ctx.judge.calls.map((c) => c.name)).toEqual(["extract_job_profile", "assess_coverage", "tailor", "claim_check", "tailor"]);
   });
 
   it("never sends a stage-1 rejection to the claim check", async () => {
     const ctx = tailoringSetup();
     const unknownTarget = modelChange({ targetItemId: "exp9.b9", text: "Something" });
-    ctx.judge.enqueue("tailor", { changes: [unknownTarget, addSkill] }).enqueue("claim_check", { verdicts: [verdict("r1.c2", "not_supported")] });
+    ctx.judge.enqueue("tailor", { changes: [unknownTarget, addSkill] }).enqueue("claim_check", { verdicts: [verdict("r1.c2", "not_supported")] }).enqueue("tailor", { changes: [] });
     const view = await finish(ctx);
-    const prompt = JSON.stringify(ctx.judge.calls[2]!.messages);
+    const prompt = JSON.stringify(ctx.judge.calls[3]!.messages);
     expect(prompt).toContain("r1.c2");
     expect(prompt).not.toContain("r1.c1");
     expect(view.exitReason).toBe("ceiling");
@@ -511,23 +512,24 @@ describe("RunsService tailoring round", () => {
 
   it("skips claim check and tailoring work entirely when every Change fails stage 1", async () => {
     const ctx = tailoringSetup();
-    ctx.judge.enqueue("tailor", { changes: [modelChange({ targetItemId: "exp9.b9", text: "Something" })] });
+    const bad = { changes: [modelChange({ targetItemId: "exp9.b9", text: "Something" })] };
+    ctx.judge.enqueue("tailor", bad, bad);
     const view = await finish(ctx);
     expect(view.exitReason).toBe("ceiling");
-    expect(ctx.judge.calls.map((c) => c.name)).toEqual(["assess_coverage", "tailor"]);
+    expect(ctx.judge.calls.map((c) => c.name)).toEqual(["extract_job_profile", "assess_coverage", "tailor", "tailor"]);
   });
 
   it("does not tailor at all when every Requirement is already met", async () => {
-    const judge = new FakeLlmClient().enqueue("assess_coverage", coverageAnswer);
+    const judge = new FakeLlmClient().enqueue("extract_job_profile", JOB_PROFILE).enqueue("assess_coverage", coverageAnswer);
     const ctx = setup(undefined, judge);
-    ctx.llm.enqueue("extract_job_profile", JOB_PROFILE).enqueue("extract_cv", extractedCv);
+    ctx.llm.enqueue("extract_cv", extractedCv);
     const id = await createExtractableRun(ctx);
     await ctx.settle();
     const view = await ctx.service.getRunView(id);
     if (view.status !== "awaiting_review") throw new Error("expected awaiting_review");
     expect(view.exitReason).toBe("target_reached");
     expect(view.iterations.used).toBe(0);
-    expect(judge.calls.map((c) => c.name)).toEqual(["assess_coverage"]);
+    expect(judge.calls.map((c) => c.name)).toEqual(["extract_job_profile", "assess_coverage"]);
   });
 
   it("stops at awaiting_review with exit reason error, keeping nothing, when the round fails", async () => {
@@ -549,11 +551,11 @@ describe("RunsService tailoring round", () => {
     ctx.judge.structured = (async (...args: Parameters<typeof structured>) => {
       if (args[2].name === "tailor") {
         const view = await service!.getRunView(runId);
-        seen = { status: view.status, used: view.status === "tailoring" ? view.iterations.used : undefined };
+        seen ??= { status: view.status, used: view.status === "tailoring" ? view.iterations.used : undefined };
       }
       return structured(...args);
     }) as typeof ctx.judge.structured;
-    ctx.judge.enqueue("tailor", { changes: [] });
+    ctx.judge.enqueue("tailor", { changes: [] }, { changes: [] });
     runId = await createExtractableRun(ctx);
     await ctx.settle();
     // `iterations.used` counts rounds started, so it is already 1 while round 1 runs.
@@ -574,8 +576,8 @@ describe("RunsService tailoring round", () => {
     function loopSetup(first: ReturnType<typeof cov>) {
       const judge = new FakeLlmClient();
       const ctx = setup(undefined, judge);
-      ctx.llm.enqueue("extract_job_profile", THREE_REQS).enqueue("extract_cv", extractedCv);
-      judge.enqueue("assess_coverage", first);
+      ctx.llm.enqueue("extract_cv", extractedCv);
+      judge.enqueue("extract_job_profile", THREE_REQS).enqueue("assess_coverage", first);
       return { ...ctx, judge };
     }
     /** One round: the tailor answer, the claim verdicts for r<round>.c<n>, and the re-judge answer. */
@@ -597,15 +599,53 @@ describe("RunsService tailoring round", () => {
       expect(view.changes.map((c) => c.id)).toEqual(["r1.c1", "r2.c1", "r2.c2"]);
     });
 
-    it("stops with ceiling in round 2 when nothing valid is proposed, keeping round 1", async () => {
+    it("stops with ceiling in round 3 after two empty rounds, keeping round 1", async () => {
       const ctx = loopSetup(cov("met", "unmet", "unmet"));
       round(ctx.judge, 1, [addSkillFor("PostgreSQL", "req2")], rejudged("req2", "partially_met"));
+      round(ctx.judge, 2, [], null);
+      round(ctx.judge, 3, [], null);
+      const view = await finish(ctx);
+      expect(view.exitReason).toBe("ceiling");
+      expect(view.iterations.used).toBe(3);
+      expect(view.changes.map((c) => c.id)).toEqual(["r1.c1"]);
+      expect(view.score.after).toBe(64);
+    });
+
+    it("gives an empty round a second chance: round 1 all rejected, round 2 gains and is kept, and its tailor saw the rejection reasons", async () => {
+      const ctx = loopSetup(cov("met", "unmet", "unmet"));
+      round(ctx.judge, 1, [addSkillFor("Kubernetes", "req2")], null, ["not_supported"]);
+      round(ctx.judge, 2, [addSkillFor("PostgreSQL", "req2")], rejudged("req2", "partially_met"));
+      round(ctx.judge, 3, [], null);
+      const view = await finish(ctx);
+      expect(view.changes.map((c) => c.id)).toEqual(["r2.c1"]);
+      expect(view.score.after).toBe(64);
+      const tailorCalls = ctx.judge.calls.filter((c) => c.name === "tailor");
+      const second = tailorCalls[1]!.messages.filter((m) => m.role === "user").map((m) => m.content).join("\n");
+      expect(second).toContain("Rejected earlier");
+      expect(second).toContain("claim reason 1.1");
+      expect(second).toContain("Kubernetes");
+    });
+
+    it("stops with ceiling after two empty rounds in a row, with two rounds used and nothing kept", async () => {
+      const ctx = loopSetup(cov("met", "unmet", "unmet"));
+      round(ctx.judge, 1, [addSkillFor("Kubernetes", "req2")], null, ["not_supported"]);
       round(ctx.judge, 2, [], null);
       const view = await finish(ctx);
       expect(view.exitReason).toBe("ceiling");
       expect(view.iterations.used).toBe(2);
-      expect(view.changes.map((c) => c.id)).toEqual(["r1.c1"]);
-      expect(view.score.after).toBe(64);
+      expect(view.changes).toEqual([]);
+      expect(view.score.after).toBe(view.score.before);
+    });
+
+    it("stops with max_iterations when round 3 is empty after a valid round 2", async () => {
+      const ctx = loopSetup(cov("met", "unmet", "unmet"));
+      round(ctx.judge, 1, [], null);
+      round(ctx.judge, 2, [addSkillFor("PostgreSQL", "req2")], rejudged("req2", "partially_met"));
+      round(ctx.judge, 3, [], null);
+      const view = await finish(ctx);
+      expect(view.exitReason).toBe("max_iterations");
+      expect(view.iterations.used).toBe(3);
+      expect(view.changes.map((c) => c.id)).toEqual(["r2.c1"]);
     });
 
     it("stops with plateau and keeps a round that gained too little", async () => {
@@ -685,11 +725,11 @@ describe("RunsService tailoring round", () => {
       ctx.judge.structured = (async (...args: Parameters<typeof structured>) => {
         if (args[2].name === "tailor") {
           const view = await ctx.service.getRunView(runId);
-          if (view.status === "tailoring") seen = view.iterations.used;
+          if (view.status === "tailoring") seen ??= view.iterations.used;
         }
         return structured(...args);
       }) as typeof ctx.judge.structured;
-      ctx.judge.enqueue("tailor", { changes: [] });
+      ctx.judge.enqueue("tailor", { changes: [] }, { changes: [] });
       runId = await createExtractableRun(ctx);
       await ctx.settle();
       expect(seen).toBe(1);
@@ -709,9 +749,10 @@ describe("RunsService tailoring round", () => {
       }) as typeof ctx.judge.structured;
       round(ctx.judge, 1, [addSkillFor("PostgreSQL", "req2")], rejudged("req2", "partially_met"));
       round(ctx.judge, 2, [], null);
+      round(ctx.judge, 3, [], null);
       runId = await createExtractableRun(ctx);
       await ctx.settle();
-      expect(seen).toEqual([{ before: 43, after: null }, { before: 43, after: 64 }]);
+      expect(seen).toEqual([{ before: 43, after: null }, { before: 43, after: 64 }, { before: 43, after: 64 }]);
     });
 
     describe("failures", () => {

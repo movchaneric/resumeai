@@ -1,14 +1,20 @@
 // Prepares the integration-test database before any test runs: creates it when missing and applies every migration,
 // so the tests exercise the real migrations without a manual step. Needs `docker compose up -d postgres`.
 import { execFileSync } from "node:child_process";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 
-/** Override with `TEST_DATABASE_URL` to use a separate database (parallel worktrees). Read by `vitest.config.ts` too: `test.env` is not visible here, because global setup runs in the main process. */
-export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL ?? "postgresql://resume:resume@localhost:15432/resume_ai_test";
+/** Test database name for a repo checkout: the folder name lowercased, each run of non-`[a-z0-9]` characters replaced by `_`, plus `_test`. `resume-ai` gives `resume_ai_test`; a worktree `resume-ai-wt-05` gives `resume_ai_wt_05_test`. */
+export function testDatabaseName(repoRoot: string): string {
+  return `${basename(repoRoot).toLowerCase().replace(/[^a-z0-9]+/g, "_")}_test`;
+}
 
 const backendDir = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+/** Defaults to a database named after the checkout folder, so parallel worktrees do not share one. Override with `TEST_DATABASE_URL` to use any other database. Read by `vitest.config.ts` too: `test.env` is not visible here, because global setup runs in the main process. */
+export const TEST_DATABASE_URL =
+  process.env.TEST_DATABASE_URL ?? `postgresql://resume:resume@localhost:15432/${testDatabaseName(join(backendDir, ".."))}`;
 
 async function createDatabaseIfMissing(url: URL): Promise<void> {
   const name = url.pathname.slice(1);

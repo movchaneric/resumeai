@@ -61,10 +61,12 @@ const asLines = (issues: string[]) => issues.map((i) => `- ${i}`).join("\n");
 export async function claimCheck(
   llm: LlmClient,
   changes: ClaimCheckInput[],
+  options: { round?: number } = {},
 ): Promise<{ supportedIds: string[]; rejections: ClaimRejection[] }> {
   if (changes.length === 0) return { supportedIds: [], rejections: [] };
 
   return withSpan(CALL_NAME, async (span) => {
+    if (options.round !== undefined) span.setAttribute("round", options.round);
     // Copy only the allowed fields, so extra properties on the caller's objects can never reach the prompt.
     const safe = changes.map(({ id, before, after, evidence }) => ({ id, before, after, evidence }));
     const ids = safe.map((c) => c.id);

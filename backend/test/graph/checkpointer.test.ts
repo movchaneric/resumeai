@@ -57,7 +57,7 @@ describe("Postgres checkpointer", () => {
     const state = await reader.read(runId);
     expect(state?.jobProfile?.title).toBe("Backend Developer");
     expect(state?.scoreBefore).toBe(100);
-    expect(state?.exitReason).toBe("ceiling");
+    expect(state?.exitReason).toBe("target_reached");
     expect(statuses).toEqual(["extracting", "awaiting_review"]);
     expect(await reader.read(randomUUID() as RunId)).toBeNull();
     await readerCheckpointer.end();

@@ -21,6 +21,7 @@ function toSnapshot(values: Partial<RunStateValues>): RunSnapshot {
     changes: values.changes ?? [],
     scoreBefore: values.scoreBefore ?? null,
     scoreAfter: values.scoreAfter ?? null,
+    rejections: values.rejections ?? [],
     rounds: values.rounds ?? 0,
     exitReason: values.exitReason ?? null,
   };

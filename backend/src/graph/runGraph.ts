@@ -44,7 +44,7 @@ export type RoundSummary = {
 };
 
 export type RunGraphDeps = {
-  /** Extraction. */
+  /** CV extraction (`LLM_MODEL`). The Job Profile is extracted with `judgeLlm`, so its Requirement list is stable. */
   llm: LlmClient;
   /** Judge-and-write work (Coverage now; the tailor and claim check later). */
   judgeLlm: LlmClient;
@@ -77,7 +77,7 @@ export function buildRunGraph({ llm, judgeLlm, checkpointer, onEnter, onRound }:
   return new StateGraph(RunState)
     .addNode("extract", async (state) => {
       await onEnter(state.runId, "extract");
-      const jobProfile = await extractJobProfile(llm, state.jobDescriptionText);
+      const jobProfile = await extractJobProfile(judgeLlm, state.jobDescriptionText);
       const { cv, softMismatches } = await extractCv(llm, state.cvText);
       console.debug(`Run ${state.runId}: extraction done, ${softMismatches} soft mismatches`);
       return { jobProfile, cv };
@@ -160,6 +160,7 @@ export function buildRunGraph({ llm, judgeLlm, checkpointer, onEnter, onRound }:
       const decision = routeAfterRound({
         previousScore,
         round: pending.round,
+        consecutiveEmptyRounds: state.consecutiveEmptyRounds,
         outcome: pending.failed
           ? { failed: true }
           : { failed: false, validChanges: pending.valid.length, newScore: pending.score ?? previousScore },
@@ -176,10 +177,12 @@ export function buildRunGraph({ llm, judgeLlm, checkpointer, onEnter, onRound }:
         keptScore: decision.keepRound ? pending.score! : previousScore,
         failed: pending.failed,
       });
-      if (!decision.keepRound) return { pending: null, exitReason };
+      const consecutiveEmptyRounds = !pending.failed && pending.valid.length === 0 ? state.consecutiveEmptyRounds + 1 : 0;
+      if (!decision.keepRound) return { pending: null, exitReason, consecutiveEmptyRounds };
       return {
         pending: null,
         exitReason,
+        consecutiveEmptyRounds,
         changes: mergeRoundIntoChanges(state.cv!, state.changes, pending.valid),
         coverage: pending.coverage!,
         scoreAfter: pending.score!,

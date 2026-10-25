@@ -45,6 +45,8 @@ export const RunState = Annotation.Root({
   pending: last<PendingRound | null>(null),
   /** Tailoring rounds started. */
   rounds: last(0),
+  /** Rounds in a row, up to the last one finished, that had no valid Changes. */
+  consecutiveEmptyRounds: last(0),
   exitReason: last<ExitReason | null>(null),
 });
 

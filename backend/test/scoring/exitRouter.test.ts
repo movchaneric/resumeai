@@ -35,11 +35,41 @@ describe("routeAfterRound", () => {
     });
   });
 
-  it("exits with ceiling when no valid Changes, keeping nothing", () => {
-    expect(routeAfterRound({ previousScore: 50, round: 1, outcome: ok(0, 50) })).toEqual({
-      next: "review",
-      exitReason: "ceiling",
-      keepRound: false,
+  describe("an empty round (no valid Changes)", () => {
+    it("gets a second chance: another round, nothing kept, when the round before was not empty", () => {
+      expect(routeAfterRound({ previousScore: 50, round: 1, consecutiveEmptyRounds: 0, outcome: ok(0, 50) })).toEqual({
+        next: "another_round",
+        keepRound: false,
+      });
+    });
+
+    it("exits with ceiling, keeping nothing, when the round before was also empty", () => {
+      expect(routeAfterRound({ previousScore: 50, round: 2, consecutiveEmptyRounds: 1, outcome: ok(0, 50) })).toEqual({
+        next: "review",
+        exitReason: "ceiling",
+        keepRound: false,
+      });
+    });
+
+    it("exits with max_iterations, keeping nothing, when it is round 3", () => {
+      expect(routeAfterRound({ previousScore: 50, round: 3, consecutiveEmptyRounds: 0, outcome: ok(0, 50) })).toEqual({
+        next: "review",
+        exitReason: "max_iterations",
+        keepRound: false,
+      });
+    });
+
+    it("exits with ceiling in round 3 when round 2 was empty too", () => {
+      expect(routeAfterRound({ previousScore: 50, round: 3, consecutiveEmptyRounds: 1, outcome: ok(0, 50) })).toMatchObject({
+        exitReason: "ceiling",
+      });
+    });
+
+    it("a valid round after an empty one routes normally", () => {
+      expect(routeAfterRound({ previousScore: 50, round: 2, consecutiveEmptyRounds: 1, outcome: ok(1, 60) })).toEqual({
+        next: "another_round",
+        keepRound: true,
+      });
     });
   });
 
@@ -96,7 +126,7 @@ describe("routeAfterRound", () => {
       });
     });
     it("ceiling beats a lower or high score", () => {
-      expect(routeAfterRound({ previousScore: 50, round: 1, outcome: ok(0, 95) })).toMatchObject({
+      expect(routeAfterRound({ previousScore: 50, round: 2, consecutiveEmptyRounds: 1, outcome: ok(0, 95) })).toMatchObject({
         exitReason: "ceiling",
       });
     });

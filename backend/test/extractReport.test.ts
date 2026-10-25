@@ -150,8 +150,9 @@ describe("runTailorInMemory", () => {
   };
 
   it("runs the whole graph with the two clients and reports each round to the observer", async () => {
-    const llm = new FakeLlmClient().enqueue("extract_job_profile", job).enqueue("extract_cv", extractedCv);
+    const llm = new FakeLlmClient().enqueue("extract_cv", extractedCv);
     const judge = new FakeLlmClient()
+      .enqueue("extract_job_profile", job)
       .enqueue("assess_coverage", { verdicts: [verdict("req1", "met", ["exp1.b1"]), verdict("req2", "unmet", [])] })
       .enqueue("tailor", { changes: [modelChange] })
       .enqueue("claim_check", { verdicts: [{ id: "r1.c1", reason: "ok", verdict: "supported" }] })
@@ -162,8 +163,8 @@ describe("runTailorInMemory", () => {
       onRound: (r) => void rounds.push(r.round),
     });
 
-    expect(llm.calls.map((c) => c.name)).toEqual(["extract_job_profile", "extract_cv"]);
-    expect(judge.calls.map((c) => c.name)).toEqual(["assess_coverage", "tailor", "claim_check", "assess_coverage"]);
+    expect(llm.calls.map((c) => c.name)).toEqual(["extract_cv"]);
+    expect(judge.calls.map((c) => c.name)).toEqual(["extract_job_profile", "assess_coverage", "tailor", "claim_check", "assess_coverage"]);
     expect(rounds).toEqual([1]);
     expect(snapshot.exitReason).toBe("target_reached");
     expect(snapshot.scoreAfter).toBeGreaterThan(snapshot.scoreBefore!);

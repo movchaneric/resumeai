@@ -14,7 +14,7 @@ import { CoverageError } from "@/scoring/errors.js";
 import { ExtractionError, NoRequirementsError } from "@/extraction/errors.js";
 import { extractCv } from "@/extraction/extractCv.js";
 import { extractJobProfile } from "@/extraction/extractJobProfile.js";
-import { LlmSchemaError } from "@/llm/llmClient.js";
+import { LlmSchemaError, LlmUnavailableError } from "@/llm/llmClient.js";
 import { RunsService } from "@/services/runs.js";
 import type { RunStore } from "@/stores/runs.js";
 import { loadConfig } from "@/utils/config.js";
@@ -291,5 +291,27 @@ describe("pipeline span", () => {
     expect(byName("assess_coverage").map((s) => s.attributes["round"])).toEqual([0, 1]);
     expect(ancestors(byName("claim_check")[0]!)[0]).toBe("validate");
     expect(byName("validate")[0]!.parentSpanContext?.spanId).toBe(rootId);
+  });
+  it("marks the failing round step's span as an error and ends the root with exit_reason error", async () => {
+    const id = "3f0c1d4e-5b2a-4c8e-9a71-0d6e2f8b7a13";
+    const llm = new FakeLlmClient()
+      .enqueue("extract_job_profile", profile)
+      .enqueue("extract_cv", fullCv())
+      .enqueue("assess_coverage", COVERAGE_ANSWER)
+      .enqueue("tailor", new LlmUnavailableError("down"));
+    const store = fakeStore();
+    const service = new RunsService({
+      store: store as unknown as RunStore,
+      config: loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" }),
+      graphRunner: makeGraphRunner(store, llm),
+    });
+    await service.runPipeline({ runId: id as RunId, cvText, jobDescriptionText: "Backend developer" });
+
+    const tailor = finished("tailor");
+    expect(tailor.status.code).toBe(SpanStatusCode.ERROR);
+    expect(tailor.attributes["failure_reason"]).toBe("LlmUnavailableError");
+    const root = finished("pipeline");
+    expect(root.attributes["exit_reason"]).toBe("error");
+    expect(root.attributes["rounds"]).toBe(1);
   });
 });

@@ -5,6 +5,7 @@ import type { LlmClient } from "@/llm/llmClient.js";
 import { tailorCv } from "@/tailoring/tailorCv.js";
 import { validateChanges } from "@/tailoring/validateChanges.js";
 import { applyChanges } from "@/tailoring/applyChanges.js";
+import { mergeRoundIntoChanges } from "@/tailoring/mergeChanges.js";
 import { mergeCoverage, requirementsListedBy } from "@/tailoring/roundCoverage.js";
 import { routeAfterRound, shouldSkipTailoring } from "@/scoring/exitRouter.js";
 import { assessCoverage } from "@/scoring/assessCoverage.js";
@@ -15,6 +16,7 @@ import { RunState } from "@/graph/state.js";
 export const NODE_STATUS = {
   extract: "extracting",
   assess_coverage: "extracting",
+  begin_round: "tailoring",
   tailor: "tailoring",
   validate: "tailoring",
   rejudge: "tailoring",
@@ -31,16 +33,23 @@ export type RunGraphDeps = {
   onEnter: (runId: string, node: keyof typeof NODE_STATUS) => Promise<void>;
 };
 
-/** A failure inside a round is logged by name only (messages can quote CV text) and handed to the exit router. */
+/**
+ * A failure inside a round is logged by error name and issue count only (messages and issues can quote CV text)
+ * and handed to the exit router. The failing span already carries the error status (`withSpan`).
+ */
 function logRoundFailure(runId: string, round: number, error: unknown): void {
-  console.error(`Run ${runId}: round ${round} failed: ${error instanceof Error ? error.name : typeof error}`);
+  const name = error instanceof Error ? error.name : typeof error;
+  const issues = (error as { issues?: unknown } | null)?.issues;
+  const count = Array.isArray(issues) ? `, ${issues.length} issues` : "";
+  console.error(`Run ${runId}: round ${round} failed: ${name}${count}`);
 }
 
 /**
  * The Run workflow (ADR 0001): extract, first Coverage, then either the pause before `review` (nothing to tailor)
- * or a tailoring round: tailor, validate, rejudge, route. Nodes are thin: each calls functions from `extraction/`,
- * `tailoring/` or `scoring/` and returns a state update. The `route` node is the only place that commits the
- * pending round. A later ticket turns its exit into a loop back to `tailor`.
+ * or tailoring rounds: begin_round, tailor, validate, rejudge, route, and back to begin_round while the exit router
+ * says so (at most MAX_ROUNDS). Nodes are thin: each calls functions from `extraction/`, `tailoring/` or `scoring/`
+ * and returns a state update. `begin_round` counts the round as started; the `route` node is the only place that
+ * commits the pending round.
  */
 export function buildRunGraph({ llm, judgeLlm, checkpointer, onEnter }: RunGraphDeps) {
   return new StateGraph(RunState)
@@ -64,10 +73,15 @@ export function buildRunGraph({ llm, judgeLlm, checkpointer, onEnter }: RunGraph
       }
       return base;
     })
+    .addNode("begin_round", async (state) => {
+      await onEnter(state.runId, "begin_round");
+      const round = state.rounds + 1;
+      return { rounds: round, pending: { round, proposed: [], valid: [], coverage: null, score: null, failed: false } };
+    })
     .addNode("tailor", async (state) => {
       await onEnter(state.runId, "tailor");
-      const round = state.rounds + 1;
-      const pending = { round, proposed: [], valid: [], coverage: null, score: null, failed: false };
+      const pending = state.pending!;
+      const round = pending.round;
       try {
         const { changes } = await tailorCv(judgeLlm, {
           originalCv: state.cv!,
@@ -77,10 +91,10 @@ export function buildRunGraph({ llm, judgeLlm, checkpointer, onEnter }: RunGraph
           rejections: state.rejections.map(({ round, change, reason }) => ({ round, change, reason })),
           round,
         });
-        return { rounds: round, pending: { ...pending, proposed: changes } };
+        return { pending: { ...pending, proposed: changes } };
       } catch (error) {
         logRoundFailure(state.runId, round, error);
-        return { rounds: round, pending: { ...pending, failed: true } };
+        return { pending: { ...pending, failed: true } };
       }
     })
     .addNode("validate", async (state) => {
@@ -107,7 +121,7 @@ export function buildRunGraph({ llm, judgeLlm, checkpointer, onEnter }: RunGraph
       const { requirements } = state.jobProfile!;
       try {
         // Only the Requirements the valid Changes list; the other verdicts carry over.
-        const tailored = applyChanges(state.cv!, [...state.changes, ...pending.valid]);
+        const tailored = applyChanges(state.cv!, mergeRoundIntoChanges(state.cv!, state.changes, pending.valid));
         const { coverage } = await assessCoverage(judgeLlm, tailored, requirementsListedBy(requirements, pending.valid), {
           round: pending.round,
         });
@@ -128,13 +142,13 @@ export function buildRunGraph({ llm, judgeLlm, checkpointer, onEnter }: RunGraph
           ? { failed: true }
           : { failed: false, validChanges: pending.valid.length, newScore: pending.score ?? previousScore },
       });
-      // One round only for now: where the router would continue, stop with the round cap.
-      const exitReason = decision.next === "review" ? decision.exitReason : ("max_iterations" as const);
+      // `null` means another round: the edge after `route` loops back while no exit reason is set.
+      const exitReason = decision.next === "review" ? decision.exitReason : null;
       if (!decision.keepRound) return { pending: null, exitReason };
       return {
         pending: null,
         exitReason,
-        changes: [...state.changes, ...pending.valid],
+        changes: mergeRoundIntoChanges(state.cv!, state.changes, pending.valid),
         coverage: pending.coverage!,
         scoreAfter: pending.score!,
       };
@@ -143,11 +157,12 @@ export function buildRunGraph({ llm, judgeLlm, checkpointer, onEnter }: RunGraph
     .addNode("review", () => ({}))
     .addEdge(START, "extract")
     .addEdge("extract", "assess_coverage")
-    .addConditionalEdges("assess_coverage", (state) => (state.exitReason === null ? "tailor" : "review"), ["tailor", "review"])
+    .addConditionalEdges("assess_coverage", (state) => (state.exitReason === null ? "begin_round" : "review"), ["begin_round", "review"])
+    .addEdge("begin_round", "tailor")
     .addEdge("tailor", "validate")
     .addEdge("validate", "rejudge")
     .addEdge("rejudge", "route")
-    .addEdge("route", "review")
+    .addConditionalEdges("route", (state) => (state.exitReason === null ? "begin_round" : "review"), ["begin_round", "review"])
     .addEdge("review", END)
     .compile({ checkpointer, interruptBefore: ["review"] });
 }

@@ -15,6 +15,7 @@ import {
 } from "@resume-ai/shared";
 import { applyChanges } from "@/tailoring/applyChanges.js";
 import type { RecordedRejection } from "@/tailoring/validateChanges.js";
+import { MAX_ROUNDS } from "@/scoring/exitRouter.js";
 import { CoverageError } from "@/scoring/errors.js";
 import { ExtractionError, NoRequirementsError } from "@/extraction/errors.js";
 import type { Config } from "@/utils/config.js";
@@ -53,9 +54,6 @@ export interface GraphRunner {
   /** The current state, or null when no checkpoint exists yet. */
   read(runId: RunId): Promise<RunSnapshot | null>;
 }
-
-/** The most tailoring rounds a Run can use (decisions record, "Exit router"). */
-const MAX_ROUNDS = 3;
 
 export type RunsDeps = {
   store: RunStore;
@@ -227,7 +225,7 @@ function toRunView(run: StoredRun, state: RunSnapshot | null): RunView {
       job,
       steps: steps({ parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "running" }),
       iterations: { used: state.rounds, max: MAX_ROUNDS },
-      score: { before: Math.round(state.scoreBefore ?? 0), after: state.scoreAfter === null ? null : Math.round(state.scoreAfter) },
+      score: { before: Math.round(state.scoreBefore ?? 0), after: state.scoreAfter === null || state.changes.length === 0 ? null : Math.round(state.scoreAfter) },
     });
   }
   return RunViewSchema.parse({

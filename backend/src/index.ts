@@ -11,8 +11,8 @@ const config = loadConfig();
 const tracingProvider = setupTracing(config);
 const prisma = createPrisma(config.databaseUrl);
 const llm = new LangChainLlmClient(config.llm);
-const coverageLlm = new LangChainLlmClient({ ...config.llm, model: config.llm.coverageModel });
-const app = createApp({ store: new RunStore(prisma), config, llm, coverageLlm });
+const judgeLlm = new LangChainLlmClient({ ...config.llm, model: config.llm.judgeModel });
+const app = createApp({ store: new RunStore(prisma), config, llm, judgeLlm });
 
 const server = app.listen(config.port, () => {
   console.log(`backend listening on :${config.port}`);

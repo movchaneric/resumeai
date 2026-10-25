@@ -541,6 +541,23 @@ describe("RunsService tailoring round", () => {
     expect(view.score.after).toBe(view.score.before);
   });
 
+  it("ends at awaiting_review with exit reason error when the tailoring status write fails, instead of failing the Run", async () => {
+    const ctx = tailoringSetup();
+    const write = ctx.store.setStatus.bind(ctx.store);
+    ctx.store.setStatus = async (id, status) => {
+      if (status === "tailoring") throw new Error("db down");
+      return write(id, status);
+    };
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const view = await finish(ctx);
+      expect(view.exitReason).toBe("error");
+      expect(view.changes).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("writes the tailoring status once, before the round's first call, and shows a tailoring view meanwhile", async () => {
     let seen: { status: string; used?: number } | undefined;
     let service: RunsService | undefined;

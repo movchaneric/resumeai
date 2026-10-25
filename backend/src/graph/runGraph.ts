@@ -96,15 +96,23 @@ export function buildRunGraph({ llm, judgeLlm, checkpointer, onEnter, onRound }:
       return base;
     })
     .addNode("begin_round", async (state) => {
-      await onEnter(state.runId, "begin_round");
       const round = state.rounds + 1;
-      return { rounds: round, pending: { round, proposed: [], valid: [], coverage: null, score: null, failed: false } };
+      const pending = { round, proposed: [], valid: [], coverage: null, score: null, failed: false };
+      // A failing status write fails the round like any other step; it never rejects the graph.
+      try {
+        await onEnter(state.runId, "begin_round");
+      } catch (error) {
+        logRoundFailure(state.runId, round, error);
+        return { rounds: round, pending: { ...pending, failed: true } };
+      }
+      return { rounds: round, pending };
     })
     .addNode("tailor", async (state) => {
-      await onEnter(state.runId, "tailor");
       const pending = state.pending!;
       const round = pending.round;
+      if (pending.failed) return {};
       try {
+        await onEnter(state.runId, "tailor");
         const { changes } = await tailorCv(judgeLlm, {
           originalCv: state.cv!,
           draftCv: applyChanges(state.cv!, state.changes),
@@ -120,10 +128,10 @@ export function buildRunGraph({ llm, judgeLlm, checkpointer, onEnter, onRound }:
       }
     })
     .addNode("validate", async (state) => {
-      await onEnter(state.runId, "validate");
       const pending = state.pending!;
       if (pending.failed) return {};
       try {
+        await onEnter(state.runId, "validate");
         const { valid, rejections } = await validateChanges(judgeLlm, {
           original: state.cv!,
           draft: applyChanges(state.cv!, state.changes),
@@ -137,11 +145,12 @@ export function buildRunGraph({ llm, judgeLlm, checkpointer, onEnter, onRound }:
       }
     })
     .addNode("rejudge", async (state) => {
-      await onEnter(state.runId, "rejudge");
       const pending = state.pending!;
-      if (pending.failed || pending.valid.length === 0) return {};
+      if (pending.failed) return {};
       const { requirements } = state.jobProfile!;
       try {
+        await onEnter(state.runId, "rejudge");
+        if (pending.valid.length === 0) return {};
         // Only the Requirements the valid Changes list; the other verdicts carry over.
         const tailored = applyChanges(state.cv!, mergeRoundIntoChanges(state.cv!, state.changes, pending.valid));
         const { coverage } = await assessCoverage(judgeLlm, tailored, requirementsListedBy(requirements, pending.valid), {

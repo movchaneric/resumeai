@@ -3,6 +3,7 @@ import { ChangeSchema } from "@resume-ai/shared";
 import type { Change, Coverage, Cv, Requirement } from "@resume-ai/shared";
 import { LlmSchemaError, type LlmClient, type LlmMessage } from "@/llm/llmClient.js";
 import { renderTailorInput, type TailorRejection } from "@/prompts/renderTailor.js";
+import { LIST_IDS } from "@/tailoring/cvItems.js";
 import { TailorError } from "@/tailoring/tailorErrors.js";
 import { withSpan } from "@/utils/spans.js";
 
@@ -22,7 +23,7 @@ Rules:
   - Add a skill only when a cited experience, project or education Item shows it in use.
 - Never remove content. The operations are:
   - "replace": new text for one text Item (a bullet, a skill, the summary or an item in another section). Set targetItemId and text.
-  - "add": a new text Item under a job, a project, a section, or a top-level list (experience, education, skills, projects, certifications). Set parentId and text.
+  - "add": a new text Item under a job, a project, a section, or a top-level list (${LIST_IDS.join(", ")}). Set parentId and text.
   - "reorder": the same Items in a new order under one parent. Set parentId and orderedItemIds, listing every Item once.
 - Cite Item IDs exactly as shown in brackets in the CV, for example exp1.b2. Never invent an ID. Every Change cites at least one Evidence ID from the CV and lists at least one Requirement ID it addresses.
 - At most one Change per Item and one reorder per list.

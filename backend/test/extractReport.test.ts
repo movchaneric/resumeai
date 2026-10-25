@@ -1,7 +1,8 @@
 import { trace } from "@opentelemetry/api";
 import { InMemorySpanExporter, NodeTracerProvider, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-node";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { Change, Coverage, Requirement } from "@resume-ai/shared";
+import { randomUUID } from "node:crypto";
+import type { Change, Coverage, Requirement, RunId } from "@resume-ai/shared";
 import { FakeLlmClient } from "./fakes/fakeLlmClient.js";
 import { extractedCv } from "./runFixtures.js";
 import {
@@ -13,6 +14,8 @@ import {
   runInPipelineSpan,
   runTailorInMemory,
 } from "./extractReport.js";
+
+const id = () => randomUUID() as RunId;
 
 describe("parseDevArgs", () => {
   it("reads the paths and the flags", () => {
@@ -159,7 +162,7 @@ describe("runTailorInMemory", () => {
       .enqueue("assess_coverage", { verdicts: [verdict("req2", "met", ["exp1.b1"])] });
     const rounds: number[] = [];
     const snapshot = await runTailorInMemory({
-      llm, judgeLlm: judge, cvText: CV_TEXT, jobDescriptionText: "made-up job",
+      runId: id(), llm, judgeLlm: judge, cvText: CV_TEXT, jobDescriptionText: "made-up job",
       onRound: (r) => void rounds.push(r.round),
     });
 
@@ -185,20 +188,21 @@ describe("runInPipelineSpan", () => {
 
   it("wraps the work in one pipeline root span with a session id, and nests child spans under it", async () => {
     const { withSpan } = await import("@/utils/spans.js");
-    const result = await runInPipelineSpan(async () => withSpan("child", async () => 7));
+    const runId = id();
+    const result = await runInPipelineSpan(runId, async () => withSpan("child", async () => 7));
     expect(result).toBe(7);
     const spans = exporter.getFinishedSpans();
     const root = spans.find((s) => s.name === "pipeline")!;
     const child = spans.find((s) => s.name === "child")!;
     expect(root.parentSpanContext).toBeUndefined();
     expect(child.parentSpanContext?.spanId).toBe(root.spanContext().spanId);
-    expect(String(root.attributes["session.id"])).toMatch(/^[0-9a-f-]{36}$/);
+    expect(root.attributes["session.id"]).toBe(runId);
   });
 
-  it("uses a fresh session id per run", async () => {
-    await runInPipelineSpan(async () => 1);
-    await runInPipelineSpan(async () => 2);
-    const ids = exporter.getFinishedSpans().map((s) => s.attributes["session.id"]);
-    expect(new Set(ids).size).toBe(2);
+  it("uses the given Run id as the session id", async () => {
+    const [a, b] = [id(), id()];
+    await runInPipelineSpan(a, async () => 1);
+    await runInPipelineSpan(b, async () => 2);
+    expect(exporter.getFinishedSpans().map((s) => s.attributes["session.id"])).toEqual([a, b]);
   });
 });

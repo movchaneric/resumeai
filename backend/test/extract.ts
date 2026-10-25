@@ -4,7 +4,8 @@
 import "dotenv/config";
 import { readFileSync } from "node:fs";
 import { basename, extname, resolve } from "node:path";
-import type { Coverage, Cv, JobProfile } from "@resume-ai/shared";
+import { randomUUID } from "node:crypto";
+import type { Coverage, Cv, JobProfile, RunId } from "@resume-ai/shared";
 import type { z } from "zod";
 import type { RunSnapshot } from "@/services/runs.js";
 import { ExtractionError, NoRequirementsError } from "@/extraction/errors.js";
@@ -106,7 +107,8 @@ async function main(): Promise<number> {
   console.log(`models: extraction ${config.llm.model} (Job Profile ${config.llm.judgeModel}), judge ${config.llm.judgeModel}`);
 
   try {
-    return await runInPipelineSpan(async () => {
+    const runId = randomUUID() as RunId;
+    return await runInPipelineSpan(runId, async () => {
       const cvText = await parseCv(cvBuffer, config.limits);
       console.log(`----- CV TEXT (${cvText.length} chars) -----\n${cvText}\n----- END CV TEXT -----\n`);
 
@@ -118,6 +120,7 @@ async function main(): Promise<number> {
       if (tailor) {
         tailored = await timed("run graph", () =>
           runTailorInMemory({
+            runId,
             llm,
             judgeLlm,
             cvText,

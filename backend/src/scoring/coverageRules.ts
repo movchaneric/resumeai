@@ -11,7 +11,7 @@ export const CLAIM_DOWNGRADE_REASON =
   "Listed in the skills or summary, but no experience, project or education Item shows it.";
 
 /**
- * A Claim is the CV saying something about the candidate without showing it in use: the summary or a skills entry.
+ * A Claim is the CV saying something about the candidate without showing it in use: the summary or a skill.
  * This relies on slice 2's IDs, where the prefix comes from the section type (never the candidate's heading):
  * `summary` and `skill<N>` are always the summary and the skills list.
  */

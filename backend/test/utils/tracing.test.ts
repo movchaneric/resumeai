@@ -1,8 +1,17 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { SpanStatusCode, context, trace } from "@opentelemetry/api";
 import { InMemorySpanExporter, NodeTracerProvider, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-node";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { LangChainLlmClient } from "@/llm/langChainLlmClient.js";
+import { createMemoryCheckpointer } from "@/graph/memoryCheckpointer.js";
+import { buildRunGraph } from "@/graph/runGraph.js";
+import { parseCv } from "@/parsing/parseCv.js";
+import { loadConfig } from "@/utils/config.js";
+import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
+import { coverageAnswer, extractedCv, extractedJob } from "../runFixtures.js";
 import { guardExporter, instrumentLangChain } from "@/utils/tracing.js";
 import { withSpan } from "@/utils/spans.js";
 
@@ -122,5 +131,49 @@ describe("LangChain tracing without content", () => {
       expect(span.events.filter((e) => e.name === "exception")).toEqual([]);
       expect(span.status.message ?? "").toBe("");
     }
+  });
+});
+
+describe("LangGraph tracing without content", () => {
+  const CV_MARKER = "MARKER-CV-TEXT-91f3";
+  const JD_MARKER = "MARKER-JD-TEXT-77b2";
+  const memory = new InMemorySpanExporter();
+  const hiddenProvider = new NodeTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(guardExporter(memory, false))],
+  });
+  let hiddenInstrumentation: ReturnType<typeof instrumentLangChain>;
+
+  beforeAll(() => {
+    trace.disable();
+    context.disable();
+    hiddenProvider.register();
+    hiddenInstrumentation = instrumentLangChain(hiddenProvider, false);
+  });
+
+  afterAll(async () => {
+    hiddenInstrumentation.disable();
+    await hiddenProvider.shutdown();
+    trace.disable();
+    context.disable();
+  });
+
+  it("keeps the CV and Job Description text out of every span attribute and event", async () => {
+    const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" });
+    const pdfText = await parseCv(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf")), config.limits);
+    const llm = new FakeLlmClient().enqueue("extract_cv", extractedCv);
+    const judge = new FakeLlmClient().enqueue("extract_job_profile", extractedJob).enqueue("assess_coverage", coverageAnswer);
+    const graph = buildRunGraph({ llm, judgeLlm: judge, checkpointer: createMemoryCheckpointer(), onEnter: async () => {} });
+
+    await graph.invoke(
+      { runId: "run-1", cvText: `${pdfText}\n${CV_MARKER}`, jobDescriptionText: `Backend developer ${JD_MARKER}` },
+      { configurable: { thread_id: "run-1" } },
+    );
+    await hiddenProvider.forceFlush();
+
+    const spans = memory.getFinishedSpans();
+    expect(spans.length).toBeGreaterThan(0);
+    const everything = JSON.stringify(spans.map((s) => ({ name: s.name, attributes: s.attributes, events: s.events, status: s.status })));
+    expect(everything).not.toContain(CV_MARKER);
+    expect(everything).not.toContain(JD_MARKER);
   });
 });

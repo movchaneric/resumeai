@@ -25,7 +25,7 @@ Every decision record, handoff, review or note belongs to the slice being worked
 | [`01-upload-parse-run-view`](./slices/01-upload-parse-run-view) | Config, `runs` table, PDF/DOCX parsing, `POST /runs`, `GET /runs/:id`, Postman collection | Done |
 | [`02-llm-extraction`](./slices/02-llm-extraction) | PDF reading order, CV and Job Profile chains, ID assignment, verbatim check, first Phoenix traces | Done |
 | [`03-scoring`](./slices/03-scoring) | Coverage chain, Match Score, move to OpenAI, `pipeline` trace per Run | Done |
-| [`04-tailoring-loop`](./slices/04-tailoring-loop) | LangGraph and checkpointer; tailor → validate → re-judge → exit router; `awaiting_review`; drop the transitional columns | In progress |
+| [`04-tailoring-loop`](./slices/04-tailoring-loop) | LangGraph and checkpointer; tailor → validate → re-judge → exit router; `awaiting_review`; drop the transitional columns | Done |
 | `05-questions-and-live-updates` | Questions and Answers interrupt, User Evidence, Confirmed Gaps, SSE, crash resume (`interrupted`) | Planned |
 | `06-review-export-cleanup` | Per-Change review, DOCX/PDF export, TTL sweep, `DELETE /runs/:id` | Planned |
 | `07-frontend` | Vite SPA, starting with a Claude Design pass (owner's request) | Planned |

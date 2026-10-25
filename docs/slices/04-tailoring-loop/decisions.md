@@ -117,3 +117,84 @@ The owner said yes to all of these.
 - Slice 1 and 2 leftovers.
 - A different judge model, if the claim check proves lenient.
 - Slice 7 (frontend) starts with a Claude Design pass before any frontend code is planned. The owner asked for this explicitly and called it very important.
+
+## After implementation
+Written at the end of the slice (2026-10-25). The owner approved the two changes below (#16, #17) after manual runs.
+
+### Spec and tickets
+They live on GitHub, all as sub-issues of spec [#5](https://github.com/movchaneric/resumeai/issues/5).
+
+| Issues | Origin |
+|---|---|
+| #6 to #15 | planned in the grilling session |
+| #16, #17 | from manual runs |
+| #19 | review fixes (`review.md`) |
+
+[#18](https://github.com/movchaneric/resumeai/issues/18) is separate (`needs-triage`), not a sub-issue.
+
+### How it was built
+- 13 tickets, each done by a Sonnet agent in its own worktree, made from the slice branch.
+- Waves: #6 to #11 in parallel; then #12 → #13 → #14 → #15; then #16, #17 and #19.
+- Opus checked each ticket by red-checking (breaking the code to prove the tests fail) before a `--no-ff` merge.
+- Red-checking caught one weak test: the checkpointer schema test passed with the wrong schema, because of tables left over from earlier runs. Fixed before the merge.
+- The parallel agents shared one test database, which caused flaky failures. Ticket #12 made `TEST_DATABASE_URL` overridable; later agents each used their own test database.
+
+### #16: the tailor stops adding qualities
+- Owner decision after the first manual run.
+- The tailor proposed 3 Changes. Each appended a quality the job asks for but the CV never states ("working independently", "attention to detail and code quality", "collaborating with engineers across…"). The claim check rejected all 3.
+- The tailor prompt now forbids appending qualities, adjectives, soft skills, ways of working, collaboration, ownership, independence or impact. It lists what is allowed, and has one rejected and one accepted made-up example.
+
+### #17: second chance, and the Job Profile on the judge model
+Owner decision after the second run.
+- **Second chance.** A round with 0 valid Changes ends with `ceiling` only if the previous round also had 0 valid Changes. The exit table's `ceiling` row becomes:
+
+  | Exit reason | When |
+  |---|---|
+  | `ceiling` | 0 valid Changes in two rounds in a row (none proposed, or all rejected) |
+
+- **Job Profile on gpt-4.1.** The Job Profile extraction moved to the judge model (`LLM_JUDGE_MODEL`). CV extraction stays on gpt-4.1-mini (`LLM_MODEL`).
+- Why: on identical input, the score before tailoring moved from 69 to 57.
+
+### Measurements
+Dev script `--tailor` on the owner's CV:
+
+| Job | Scores before tailoring | Requirement counts |
+|---|---|---|
+| first | 69, 57, 54, 65 | 35, 34 on gpt-4.1 |
+| second | 49, 43 | 17, 20 on gpt-4.1 |
+
+- The Requirement counts are steadier on gpt-4.1, so the spread now seems to come mostly from Coverage verdicts. That became [#18](https://github.com/movchaneric/resumeai/issues/18) "Match Score varies by up to 15 points on identical input": measure first, then a grill. Not part of 4a.
+- Across 6 dev runs and 1 Postman run, the tailor found no Change the claim check accepted.
+- Every rejection was a real addition. Examples: "in React" on a Design System bullet, when the CV lists React only as a skill; "SQL query optimization", when the CV lists only SQL.
+- Conclusion: 4a works as designed. Gains need facts from the owner (slice 5).
+
+### Postman end to end
+2026-10-25, the second job, the owner's newer CV (it has a Projects section).
+
+| Field | Value |
+|---|---|
+| status | `awaiting_review` |
+| score | 48 → 48 (4 met, 13 partially met, 6 unmet of 23) |
+| rounds | 2 (round 1: 4 proposed, 4 rejected by the claim check; round 2: none proposed) |
+| changes | empty |
+| exit reason | `ceiling` |
+| time | 22.2 s |
+
+Phoenix: one `pipeline` trace with `session.id` = the Run id and `score.before`, `score.after`, `rounds` and `exit_reason`. Children: `extract_job_profile` 5.2 s, `extract_cv` 6.5 s, `assess_coverage` 5.6 s, `tailor` 2.6 s, `validate` 1.6 s, `tailor` 0.7 s. The counts sit only on our named spans, not on LangGraph's.
+
+### Cost
+From the real token counts of that Run:
+
+| Model | Tokens in / out | Cost |
+|---|---|---|
+| gpt-4.1 | 9,916 / 2,857 | about $0.043 |
+| gpt-4.1-mini | 2,151 / 875 | about $0.002 |
+| **Total per Run** | | **about $0.045** |
+
+Three times slice 3's $0.015, and under the planned worst case of $0.08. About 100 Runs on the owner's $4.79 balance.
+
+### Idea for slice 5
+Every rejected Change, and every "only in the skills list" `partially_met` verdict, points at a fact only the owner can confirm: "Was the Design System built in React?", "Did you optimize SQL queries?". These are natural Question candidates.
+
+### Review
+See `review.md`. The fixes went into [#19](https://github.com/movchaneric/resumeai/issues/19). One of them is a test proving that `TRACE_CONTENT=false` keeps CV and Job Description text off LangGraph's spans; it passed without code changes.

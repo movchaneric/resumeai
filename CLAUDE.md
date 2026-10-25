@@ -23,10 +23,10 @@ backend/src/
   middleware/    cross-cutting HTTP code (error handler, not-found)
   parsing/       CV file parsing (file to text, no model)
   extraction/    Extraction chains, ID assignment, verbatim check. Imports `LlmClient` and `@/utils/spans.js`, never LangChain.
-  scoring/       Coverage chain, Match Score, weights. Imports `LlmClient` and `@/utils/spans.js`, never LangChain.
+  scoring/       Coverage chain, Match Score, weights, exit router (`exitRouter.ts`). Imports `LlmClient` and `@/utils/spans.js`, never LangChain.
   tailoring/     Tailor chain, claim-check chain, stage-1 checks, `applyChanges`. Imports `LlmClient` and `@/utils/spans.js`, never LangChain or LangGraph.
   prompts/       pure renderers that turn the CV and Requirements into prompt text with IDs. Imports only shared types (`@resume-ai/shared`).
-  graph/         the LangGraph Run graph, its thin nodes, the graph runner and the Postgres checkpointer. The only importer of LangGraph (`@langchain/langgraph*`); nodes call `extraction/` and `scoring/`, and the service sees the runner only through the `GraphRunner` interface it defines.
+  graph/         the LangGraph Run graph, its thin nodes, the graph runner and the Postgres checkpointer. The only importer of LangGraph (`@langchain/langgraph*`); nodes call `extraction/`, `scoring/` and `tailoring/`, and the service sees the runner only through the `GraphRunner` interface it defines.
   llm/           the `LlmClient` interface and its LangChain implementation. Only `llm/` imports LangChain models (one exception below).
   utils/         config, db client, errors, tracing (`tracing.ts`), named spans (`spans.ts`)
 backend/test/    mirrors src (routes/, services/, graph/, parsing/, prompts/, scoring/, tailoring/, utils/); fixtures live in test/fixtures

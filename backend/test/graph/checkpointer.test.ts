@@ -22,7 +22,12 @@ const tablesIn = async (schema: string) =>
     (r) => r.table_name as string,
   );
 
+const CHECKPOINT_TABLES = ["checkpoint_blobs", "checkpoint_migrations", "checkpoint_writes", "checkpoints"];
+
 beforeAll(async () => {
+  // Drop leftovers from earlier runs, so setup() must create the tables where the code says it does.
+  await pool.query("DROP SCHEMA IF EXISTS checkpoints CASCADE");
+  for (const table of CHECKPOINT_TABLES) await pool.query(`DROP TABLE IF EXISTS public.${table} CASCADE`);
   await checkpointer.setup();
 });
 afterAll(async () => {
@@ -33,7 +38,7 @@ afterAll(async () => {
 describe("Postgres checkpointer", () => {
   it("creates its tables in the checkpoints schema, saves a Run's state under its id and reads it back", async () => {
     expect(await tablesIn("checkpoints")).toEqual(
-      expect.arrayContaining(["checkpoint_blobs", "checkpoint_migrations", "checkpoint_writes", "checkpoints"]),
+      expect.arrayContaining(CHECKPOINT_TABLES),
     );
 
     const llm = new FakeLlmClient().enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueue("assess_coverage", coverageAnswer);
@@ -57,7 +62,10 @@ describe("Postgres checkpointer", () => {
     expect(await reader.read(randomUUID() as RunId)).toBeNull();
     await readerCheckpointer.end();
 
-    expect(await tablesIn("app")).not.toEqual(expect.arrayContaining(["checkpoints"]));
+    for (const schema of ["public", "app"]) {
+      const tables = await tablesIn(schema);
+      for (const table of CHECKPOINT_TABLES) expect(tables).not.toContain(table);
+    }
     expect(await tablesIn("app")).toContain("runs");
   });
 });

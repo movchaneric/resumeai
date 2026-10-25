@@ -2,6 +2,8 @@
 
 Settled in a grilling session (2026-10-24) before implementation. Scope comes from the slice 3 handoff. Terms follow `CONTEXT.md`, which was updated in the same session. All decisions are owner-approved.
 
+Spec: [#5 Slice 4a: tailoring loop](https://github.com/movchaneric/resumeai/issues/5). Tickets are linked from it.
+
 ## Scope
 - **Slice 4 is split in two.**
 

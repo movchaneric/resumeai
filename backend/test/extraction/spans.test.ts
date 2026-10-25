@@ -20,6 +20,7 @@ import type { RunStore } from "@/stores/runs.js";
 import { loadConfig } from "@/utils/config.js";
 import { withSpan } from "@/utils/spans.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
+import { makeGraphRunner } from "../fakes/runGraph.js";
 import { fullCv } from "./cvFixture.js";
 
 const cvText = `Ada Lovelace
@@ -197,34 +198,30 @@ describe("pipeline span", () => {
     verdicts: [{ requirementId: "req1", reason: "Built it.", evidenceIds: ["exp1.b1"], verdict: "partially_met" }],
   };
 
-  /** A minimal in-memory store: the pipeline only reads the Run and saves results. */
-  function fakeStore(id: string) {
-    const run = { id, cvText: cvText, jobDescriptionText: "Backend developer" };
-    return {
-      get: async () => run,
-      saveExtraction: async () => undefined,
-      saveCoverage: async () => undefined,
-      markFailed: async () => undefined,
-    };
-  }
+  /** The pipeline only writes statuses and failures. */
+  const fakeStore = () => ({ setStatus: async () => undefined, markFailed: async () => undefined });
 
-  it("is one root with session.id and a numeric score, and the three chains are its children", async () => {
+  it("is one root with session.id, the scores, rounds and exit reason, and the three chains are its children", async () => {
     const id = "3f0c1d4e-5b2a-4c8e-9a71-0d6e2f8b7a11";
     const llm = new FakeLlmClient()
       .enqueue("extract_job_profile", profile)
       .enqueue("extract_cv", fullCv())
       .enqueue("assess_coverage", COVERAGE_ANSWER);
+    const store = fakeStore();
     const service = new RunsService({
-      store: fakeStore(id) as unknown as RunStore,
+      store: store as unknown as RunStore,
       config: loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" }),
-      llm,
+      graphRunner: makeGraphRunner(store, llm),
     });
-    await service.runPipeline(id as RunId);
+    await service.runPipeline({ runId: id as RunId, cvText, jobDescriptionText: "Backend developer" });
 
     const root = finished("pipeline");
     expect(root.parentSpanContext).toBeUndefined();
     expect(root.attributes["session.id"]).toBe(id);
-    expect(root.attributes["score"]).toBe(50);
+    expect(root.attributes["score.before"]).toBe(50);
+    expect(root.attributes["score.after"]).toBe(50);
+    expect(root.attributes["rounds"]).toBe(0);
+    expect(root.attributes["exit_reason"]).toBe("ceiling");
     expect(root.attributes["openinference.span.kind"]).toBe("CHAIN");
     for (const name of ["extract_job_profile", "extract_cv", "assess_coverage"]) {
       const child = finished(name);

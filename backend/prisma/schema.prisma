@@ -8,21 +8,16 @@ datasource db {
   schemas  = ["app"]
 }
 
-// Run metadata only (ADR 0003). cv_text, job_description_text, cv, job_profile, coverage, error_code and error_message are
-// transitional (ADR 0003, slice 2 and 3 extensions): slice 4 moves the data into the graph state and drops them.
+// Run metadata only (ADR 0003). The Run's data (texts, CV, Job Profile, Coverage, Changes) lives in the LangGraph
+// checkpoint, in the separate `checkpoints` schema (ADR 0005), which Prisma does not manage.
 model Run {
-  id                 String   @id @db.Uuid
-  status             String
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  expiresAt          DateTime @map("expires_at") @db.Timestamptz(3)
-  exportPath         String?  @map("export_path")
-  cvText             String   @map("cv_text")
-  jobDescriptionText String   @map("job_description_text")
-  cv                 Json?    @db.JsonB
-  jobProfile         Json?    @map("job_profile") @db.JsonB
-  coverage           Json?    @db.JsonB
-  errorCode          String?  @map("error_code")
-  errorMessage       String?  @map("error_message")
+  id           String   @id @db.Uuid
+  status       String
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt    DateTime @map("expires_at") @db.Timestamptz(3)
+  exportPath   String?  @map("export_path")
+  errorCode    String?  @map("error_code")
+  errorMessage String?  @map("error_message")
 
   @@map("runs")
   @@schema("app")

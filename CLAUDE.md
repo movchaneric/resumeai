@@ -26,9 +26,10 @@ backend/src/
   scoring/       Coverage chain, Match Score, weights. Imports `LlmClient` and `@/utils/spans.js`, never LangChain.
   tailoring/     Tailor chain, claim-check chain, stage-1 checks, `applyChanges`. Imports `LlmClient` and `@/utils/spans.js`, never LangChain or LangGraph.
   prompts/       pure renderers that turn the CV and Requirements into prompt text with IDs. Imports only shared types (`@resume-ai/shared`).
-  llm/           the `LlmClient` interface and its LangChain implementation. Only `llm/` imports LangChain (one exception below).
+  graph/         the LangGraph Run graph, its thin nodes, the graph runner and the Postgres checkpointer. The only importer of LangGraph (`@langchain/langgraph*`); nodes call `extraction/` and `scoring/`, and the service sees the runner only through the `GraphRunner` interface it defines.
+  llm/           the `LlmClient` interface and its LangChain implementation. Only `llm/` imports LangChain models (one exception below).
   utils/         config, db client, errors, tracing (`tracing.ts`), named spans (`spans.ts`)
-backend/test/    mirrors src (routes/, services/, parsing/, prompts/, scoring/, tailoring/, utils/); fixtures live in test/fixtures
+backend/test/    mirrors src (routes/, services/, graph/, parsing/, prompts/, scoring/, tailoring/, utils/); fixtures live in test/fixtures
 ```
 
 - `utils/tracing.ts` is the one file outside `llm/` that imports LangChain (`@langchain/core/callbacks/manager`, to instrument it). `utils/spans.ts` imports only the OpenTelemetry API and OpenInference semantic conventions, so any layer may use `withSpan`.

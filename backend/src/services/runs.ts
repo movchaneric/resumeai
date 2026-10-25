@@ -3,30 +3,60 @@ import {
   RunIdSchema,
   RunViewSchema,
   StepKeySchema,
+  type Change,
+  type Coverage,
+  type Cv,
+  type ExitReason,
+  type JobProfile,
   type RunErrorCode,
   type RunId,
   type StepState,
   type RunView,
 } from "@resume-ai/shared";
-import { assessCoverage } from "@/scoring/assessCoverage.js";
 import { CoverageError } from "@/scoring/errors.js";
-import { matchScore } from "@/scoring/matchScore.js";
 import { ExtractionError, NoRequirementsError } from "@/extraction/errors.js";
-import { extractCv } from "@/extraction/extractCv.js";
-import { extractJobProfile } from "@/extraction/extractJobProfile.js";
-import type { LlmClient } from "@/llm/llmClient.js";
 import type { Config } from "@/utils/config.js";
 import { ApiError } from "@/utils/errors.js";
 import { withSessionSpan } from "@/utils/spans.js";
 import { parseCv, stripNul } from "@/parsing/parseCv.js";
 import type { RunStore, StoredRun } from "@/stores/runs.js";
 
+/** What the service sees of a Run's graph state: plain data typed with shared types. */
+export type RunSnapshot = {
+  jobProfile: JobProfile | null;
+  cv: Cv | null;
+  coverageBefore: Coverage[] | null;
+  coverage: Coverage[] | null;
+  changes: Change[];
+  /** Unrounded Match Scores, before tailoring and after the last kept round. */
+  scoreBefore: number | null;
+  scoreAfter: number | null;
+  /** Tailoring rounds started. */
+  rounds: number;
+  exitReason: ExitReason | null;
+};
+
+export type StartRunInput = { runId: RunId; cvText: string; jobDescriptionText: string };
+
+/**
+ * Runs a Run's workflow and reads its state back. Defined here so the service never sees LangGraph; `graph/`
+ * implements it. It keeps the Run's `status` in step with the node it is in, and rejects with the original
+ * error when the workflow fails before the first score.
+ */
+export interface GraphRunner {
+  /** Runs until the workflow pauses for review, and returns the state it paused with. */
+  start(input: StartRunInput): Promise<RunSnapshot>;
+  /** The current state, or null when no checkpoint exists yet. */
+  read(runId: RunId): Promise<RunSnapshot | null>;
+}
+
+/** The most tailoring rounds a Run can use (decisions record, "Exit router"). */
+const MAX_ROUNDS = 3;
+
 export type RunsDeps = {
   store: RunStore;
   config: Config;
-  llm: LlmClient;
-  /** Judge-and-write work (Coverage now). Falls back to `llm` when unset. */
-  judgeLlm?: LlmClient;
+  graphRunner: GraphRunner;
   now?: () => Date;
   /** Starts a task without awaiting it. Tests pass a version that collects the promises. */
   runInBackground?: (task: () => Promise<void>) => void;
@@ -81,35 +111,28 @@ export class RunsService {
       status: "extracting",
       createdAt,
       expiresAt: new Date(createdAt.getTime() + config.runTtlMs),
-      cvText,
-      jobDescriptionText,
     });
-    this.runInBackground(() => this.runPipeline(run.id));
+    this.runInBackground(() => this.runPipeline({ runId: run.id, cvText, jobDescriptionText }));
     return run.id;
   }
 
   /**
-   * The background pipeline: extracts the Job Profile, then the CV, then assesses Coverage, storing each result
-   * as it arrives, or the failure on the Run. It runs under one `pipeline` root span (`session.id` = the Run id,
-   * `score` = the unrounded match score when it finishes).
+   * The background pipeline: hands the texts to the graph runner, which extracts, assesses Coverage and pauses for
+   * review, writing the status as it goes; or records the failure on the Run. It runs under one `pipeline` root
+   * span (`session.id` = the Run id) that ends with the scores, the rounds and the exit reason, never content.
    * It never throws: it runs detached from the request, so a failure has nowhere else to go.
    */
-  async runPipeline(id: RunId): Promise<void> {
-    const { store, llm } = this.deps;
-    // Two clients: extraction is copying (checked by code), Coverage is judgement and may use a stronger model.
-    const judgeLlm = this.deps.judgeLlm ?? llm;
+  async runPipeline(input: StartRunInput): Promise<void> {
+    const { store, graphRunner } = this.deps;
+    const id = input.runId;
     try {
-      const run = await store.get(id);
-      if (!run) return;
       try {
         await withSessionSpan("pipeline", id, async (span) => {
-          const jobProfile = await extractJobProfile(llm, run.jobDescriptionText);
-          const { cv, softMismatches } = await extractCv(llm, run.cvText);
-          console.debug(`Run ${id}: extraction done, ${softMismatches} soft mismatches`);
-          await store.saveExtraction(id, { cv, jobProfile });
-          const { coverage } = await assessCoverage(judgeLlm, cv, jobProfile.requirements);
-          await store.saveCoverage(id, coverage);
-          span.setAttribute("score", matchScore(jobProfile.requirements, coverage));
+          const result = await graphRunner.start(input);
+          if (result.scoreBefore !== null) span.setAttribute("score.before", result.scoreBefore);
+          if (result.scoreAfter !== null) span.setAttribute("score.after", result.scoreAfter);
+          span.setAttribute("rounds", result.rounds);
+          if (result.exitReason !== null) span.setAttribute("exit_reason", result.exitReason);
         });
       } catch (error) {
         const code: RunErrorCode = failureCode(error);
@@ -134,66 +157,68 @@ export class RunsService {
     const id = RunIdSchema.safeParse(rawId);
     const run = id.success ? await this.deps.store.get(id.data) : null;
     if (!run || run.expiresAt <= this.now()) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
-    return toRunView(run);
+    // A Run with no checkpoint yet (the graph has not started) reads as null.
+    return toRunView(run, await this.deps.graphRunner.read(run.id));
   }
 }
 
 /**
- * Derives the view from what is stored (plan, "Behaviour seen from outside"). The status stays
- * `extracting` until Coverage is stored; the Coverage step runs once both extraction results exist.
- * A failed Run marks the step that broke as `failed`: `coverage` when the extraction results are stored,
- * otherwise `extract`. The score is computed here from the stored verdicts, never stored. Validating
- * against the schema keeps the response honest as the view grows.
+ * Derives the view from the `runs` row (status, error, timestamps) and the graph state (everything else).
+ * A failed Run marks the step that broke as `failed`: `coverage` when the extraction results exist, otherwise
+ * `extract`. Scores are rounded here for display. Validating against the schema keeps the response honest.
  */
-function toRunView(run: StoredRun): RunView {
+function toRunView(run: StoredRun, state: RunSnapshot | null): RunView {
   const common = {
     id: run.id,
     createdAt: run.createdAt.toISOString(),
     expiresAt: run.expiresAt.toISOString(),
   };
-  const { cv, jobProfile, coverage } = run;
+  const { cv, jobProfile } = state ?? { cv: null, jobProfile: null };
   const extracted = cv !== null && jobProfile !== null;
-  const job = extracted ? { title: jobProfile.title, company: jobProfile.company } : null;
-  const steps = (extract: StepState, coverageState: StepState) =>
-    StepKeySchema.options.map((key) => ({
-      key,
-      state: key === "parse" ? "done" : key === "extract" ? extract : key === "coverage" ? coverageState : "pending",
-    }));
+  const job = jobProfile ? { title: jobProfile.title, company: jobProfile.company } : null;
+  const steps = (states: Partial<Record<(typeof StepKeySchema.options)[number], StepState>>) =>
+    StepKeySchema.options.map((key) => ({ key, state: states[key] ?? "pending" }));
 
   if (run.status === "failed" && run.error) {
     return RunViewSchema.parse({
       ...common,
       status: "failed",
       job,
-      steps: extracted ? steps("done", "failed") : steps("failed", "pending"),
+      steps: extracted ? steps({ parse: "done", extract: "done", coverage: "failed" }) : steps({ parse: "done", extract: "failed" }),
       error: run.error,
     });
   }
-  if (run.status === "scored" && extracted && coverage !== null) {
-    const verdictById = new Map(coverage.map((c) => [c.requirementId as string, c]));
+  if (run.status === "awaiting_review" && cv && jobProfile && state?.coverageBefore && state.coverage && state.scoreBefore !== null && state.scoreAfter !== null && state.exitReason) {
+    const verdict = (coverage: Coverage[], id: string) => coverage.find((c) => c.requirementId === id);
     return RunViewSchema.parse({
       ...common,
-      status: "scored",
+      status: "awaiting_review",
       job,
-      steps: steps("done", "done"),
-      score: Math.round(matchScore(jobProfile.requirements, coverage)),
+      steps: steps({ parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "done", review: "running" }),
+      score: { before: Math.round(state.scoreBefore), after: Math.round(state.scoreAfter) },
       requirements: jobProfile.requirements.map((requirement) => {
-        const verdict = verdictById.get(requirement.id);
+        const before = verdict(state.coverageBefore!, requirement.id);
+        const after = verdict(state.coverage!, requirement.id);
         return {
           id: requirement.id,
           text: requirement.text,
           importance: requirement.importance,
-          verdict: verdict?.verdict ?? "unmet",
-          evidenceIds: verdict?.evidenceIds ?? [],
-          reason: verdict?.reason ?? "",
+          before: before?.verdict ?? "unmet",
+          after: { verdict: after?.verdict ?? "unmet", evidenceIds: after?.evidenceIds ?? [], reason: after?.reason ?? "" },
+          confirmedGap: false,
         };
       }),
+      cv,
+      changes: state.changes,
+      userEvidence: [],
+      iterations: { used: state.rounds, max: MAX_ROUNDS },
+      exitReason: state.exitReason,
     });
   }
   return RunViewSchema.parse({
     ...common,
     status: "extracting",
     job,
-    steps: extracted ? steps("done", "running") : steps("running", "pending"),
+    steps: extracted ? steps({ parse: "done", extract: "done", coverage: "running" }) : steps({ parse: "done", extract: "running" }),
   });
 }

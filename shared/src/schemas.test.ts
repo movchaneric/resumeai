@@ -9,6 +9,7 @@ import {
   ItemIdSchema,
   PartialDateSchema,
   RequirementIdSchema,
+  ExitReasonSchema,
   RunIdSchema,
   RunViewSchema,
   normalizeDateRange,
@@ -200,6 +201,12 @@ describe("run view", () => {
     exitReason: "plateau",
   };
 
+  it("accepts every exit reason, including error", () => {
+    for (const reason of ["ceiling", "plateau", "max_iterations", "target_reached", "error"]) {
+      expect(ExitReasonSchema.safeParse(reason).success).toBe(true);
+    }
+    expect(ExitReasonSchema.safeParse("other").success).toBe(false);
+  });
   it("discriminates on status", () => {
     expect(RunViewSchema.safeParse({ ...base, status: "parsing" }).success).toBe(true);
     expect(RunViewSchema.safeParse({ ...base, status: "interrupted" }).success).toBe(true);

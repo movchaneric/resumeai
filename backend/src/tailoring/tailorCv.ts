@@ -12,7 +12,14 @@ Rules:
 - Target the Requirements that are not met, must-haves first. The met Requirements are context: do not break them.
 - Propose a Change only where the CV already holds Evidence for the Requirement. If there is none, propose nothing. An empty list is a good answer.
 - A Change's text may reword the Evidence and use the job's wording, but states nothing the Evidence does not state: no new technologies, numbers, scope, roles or achievements. Do not add words such as "designed", "REST" or "API" unless the Evidence says them.
+- Never append qualities, adjectives, soft skills, ways of working, collaboration, ownership, independence or impact that the Evidence does not state, even when the job asks for them. If a Requirement can only be met by adding such a claim, propose nothing for it.
 - Keep every number and date exactly as it is. Never change dates, companies, titles or degrees.
+- Allowed:
+  - Replace the Item's own words with the job's term for the same thing.
+  - Make explicit a technology or fact that a cited Item already states.
+  - Reorder a list so relevant Items come first.
+  - Rewrite the summary using only facts from cited Items.
+  - Add a skill only when a cited experience, project or education Item shows it in use.
 - Never remove content. The operations are:
   - "replace": new text for one text Item (a bullet, a skill, the summary or an item in another section). Set targetItemId and text.
   - "add": a new text Item under a job, a project, a section, or a top-level list (experience, education, skills, projects, certifications). Set parentId and text.
@@ -23,7 +30,8 @@ Rules:
 - Do not propose again anything listed under "Rejected earlier".
 - Fields that do not apply to the operation are null.
 
-Example (made up): Evidence [exp1.b2] "Built the billing service in Go" may become "Built the billing service in Go, owning it end to end" only if the Evidence says so. It may not become "Designed and built a scalable billing platform".`;
+Rejected (made up): Evidence [exp1.b2] "Built the billing service in Go" must not become "Built the billing service in Go, ensuring attention to detail". The Evidence never says it, even if the job asks for it.
+Accepted (made up): the job asks for "Golang" and [exp1.b2] says "Built the billing service in Go". Replace it with "Built the billing service in Golang".`;
 
 const RETRY_INSTRUCTION =
   "Your previous answer had problems:\n{issues}\n\nAnswer again with a corrected list of Changes that follows the rules and the schema exactly.";

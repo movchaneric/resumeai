@@ -49,6 +49,9 @@ backend/test/    mirrors src (routes/, services/, graph/, parsing/, prompts/, sc
 - One branch and one PR per slice. Commit messages end with the Co-Authored-By line.
 - Specs and tickets are GitHub issues (see `docs/agents/issue-tracker.md`); decisions, reviews, handoffs and retrospectives go under `docs/slices/<NN>-<name>/`, and `decisions.md` links the slice's spec issue.
 - Run `pnpm typecheck` and `pnpm --filter backend test` (needs `docker compose up -d postgres`) before committing.
+- CI (`.github/workflows/ci.yml`) runs typecheck and the shared and backend tests on every PR. `backend/test/architecture.test.ts` enforces the layer and import rules above, so a broken rule fails CI.
+- Create ticket worktrees with `scripts/worktree.sh add <NN> <name>`; it branches from the current branch, copies `backend/.env`, installs, and builds shared. Each checkout uses its own test database, named after its folder.
+- Code review also checks `CODING_STANDARDS.md`.
 
 ## Agent skills
 

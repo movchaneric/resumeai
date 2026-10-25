@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # `prisma generate` (backend postinstall) does not connect, but prisma.config.ts reads this variable.
+      DATABASE_URL: postgresql://resume:resume@localhost:15432/resume_ai_test
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: resume
+          POSTGRES_PASSWORD: resume
+        ports:
+          - 15432:5432
+        options: >-
+          --health-cmd "pg_isready -U resume"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @resume-ai/shared build
+      - run: pnpm typecheck
+      - run: pnpm --filter @resume-ai/shared test
+      - run: pnpm --filter backend test

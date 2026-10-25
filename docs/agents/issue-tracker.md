@@ -5,7 +5,7 @@ Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all op
 ## Conventions
 
 - **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.
-- **Read an issue**: `gh issue view <number> --comments`, filtering comments by `jq` and also fetching labels.
+- **Read an issue**: `gh issue view <number> --json title,body,labels,comments`. Plain `gh issue view` prints only a Projects (classic) deprecation warning and no body.
 - **List issues**: `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'` with appropriate `--label` and `--state` filters.
 - **Comment on an issue**: `gh issue comment <number> --body "..."`
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
@@ -31,7 +31,7 @@ Create a GitHub issue.
 
 ## When a skill says "fetch the relevant ticket"
 
-Run `gh issue view <number> --comments`.
+Run `gh issue view <number> --json title,body,labels,comments`.
 
 ## Wayfinding operations
 
@@ -50,4 +50,4 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
 - One **spec issue** per slice, titled `Slice NN: <name>`, plus one issue per ticket that links its spec (`Part of #<spec>`). Blocking edges use native issue dependencies.
 - **Issues are public.** Never put CV text, employer names, contact details or keys in an issue, a comment or a label, the same rule as commits.
 - Slice docs stay in the repo under `docs/slices/<NN>-<name>/`: `decisions.md` (links the spec issue), `review.md`, `handoff.md`, `retrospective.md`.
-- One branch and one PR per slice (`feat/slice-…`). Ticket work happens in worktrees branched from the slice branch. The slice PR closes its tickets and spec with `Closes #…`.
+- One branch and one PR per slice (`feat/slice-…`). Ticket work happens in worktrees branched from the slice branch: `scripts/worktree.sh add <NN> <name>` creates one (each gets its own test database), `scripts/worktree.sh remove <NN>` cleans it up. The slice PR closes its tickets and spec with `Closes #…`.

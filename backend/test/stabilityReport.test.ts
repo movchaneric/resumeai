@@ -1,0 +1,190 @@
+import { describe, expect, it } from "vitest";
+import type { Coverage, Cv, Requirement } from "@resume-ai/shared";
+import {
+  analyseCoverage,
+  listStability,
+  mapPool,
+  normaliseText,
+  parseStabilityArgs,
+  renderReport,
+  scoreSwing,
+  stats,
+  summarise,
+  type CoverageRun,
+  type EndToEndRun,
+} from "./stabilityReport.js";
+
+const req = (id: string, text: string, importance = "must_have", kind = "skill") =>
+  ({ id, text, source: text, kind, importance }) as unknown as Requirement;
+const cov = (requirementId: string, verdict: string) =>
+  ({ requirementId, verdict, evidenceIds: ["exp1.b1"], reason: "r" }) as unknown as Coverage;
+
+// weights: req1 3, req2 3, req3 1 -> total 7
+const reqs = [req("req1", "Node.js"), req("req2", "5+ years backend"), req("req3", "Docker", "nice_to_have")];
+
+describe("parseStabilityArgs", () => {
+  it("uses the defaults", () => {
+    expect(parseStabilityArgs(["cv.pdf", "jd.txt"])).toEqual({ ok: true, cvArg: "cv.pdf", jdArg: "jd.txt", runs: 5, coverageRuns: 10, parallel: 3 });
+  });
+  it("reads the options in any position", () => {
+    expect(parseStabilityArgs(["--runs", "2", "cv.pdf", "--coverage-runs", "4", "jd.txt", "--parallel", "1", "--out", "r.md"])).toEqual({
+      ok: true, cvArg: "cv.pdf", jdArg: "jd.txt", runs: 2, coverageRuns: 4, parallel: 1, out: "r.md",
+    });
+  });
+  it("rejects missing paths, bad numbers and unknown flags", () => {
+    expect(parseStabilityArgs([]).ok).toBe(false);
+    expect(parseStabilityArgs(["a"]).ok).toBe(false);
+    expect(parseStabilityArgs(["a", "b", "c"]).ok).toBe(false);
+    expect(parseStabilityArgs(["a", "b", "--runs", "0"]).ok).toBe(false);
+    expect(parseStabilityArgs(["a", "b", "--runs"]).ok).toBe(false);
+    expect(parseStabilityArgs(["a", "b", "--nope"]).ok).toBe(false);
+    expect(parseStabilityArgs(["a", "b", "--out"]).ok).toBe(false);
+  });
+});
+
+describe("mapPool", () => {
+  it("keeps results in order and never exceeds the limit", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const result = await mapPool(7, 3, async (i) => {
+      peak = Math.max(peak, ++inFlight);
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight--;
+      return i * 2;
+    });
+    expect(result).toEqual([0, 2, 4, 6, 8, 10, 12]);
+    expect(peak).toBe(3);
+  });
+});
+
+describe("stats", () => {
+  it("computes min, max, mean and population stdev", () => {
+    expect(stats([2, 4, 4, 4, 5, 5, 7, 9])).toMatchObject({ n: 8, min: 2, max: 9, mean: 5, stdev: 2, range: 7 });
+  });
+  it("is undefined for no values", () => {
+    expect(stats([])).toBeUndefined();
+  });
+});
+
+describe("scoreSwing", () => {
+  it("a Requirement flipping between met and unmet swings 100 x weight / total weight", () => {
+    expect(scoreSwing(reqs[0]!, ["met", "unmet", "met"], 7)).toBeCloseTo(300 / 7);
+  });
+  it("met and partially_met swings half as much", () => {
+    expect(scoreSwing(reqs[2]!, ["met", "partially_met"], 7)).toBeCloseTo(50 / 7);
+  });
+  it("a steady verdict does not swing", () => {
+    expect(scoreSwing(reqs[0]!, ["met", "met"], 7)).toBe(0);
+  });
+});
+
+describe("analyseCoverage", () => {
+  it("tallies verdicts, lists only flipped Requirements, sorted by swing", () => {
+    const runs = [
+      [cov("req1", "met"), cov("req2", "met"), cov("req3", "met")],
+      [cov("req1", "unmet"), cov("req2", "met"), cov("req3", "unmet")],
+      [cov("req1", "met"), cov("req2", "met"), cov("req3", "met")],
+    ];
+    const a = analyseCoverage(reqs, runs);
+    expect(a.perRequirement[0]!.counts).toEqual({ met: 2, partially_met: 0, unmet: 1 });
+    expect(a.flipped.map((f) => f.id)).toEqual(["req1", "req3"]);
+    expect(a.flipped[0]!.swing).toBeCloseTo(300 / 7);
+    expect(a.swingSum).toBeCloseTo(400 / 7);
+  });
+});
+
+describe("matching across runs", () => {
+  it("normalises case, whitespace and surrounding punctuation", () => {
+    expect(normaliseText("  Node.JS,\n  5+  years. ")).toBe("node.js, 5+ years");
+    expect(normaliseText("NODE.js")).toBe(normaliseText("node.JS."));
+  });
+  it("matches the same Requirement despite case and whitespace, and counts all/some/one", () => {
+    const s = listStability([
+      [req("req1", "Node.js"), req("req2", "Docker")],
+      [req("req1", "  node.JS  "), req("req2", "Kubernetes")],
+      [req("req1", "NODE.JS."), req("req2", "docker")],
+    ]);
+    expect(s).toMatchObject({ runs: 3, inAll: 1, inSome: 1, inOne: 1 });
+  });
+  it("reports importance and kind changes on Requirements seen in several runs", () => {
+    const s = listStability([[req("req1", "Docker", "must_have", "skill")], [req("req1", "docker", "nice_to_have", "other")], [req("req1", "Only once", "must_have")]]);
+    expect(s.labelChanges).toEqual([{ text: "Docker", runs: 2, importances: ["must_have", "nice_to_have"], kinds: ["other", "skill"] }]);
+  });
+});
+
+describe("summarise", () => {
+  it("applies the 60% rule", () => {
+    expect(summarise(10, 6)).toContain("driven by Coverage verdicts");
+    expect(summarise(10, 5.9)).toContain("driven by the Requirement list and CV extraction");
+    expect(summarise(0, 0)).toContain("no spread");
+    expect(summarise(undefined, 3)).toContain("cannot tell");
+  });
+});
+
+describe("renderReport", () => {
+  const good = (score: number, verdict: string): EndToEndRun => ({
+    ok: true,
+    score,
+    requirements: reqs,
+    coverage: [cov("req1", verdict), cov("req2", "met"), cov("req3", "unmet")],
+  });
+  const cRun = (verdict: string, score: number): CoverageRun => ({
+    ok: true,
+    score,
+    coverage: [cov("req1", verdict), cov("req2", "met"), cov("req3", "unmet")],
+  });
+
+  it("counts a failed run, lists its error name and keeps the stats", () => {
+    const report = renderReport({
+      runs: 3,
+      coverageRuns: 3,
+      endToEnd: [good(60, "met"), { ok: false, error: "CoverageError" }, good(50, "unmet")],
+      baseRequirements: reqs,
+      coverageOnly: [cRun("met", 60), { ok: false, error: "LlmUnavailableError" }, cRun("unmet", 50)],
+    });
+    expect(report).toContain("A: 2/3 runs succeeded, 1 failed (CoverageError x1)");
+    expect(report).toContain("C: 2/3 runs succeeded, 1 failed (LlmUnavailableError x1)");
+    expect(report).toContain("n 2, min 50.0, max 60.0, range 10.0");
+    expect(report).toContain("lower bound");
+    expect(report).toContain("Verdict: the spread looks driven by Coverage verdicts");
+  });
+
+  it("survives a run where everything failed", () => {
+    const report = renderReport({ runs: 1, coverageRuns: 1, endToEnd: [{ ok: false, error: "ExtractionError" }], coverageOnly: [] });
+    expect(report).toContain("0/1 runs succeeded");
+    expect(report).toContain("cannot tell");
+  });
+
+  it("contains no CV Item text", () => {
+    const MARKER = "ZXQ-CV-MARKER-4417";
+    const cv = {
+      contact: { id: "contact", name: MARKER, email: `${MARKER}@example.com`, phone: MARKER, location: MARKER, links: [] },
+      summary: { id: "summary", text: MARKER },
+      experience: [{ id: "exp1", company: MARKER, title: MARKER, location: null, dates: { start: "2020", end: null, current: true }, bullets: [{ id: "exp1.b1", text: `Built ${MARKER}` }] }],
+      education: [],
+      skills: [{ id: "skill1", text: MARKER }],
+      projects: [],
+      certifications: [],
+      additionalSections: [],
+    } as unknown as Cv;
+    // Coverage reasons can quote the CV; the report must not carry them.
+    const quoting = (verdict: string) =>
+      [{ requirementId: "req1", verdict, evidenceIds: ["exp1.b1"], reason: JSON.stringify(cv.experience[0]!.bullets) }] as unknown as Coverage[];
+    const report = renderReport({
+      runs: 2,
+      coverageRuns: 2,
+      endToEnd: [
+        { ok: true, score: 60, requirements: reqs, coverage: quoting("met") },
+        { ok: true, score: 50, requirements: reqs, coverage: quoting("unmet") },
+      ],
+      baseRequirements: reqs,
+      coverageOnly: [
+        { ok: true, score: 60, coverage: quoting("met") },
+        { ok: true, score: 50, coverage: quoting("unmet") },
+      ],
+    });
+    expect(report).toContain("Node.js");
+    expect(report).not.toContain(MARKER);
+    expect(report).not.toContain("exp1.b1");
+  });
+});

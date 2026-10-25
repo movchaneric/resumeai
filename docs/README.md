@@ -10,11 +10,11 @@ Package-level READMEs (for example `frontend/README.md`) stay next to their code
 
 ## Where a new doc goes
 
-Every plan, handoff, review or note belongs to the slice being worked on, in `docs/slices/<NN>-<slice-name>/`. Do not put files in `docs/` itself, and do not use generic names at the top level.
+Every decision record, handoff, review or note belongs to the slice being worked on, in `docs/slices/<NN>-<slice-name>/`. From slice 4a on, the spec (plan) and tickets are GitHub issues instead (see [`agents/issue-tracker.md`](./agents/issue-tracker.md)); slices 0 to 3 keep their `plan.md` and `tickets/`. Do not put files in `docs/` itself, and do not use generic names at the top level.
 
 - Create the slice folder when work on that slice starts, not before.
-- Use descriptive file names inside it: `plan.md`, `handoff.md`, `review-<topic>.md`, `notes-<topic>.md`.
-- A handoff is written at the end of a slice and stays in that slice's folder. It describes the state and the next slice, which then gets its own folder and `plan.md`.
+- Use descriptive file names inside it: `decisions.md`, `handoff.md`, `review.md`, `retrospective.md`, `notes-<topic>.md`.
+- A handoff is written at the end of a slice and stays in that slice's folder. It describes the state and the next slice, which then gets its own folder and spec issue.
 - A decision that outlives the slice becomes an ADR in `adr/` and is linked from the slice docs.
 
 ## Slices

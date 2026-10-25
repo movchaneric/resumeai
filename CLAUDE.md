@@ -45,5 +45,19 @@ backend/test/    mirrors src (routes/, services/, parsing/, prompts/, scoring/, 
 ## Workflow
 
 - One branch and one PR per slice. Commit messages end with the Co-Authored-By line.
-- Plans, handoffs and reviews go under `docs/slices/<NN>-<name>/`.
+- Specs and tickets are GitHub issues (see `docs/agents/issue-tracker.md`); decisions, reviews, handoffs and retrospectives go under `docs/slices/<NN>-<name>/`, and `decisions.md` links the slice's spec issue.
 - Run `pnpm typecheck` and `pnpm --filter backend test` (needs `docker compose up -d postgres`) before committing.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `movchaneric/resumeai`, through the `gh` CLI. Specs and tickets are issues; slice docs stay in `docs/slices/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` and `docs/adr/` at the root. See `docs/agents/domain.md`.

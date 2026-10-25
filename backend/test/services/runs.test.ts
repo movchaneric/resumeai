@@ -437,11 +437,13 @@ describe("RunsService tailoring round", () => {
     ctx.judge
       .enqueue("tailor", { changes: [reword, addSkill] })
       .enqueue("claim_check", { verdicts: [verdict("r1.c1", "supported"), verdict("r1.c2", "supported")] })
-      .enqueue("assess_coverage", { verdicts: [{ requirementId: "req2", reason: "Shown now.", evidenceIds: ["exp1.b1"], verdict: "met" }] });
+      .enqueue("assess_coverage", { verdicts: [{ requirementId: "req2", reason: "Shown now.", evidenceIds: ["exp1.b1"], verdict: "met" }] })
+      .enqueue("tailor", { changes: [] });
     const view = await finish(ctx);
 
-    expect(view.exitReason).toBe("max_iterations");
-    expect(view.iterations).toEqual({ used: 1, max: 3 });
+    // Round 1 gained 43 points; round 2 found nothing more to propose.
+    expect(view.exitReason).toBe("ceiling");
+    expect(view.iterations).toEqual({ used: 2, max: 3 });
     expect(view.changes.map((c) => c.id)).toEqual(["r1.c1", "r1.c2"]);
     expect(view.cv.skills.map((s) => [s.id, s.text])).toEqual([["skill1", "TypeScript"], ["skill2", "Node.js"], ["skill3", "PostgreSQL"]]);
     expect(view.cv.experience[0]!.bullets[0]!.text).toBe("Designed and maintained Node.js services backed by PostgreSQL databases.");
@@ -459,10 +461,11 @@ describe("RunsService tailoring round", () => {
     ctx.judge
       .enqueue("tailor", { changes: [addSkill] })
       .enqueue("claim_check", { verdicts: [verdict("r1.c1", "supported")] })
-      .enqueue("assess_coverage", { verdicts: [{ requirementId: "req2", reason: "Shown now.", evidenceIds: ["exp1.b1"], verdict: "met" }] });
+      .enqueue("assess_coverage", { verdicts: [{ requirementId: "req2", reason: "Shown now.", evidenceIds: ["exp1.b1"], verdict: "met" }] })
+      .enqueue("tailor", { changes: [] });
     await finish(ctx);
     expect(ctx.llm.calls.map((c) => c.name)).toEqual(["extract_job_profile", "extract_cv"]);
-    expect(ctx.judge.calls.map((c) => c.name)).toEqual(["assess_coverage", "tailor", "claim_check", "assess_coverage"]);
+    expect(ctx.judge.calls.map((c) => c.name)).toEqual(["assess_coverage", "tailor", "claim_check", "assess_coverage", "tailor"]);
   });
 
   it("re-judges only the Requirements the valid Changes list", async () => {
@@ -470,7 +473,8 @@ describe("RunsService tailoring round", () => {
     ctx.judge
       .enqueue("tailor", { changes: [addSkill] })
       .enqueue("claim_check", { verdicts: [verdict("r1.c1", "supported")] })
-      .enqueue("assess_coverage", { verdicts: [{ requirementId: "req2", reason: "Shown now.", evidenceIds: ["exp1.b1"], verdict: "met" }] });
+      .enqueue("assess_coverage", { verdicts: [{ requirementId: "req2", reason: "Shown now.", evidenceIds: ["exp1.b1"], verdict: "met" }] })
+      .enqueue("tailor", { changes: [] });
     await finish(ctx);
     const rejudge = JSON.stringify(ctx.judge.calls[3]!.messages);
     expect(rejudge).toContain("req2");
@@ -552,8 +556,222 @@ describe("RunsService tailoring round", () => {
     ctx.judge.enqueue("tailor", { changes: [] });
     runId = await createExtractableRun(ctx);
     await ctx.settle();
-    // `iterations.used` counts finished rounds, so it is still 0 while round 1 runs.
-    expect(seen).toEqual({ status: "tailoring", used: 0 });
+    // `iterations.used` counts rounds started, so it is already 1 while round 1 runs.
+    expect(seen).toEqual({ status: "tailoring", used: 1 });
     expect(ctx.store.statusLog).toEqual(["extracting", "tailoring", "awaiting_review"]);
+  });
+
+  describe("the loop", () => {
+    // Weights: req1 3, req2 3, req3 1 (total 7). Scores below are the unrounded Match Score.
+    const cov = (...v: ("met" | "partially_met" | "unmet")[]) => ({
+      verdicts: v.map((verdict, i) => ({ requirementId: `req${i + 1}`, reason: `reason ${i + 1}`, evidenceIds: verdict === "unmet" ? [] : ["exp1.b1"], verdict })),
+    });
+    const rejudged = (id: string, v: "met" | "partially_met" | "unmet") => ({ verdicts: [{ requirementId: id, reason: `now ${v}`, evidenceIds: ["exp1.b1"], verdict: v }] });
+    const addSkillFor = (text: string, req: string) => modelChange({ op: "add", parentId: "skills", text, requirementIds: [req] });
+    const replaceFor = (target: string, text: string, req: string) => modelChange({ targetItemId: target, text, requirementIds: [req] });
+
+    /** Starts from a custom first Coverage (and no `firstCoverage` from the shared setup). */
+    function loopSetup(first: ReturnType<typeof cov>) {
+      const judge = new FakeLlmClient();
+      const ctx = setup(undefined, judge);
+      ctx.llm.enqueue("extract_job_profile", THREE_REQS).enqueue("extract_cv", extractedCv);
+      judge.enqueue("assess_coverage", first);
+      return { ...ctx, judge };
+    }
+    /** One round: the tailor answer, the claim verdicts for r<round>.c<n>, and the re-judge answer. */
+    function round(judge: FakeLlmClient, n: number, changes: unknown[], rejudge: unknown, claim: ("supported" | "not_supported")[] = changes.map(() => "supported")) {
+      judge.enqueue("tailor", { changes }).enqueue("claim_check", { verdicts: claim.map((c, i) => verdict(`r${n}.c${i + 1}`, c, `claim reason ${n}.${i + 1}`)) });
+      if (rejudge !== null) judge.enqueue("assess_coverage", rejudge);
+    }
+
+    it("runs a second round and stops with target_reached when the score reaches 90", async () => {
+      const ctx = loopSetup(cov("met", "unmet", "unmet")); // 42.9
+      round(ctx.judge, 1, [addSkillFor("PostgreSQL", "req2")], rejudged("req2", "partially_met")); // 64.3
+      round(ctx.judge, 2, [replaceFor("exp1.b1", "Designed Node.js services and PostgreSQL databases.", "req2"), addSkillFor("Docker", "req3")], {
+        verdicts: [rejudged("req2", "met").verdicts[0], rejudged("req3", "met").verdicts[0]],
+      }); // 100
+      const view = await finish(ctx);
+      expect(view.exitReason).toBe("target_reached");
+      expect(view.iterations).toEqual({ used: 2, max: 3 });
+      expect(view.score).toEqual({ before: 43, after: 100 });
+      expect(view.changes.map((c) => c.id)).toEqual(["r1.c1", "r2.c1", "r2.c2"]);
+    });
+
+    it("stops with ceiling in round 2 when nothing valid is proposed, keeping round 1", async () => {
+      const ctx = loopSetup(cov("met", "unmet", "unmet"));
+      round(ctx.judge, 1, [addSkillFor("PostgreSQL", "req2")], rejudged("req2", "partially_met"));
+      round(ctx.judge, 2, [], null);
+      const view = await finish(ctx);
+      expect(view.exitReason).toBe("ceiling");
+      expect(view.iterations.used).toBe(2);
+      expect(view.changes.map((c) => c.id)).toEqual(["r1.c1"]);
+      expect(view.score.after).toBe(64);
+    });
+
+    it("stops with plateau and keeps a round that gained too little", async () => {
+      const ctx = loopSetup(cov("met", "unmet", "unmet")); // 42.9
+      round(ctx.judge, 1, [addSkillFor("PostgreSQL", "req2")], rejudged("req2", "partially_met")); // 64.3
+      round(ctx.judge, 2, [addSkillFor("Docker", "req3")], rejudged("req3", "unmet")); // 64.3: gain 0
+      const view = await finish(ctx);
+      expect(view.exitReason).toBe("plateau");
+      expect(view.changes.map((c) => c.id)).toEqual(["r1.c1", "r2.c1"]);
+    });
+
+    it("undoes a lower-scoring round: plateau, and round 1's result stays in place", async () => {
+      const ctx = loopSetup(cov("met", "unmet", "unmet"));
+      round(ctx.judge, 1, [addSkillFor("PostgreSQL", "req2")], rejudged("req2", "partially_met")); // 64.3
+      round(ctx.judge, 2, [replaceFor("exp1.b1", "Worked with services.", "req1")], rejudged("req1", "unmet")); // 21.4
+      const view = await finish(ctx);
+      expect(view.exitReason).toBe("plateau");
+      expect(view.iterations.used).toBe(2);
+      expect(view.score.after).toBe(64);
+      expect(view.changes.map((c) => c.id)).toEqual(["r1.c1"]);
+      expect(view.cv.experience[0]!.bullets[0]!.text).toBe(extractedCv.experience[0]!.bullets[0]);
+      expect(view.requirements.map((r) => r.after.verdict)).toEqual(["met", "partially_met", "unmet"]);
+    });
+
+    it("stops with max_iterations after three rounds that each gain", async () => {
+      const ctx = loopSetup(cov("partially_met", "unmet", "unmet")); // 21.4
+      round(ctx.judge, 1, [addSkillFor("PostgreSQL", "req2")], rejudged("req2", "partially_met")); // 42.9
+      round(ctx.judge, 2, [replaceFor("skill3", "PostgreSQL databases", "req2")], rejudged("req2", "met")); // 64.3
+      round(ctx.judge, 3, [replaceFor("exp1.b1", "Designed and maintained Node.js services backed by PostgreSQL.", "req1")], rejudged("req1", "met")); // 85.7
+      const view = await finish(ctx);
+      expect(view.exitReason).toBe("max_iterations");
+      expect(view.iterations).toEqual({ used: 3, max: 3 });
+      expect(ctx.judge.calls.filter((c) => c.name === "tailor")).toHaveLength(3);
+    });
+
+    it("keeps one Change per Item across rounds: ID and original text stay, Requirements merge, an added Item can be reworded", async () => {
+      const ctx = loopSetup(cov("met", "unmet", "unmet"));
+      round(ctx.judge, 1, [replaceFor("exp1.b1", "Built Node.js services backed by PostgreSQL.", "req2"), addSkillFor("Postgres", "req2")], rejudged("req2", "partially_met")); // 64.3
+      round(
+        ctx.judge,
+        2,
+        [replaceFor("exp1.b1", "Designed and maintained Node.js services backed by PostgreSQL databases.", "req3"), replaceFor("skill3", "PostgreSQL", "req3")],
+        rejudged("req3", "partially_met"),
+      ); // 71.4
+      const view = await finish(ctx);
+      expect(view.changes.map((c) => [c.id, c.op])).toEqual([["r1.c1", "replace"], ["r1.c2", "add"]]);
+      const first = view.changes[0]!;
+      if (first.op !== "replace") throw new Error("expected a replace");
+      expect(first.before).toBe(extractedCv.experience[0]!.bullets[0]);
+      expect(first.after).toBe("Designed and maintained Node.js services backed by PostgreSQL databases.");
+      expect(first.requirementIds).toEqual(["req2", "req3"]);
+      const added = view.changes[1]!;
+      if (added.op !== "add") throw new Error("expected an add");
+      expect(added.after).toBe("PostgreSQL");
+      expect(view.cv.skills.map((s) => s.text)).toEqual(["TypeScript", "Node.js", "PostgreSQL"]);
+    });
+
+    it("tells round 2's tailor about round 1's rejection and its reason", async () => {
+      const ctx = loopSetup(cov("met", "unmet", "unmet"));
+      round(ctx.judge, 1, [addSkillFor("PostgreSQL", "req2"), addSkillFor("Kubernetes", "req3")], rejudged("req2", "partially_met"), ["supported", "not_supported"]);
+      round(ctx.judge, 2, [], null);
+      await finish(ctx);
+      const tailorCalls = ctx.judge.calls.filter((c) => c.name === "tailor");
+      const userText = (call: { messages: { role: string; content: string }[] }) => call.messages.filter((m) => m.role === "user").map((m) => m.content).join("\n");
+      expect(userText(tailorCalls[0]!)).not.toContain("Rejected earlier");
+      const second = userText(tailorCalls[1]!);
+      expect(second).toContain("Rejected earlier");
+      expect(second).toContain("claim reason 1.2");
+      expect(second).toContain("Kubernetes");
+    });
+
+    it("counts a round as used from the moment it starts", async () => {
+      const ctx = loopSetup(cov("met", "unmet", "unmet"));
+      let seen: number | undefined;
+      let runId = "";
+      const structured = ctx.judge.structured.bind(ctx.judge) as typeof ctx.judge.structured;
+      ctx.judge.structured = (async (...args: Parameters<typeof structured>) => {
+        if (args[2].name === "tailor") {
+          const view = await ctx.service.getRunView(runId);
+          if (view.status === "tailoring") seen = view.iterations.used;
+        }
+        return structured(...args);
+      }) as typeof ctx.judge.structured;
+      ctx.judge.enqueue("tailor", { changes: [] });
+      runId = await createExtractableRun(ctx);
+      await ctx.settle();
+      expect(seen).toBe(1);
+    });
+
+    it("shows the rounded first score and the latest kept score (null before any round is kept) while tailoring", async () => {
+      const ctx = loopSetup(cov("met", "unmet", "unmet"));
+      const seen: { before: number; after: number | null }[] = [];
+      let runId = "";
+      const structured = ctx.judge.structured.bind(ctx.judge) as typeof ctx.judge.structured;
+      ctx.judge.structured = (async (...args: Parameters<typeof structured>) => {
+        if (args[2].name === "tailor") {
+          const view = await ctx.service.getRunView(runId);
+          if (view.status === "tailoring") seen.push(view.score);
+        }
+        return structured(...args);
+      }) as typeof ctx.judge.structured;
+      round(ctx.judge, 1, [addSkillFor("PostgreSQL", "req2")], rejudged("req2", "partially_met"));
+      round(ctx.judge, 2, [], null);
+      runId = await createExtractableRun(ctx);
+      await ctx.settle();
+      expect(seen).toEqual([{ before: 43, after: null }, { before: 43, after: 64 }]);
+    });
+
+    describe("failures", () => {
+      const errorLogs = () => vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+      it("a tailor failure in round 2 keeps round 1's result and exits error", async () => {
+        const ctx = loopSetup(cov("met", "unmet", "unmet"));
+        round(ctx.judge, 1, [addSkillFor("PostgreSQL", "req2")], rejudged("req2", "partially_met"));
+        ctx.judge.enqueue("tailor", new LlmUnavailableError("down"));
+        const view = await finish(ctx);
+        expect(view.exitReason).toBe("error");
+        expect(view.changes.map((c) => c.id)).toEqual(["r1.c1"]);
+        expect(view.score.after).toBe(64);
+        expect(view.iterations.used).toBe(2);
+      });
+
+      it("a claim-check failure after its retry in round 2 keeps round 1's result", async () => {
+        const ctx = loopSetup(cov("met", "unmet", "unmet"));
+        round(ctx.judge, 1, [addSkillFor("PostgreSQL", "req2")], rejudged("req2", "partially_met"));
+        ctx.judge.enqueue("tailor", { changes: [addSkillFor("Docker", "req3")] }).enqueue("claim_check", new LlmSchemaError("bad", ["x"]), new LlmSchemaError("bad", ["x"]));
+        const view = await finish(ctx);
+        expect(view.exitReason).toBe("error");
+        expect(view.changes.map((c) => c.id)).toEqual(["r1.c1"]);
+        expect(view.cv.skills.map((s) => s.text)).toEqual(["TypeScript", "Node.js", "PostgreSQL"]);
+      });
+
+      it("a re-judge failure in round 2 keeps round 1's result", async () => {
+        const ctx = loopSetup(cov("met", "unmet", "unmet"));
+        round(ctx.judge, 1, [addSkillFor("PostgreSQL", "req2")], rejudged("req2", "partially_met"));
+        round(ctx.judge, 2, [addSkillFor("Docker", "req3")], null);
+        ctx.judge.enqueue("assess_coverage", new LlmSchemaError("bad", ["x"]), new LlmSchemaError("bad", ["x"]));
+        const view = await finish(ctx);
+        expect(view.exitReason).toBe("error");
+        expect(view.changes.map((c) => c.id)).toEqual(["r1.c1"]);
+        expect(view.score.after).toBe(64);
+      });
+
+      it("a failure in round 1 gives zero Changes and before = after", async () => {
+        const ctx = loopSetup(cov("met", "unmet", "unmet"));
+        round(ctx.judge, 1, [addSkillFor("PostgreSQL", "req2")], null);
+        ctx.judge.enqueue("assess_coverage", new LlmUnavailableError("down"));
+        const view = await finish(ctx);
+        expect(view.exitReason).toBe("error");
+        expect(view.changes).toEqual([]);
+        expect(view.score.after).toBe(view.score.before);
+        expect(view.iterations.used).toBe(1);
+      });
+
+      it("logs the error name and issue count only, never the message or the issues", async () => {
+        const log = errorLogs();
+        const ctx = loopSetup(cov("met", "unmet", "unmet"));
+        ctx.judge.enqueue("tailor", new LlmSchemaError("secret message", ["secret issue"]), new LlmSchemaError("secret message", ["secret issue"]));
+        await finish(ctx);
+        const logged = log.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
+        log.mockRestore();
+        expect(logged).toContain("round 1 failed");
+        expect(logged).toContain("TailorError");
+        expect(logged).toContain("1 issues");
+        expect(logged).not.toContain("secret");
+      });
+    });
   });
 });

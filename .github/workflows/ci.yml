@@ -9,6 +9,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
+      # Do not install git hooks (husky `prepare`) in CI.
+      HUSKY: 0
       # `prisma generate` (backend postinstall) does not connect, but prisma.config.ts reads this variable.
       DATABASE_URL: postgresql://resume:resume@localhost:15432/resume_ai_test
     services:

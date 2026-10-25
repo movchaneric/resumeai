@@ -51,6 +51,7 @@ backend/test/    mirrors src (routes/, services/, graph/, parsing/, prompts/, sc
 - Run `pnpm typecheck` and `pnpm --filter backend test` (needs `docker compose up -d postgres`) before committing.
 - CI (`.github/workflows/ci.yml`) runs typecheck and the shared and backend tests on every PR. `backend/test/architecture.test.ts` enforces the layer and import rules above, so a broken rule fails CI.
 - Create ticket worktrees with `scripts/worktree.sh add <NN> <name>`; it branches from the current branch, copies `backend/.env`, installs, and builds shared. Each checkout uses its own test database, named after its folder.
+- A pre-commit hook (husky, `.husky/pre-commit`) builds shared and runs `pnpm typecheck` on every commit; `pnpm install` sets it up. Tests are left to CI. Don't skip it with `--no-verify` unless the owner asks.
 - Code review also checks `CODING_STANDARDS.md`.
 
 ## Agent skills

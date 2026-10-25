@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RunIdSchema, RunViewSchema, type ExtractedCv } from "@resume-ai/shared";
+import { RunIdSchema, RunViewSchema } from "@resume-ai/shared";
 import request from "supertest";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "@/app.js";
@@ -11,6 +11,8 @@ import { RunStore } from "@/stores/runs.js";
 import { ExtractionError } from "@/extraction/errors.js";
 import { LlmSchemaError } from "@/llm/llmClient.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
+import { makeGraphRunner } from "../fakes/runGraph.js";
+import { coverageAnswer, extractedCv, extractedJob } from "../runFixtures.js";
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "../fixtures");
 const fixture = (name: string) => readFileSync(join(fixtures, name));
@@ -28,40 +30,8 @@ const settle = async () => {
   await Promise.all(tasks);
   tasks = [];
 };
-const app = createApp({ store, config, llm, runInBackground });
-
-const range = (start: string, end: string | null) => ({ start, end, current: end === null });
-/** What a model would extract from the text of `fixtures/cv.pdf`; every protected field is quoted from it. */
-const extractedCv: ExtractedCv = {
-  contact: { name: "Jane Doe", email: "jane.doe@example.com", phone: null, location: "Springfield", links: [] },
-  summary: null,
-  experience: [
-    {
-      company: "Acme Corp",
-      title: "Senior Backend Developer",
-      location: null,
-      dates: range("2021", null),
-      bullets: ["Designed and maintained Node.js services backed by PostgreSQL."],
-    },
-  ],
-  education: [
-    { institution: "Springfield University", degree: "BSc", field: "Computer Science", dates: range("2014", "2018"), bullets: [] },
-  ],
-  skills: ["TypeScript", "Node.js"],
-  projects: [],
-  certifications: [],
-  additionalSections: [],
-};
-const extractedJob = {
-  title: "Backend Developer",
-  company: "Initech",
-  requirements: [{ text: "Node.js", source: "Node.js", kind: "skill", importance: "must_have" }],
-};
-
-/** What a model would answer for `extractedJob` (one Requirement, `req1`) against `extractedCv`. */
-const coverageAnswer = {
-  verdicts: [{ requirementId: "req1", reason: "Built Node.js services.", evidenceIds: ["exp1.b1"], verdict: "met" }],
-};
+const graphRunner = makeGraphRunner(store, llm);
+const app = createApp({ store, config, graphRunner, runInBackground });
 
 const JOB_DESCRIPTION = "We are hiring a backend developer with Node.js and PostgreSQL experience.";
 
@@ -83,14 +53,15 @@ afterAll(async () => {
 
 describe("POST /runs", () => {
   it.each(["cv.pdf", "cv.docx"])("accepts %s, stores the Run and returns its ID", async (file) => {
-    const res = await upload(file);
+    // An app whose background task never starts, so the Run stays as `POST` left it.
+    const idle = createApp({ store, config, graphRunner, runInBackground: () => {} });
+    const res = await request(idle).post("/runs").attach("cv", fixture(file), file).field("jobDescription", JOB_DESCRIPTION);
     expect(res.status).toBe(201);
     const id = RunIdSchema.parse(res.body.id);
     expect(res.headers.location).toBe(`/runs/${id}`);
 
     const row = await store.get(id);
-    expect(row?.cvText).toContain("Jane Doe");
-    expect(row?.jobDescriptionText).toBe(JOB_DESCRIPTION);
+    expect(row?.status).toBe("extracting");
     expect(row!.expiresAt.getTime() - row!.createdAt.getTime()).toBe(config.runTtlMs);
   });
 
@@ -122,9 +93,11 @@ describe("POST /runs", () => {
   });
 
   it("strips NUL characters instead of failing on them", async () => {
+    llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueue("assess_coverage", coverageAnswer);
     const res = await upload("cv.pdf", "Backend\u0000 developer");
     expect(res.status).toBe(201);
-    expect((await store.get(RunIdSchema.parse(res.body.id)))?.jobDescriptionText).toBe("Backend developer");
+    await settle();
+    expect(JSON.stringify(llm.calls[0]!.messages)).toContain("Backend developer");
   });
 
   it("rejects a job description over the limit", async () => {
@@ -138,7 +111,7 @@ describe("POST /runs", () => {
 describe("GET /runs/:id", () => {
   it("returns a valid RunView while extraction is running", async () => {
     // An app whose background task never starts, so the Run stays as `POST` left it.
-    const idle = createApp({ store, config, llm, runInBackground: () => {} });
+    const idle = createApp({ store, config, graphRunner, runInBackground: () => {} });
     const created = await request(idle).post("/runs").attach("cv", fixture("cv.pdf"), "cv.pdf").field("jobDescription", JOB_DESCRIPTION);
     const res = await request(idle).get(`/runs/${created.body.id}`);
     expect(res.status).toBe(200);
@@ -149,7 +122,7 @@ describe("GET /runs/:id", () => {
     expect(view.job).toBeNull();
   });
 
-  it("shows the Run as scored, with its score and requirements, once the pipeline has finished", async () => {
+  it("shows the Run as awaiting_review, with its scores and requirements, once the pipeline has finished", async () => {
     llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueue("assess_coverage", coverageAnswer);
     const { body } = await upload("cv.pdf");
     await settle();
@@ -158,17 +131,26 @@ describe("GET /runs/:id", () => {
     expect(res.status).toBe(200);
     const view = RunViewSchema.parse(res.body);
     expect(view.id).toBe(body.id);
-    expect(view.status).toBe("scored");
-    if (view.status !== "scored") return;
-    expect(view.score).toBe(100);
+    expect(view.status).toBe("awaiting_review");
+    if (view.status !== "awaiting_review") return;
+    expect(view.score).toEqual({ before: 100, after: 100 });
     expect(view.job).toEqual({ title: "Backend Developer", company: "Initech" });
-    expect(view.steps.map((s) => `${s.key}:${s.state}`)).toContain("coverage:done");
+    expect(view.steps.map((s) => `${s.key}:${s.state}`)).toContain("review:running");
+    expect(view.changes).toEqual([]);
+    expect(view.userEvidence).toEqual([]);
+    expect(view.iterations).toEqual({ used: 0, max: 3 });
+    expect(view.exitReason).toBe("ceiling");
     expect(view.requirements).toEqual([
-      { id: "req1", text: "Node.js", importance: "must_have", verdict: "met", evidenceIds: ["exp1.b1"], reason: "Built Node.js services." },
+      {
+        id: "req1",
+        text: "Node.js",
+        importance: "must_have",
+        before: "met",
+        after: { verdict: "met", evidenceIds: ["exp1.b1"], reason: "Built Node.js services." },
+        confirmedGap: false,
+      },
     ]);
-    const row = await store.get(RunIdSchema.parse(body.id));
-    expect(row?.cv?.experience[0]?.id).toBe("exp1");
-    expect(row?.jobProfile?.requirements[0]?.id).toBe("req1");
+    expect(view.cv.experience[0]?.id).toBe("exp1");
   });
 
   it("shows a failed Run with coverage failed when the Coverage answer stays invalid", async () => {
@@ -223,7 +205,7 @@ describe("GET /runs/:id", () => {
 
   it("returns 404 for an expired Run even while its row still exists", async () => {
     const { body } = await upload("cv.pdf");
-    const later = createApp({ store, config, llm, now: () => new Date(Date.now() + config.runTtlMs + 1000) });
+    const later = createApp({ store, config, graphRunner, now: () => new Date(Date.now() + config.runTtlMs + 1000) });
     const res = await request(later).get(`/runs/${body.id}`);
     expect(res.status).toBe(404);
     expect(res.body.code).toBe("RUN_NOT_FOUND");

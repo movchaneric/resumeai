@@ -11,6 +11,7 @@
     "test": "vitest run",
     "fixtures": "tsx test/make-fixtures.ts",
     "extract": "tsx test/extract.ts",
+    "stability": "tsx test/stability.ts",
     "db:migrate": "prisma migrate dev"
   },
   "dependencies": {

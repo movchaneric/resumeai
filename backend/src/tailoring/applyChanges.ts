@@ -1,11 +1,11 @@
 import { ItemIdSchema } from "@resume-ai/shared";
 import type { Change, Cv } from "@resume-ai/shared";
-import { allIds, childLists, textItems, textParentIds } from "@/tailoring/cvItems.js";
+import { SECTION_ID_PATTERN, allIds, childLists, textItems, textParentIds } from "@/tailoring/cvItems.js";
 
 /** ID prefix for a new Item under a parent: `skill`, `exp1.b`, `sec1.i`. Matches `assignCvIds`. */
 function newIdPrefix(parentId: string): string {
   if (parentId === "skills") return "skill";
-  return /^sec[0-9]+$/.test(parentId) ? `${parentId}.i` : `${parentId}.b`;
+  return SECTION_ID_PATTERN.test(parentId) ? `${parentId}.i` : `${parentId}.b`;
 }
 
 /**

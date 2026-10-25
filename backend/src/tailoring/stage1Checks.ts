@@ -1,12 +1,12 @@
 import type { Change, Cv } from "@resume-ai/shared";
-import { allIds, childLists, itemTexts, textItems, textParentIds } from "@/tailoring/cvItems.js";
+import { LIST_IDS, SECTION_ID_PATTERN, allIds, childLists, itemTexts, textItems, textParentIds } from "@/tailoring/cvItems.js";
 import { collectItemIds } from "@/scoring/coverageRules.js";
 
 /** The fixed reason recorded for each rejection. The tailor reads them on the next round. */
 export const STAGE1_REASONS = {
   unknownTarget: "The target Item does not exist in the CV.",
   notTextItem: "The target is not a text Item; only bullets, skills, the summary and additional-section items can be changed.",
-  protectedField: "The target is a job, education, project or certification entry; dates, companies, titles and degrees are never changed.",
+  protectedField: "The target is a job, education, project or certification; dates, companies, titles and degrees are never changed.",
   unknownParent: "The parent does not exist in the CV.",
   parentNotText: "The parent does not accept new text Items.",
   noEvidence: "The Change cites no Evidence.",
@@ -58,8 +58,8 @@ function structureProblem(draft: Cv, change: Change): string | null {
     const id = change.targetItemId;
     if (textItems(draft).has(id)) return null;
     if (!allIds(draft).has(id)) return STAGE1_REASONS.unknownTarget;
-    const entries = [draft.experience, draft.education, draft.projects, draft.certifications].flat();
-    return entries.some((e) => e.id === id) ? STAGE1_REASONS.protectedField : STAGE1_REASONS.notTextItem;
+    const protectedItems = [draft.experience, draft.education, draft.projects, draft.certifications].flat();
+    return protectedItems.some((item) => item.id === id) ? STAGE1_REASONS.protectedField : STAGE1_REASONS.notTextItem;
   }
   if (change.op === "add") {
     if (textParentIds(draft).has(change.parentId)) return null;
@@ -81,7 +81,7 @@ function evidenceProblem(original: Cv, draft: Cv, change: Change): string | null
   const inDraft = allIds(draft);
   for (const id of change.evidenceIds) {
     if (known.has(id)) continue;
-    if (/^sec[0-9]+$/.test(id) || ["experience", "education", "skills", "projects", "certifications"].includes(id)) {
+    if (SECTION_ID_PATTERN.test(id) || (LIST_IDS as readonly string[]).includes(id)) {
       return STAGE1_REASONS.sectionEvidence;
     }
     return inDraft.has(id) ? STAGE1_REASONS.addedItemEvidence : STAGE1_REASONS.unknownEvidence;

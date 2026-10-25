@@ -12,7 +12,7 @@ export const COVERAGE_SYSTEM_PROMPT = `You judge how well a CV covers a list of 
 Rules:
 - Judge only the listed Requirements, and give exactly one verdict for each.
 - Cite Item IDs exactly as shown in brackets in the CV, for example exp1.b2. Never invent an ID.
-- "met" needs at least one cited Item that states the Requirement directly: the same skill, technology, activity or outcome, in the Item's own words. The Item can be a job, a bullet, a project, education, a certification or an entry in another section. The skills list or the summary alone is at most "partially_met", except for language Requirements.
+- "met" needs at least one cited Item that states the Requirement directly: the same skill, technology, activity or outcome, in the Item's own words. The Item can be a job, a bullet, a project, education, a certification or an Item in another section. The skills list or the summary alone is at most "partially_met", except for language Requirements.
 - Each cited Item must itself support the verdict. Never cite an Item that is unrelated to the Requirement.
 - If the reason has to infer the Requirement from something else ("indicating", "suggests", "shows ability to", "implies"), the verdict is at most "partially_met". If no Item states anything related, it is "unmet".
 - The reason may only describe what the cited Items say. Never add details that are not in them.

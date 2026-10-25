@@ -46,7 +46,7 @@ export type RoundSummary = {
 export type RunGraphDeps = {
   /** CV extraction (`LLM_MODEL`). The Job Profile is extracted with `judgeLlm`, so its Requirement list is stable. */
   llm: LlmClient;
-  /** Judge-and-write work (Coverage now; the tailor and claim check later). */
+  /** Judge-and-write work (Coverage, the tailor and the claim check). */
   judgeLlm: LlmClient;
   checkpointer: BaseCheckpointSaver;
   /** Called first thing in each node, so the Run's status is written before the node's work starts. */

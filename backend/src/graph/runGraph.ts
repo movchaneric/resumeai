@@ -5,6 +5,8 @@ import { selectQuestions } from "@/tailoring/questions.js";
 import { tailorCv } from "@/tailoring/tailorCv.js";
 import { validateChanges } from "@/tailoring/validateChanges.js";
 import { applyChanges } from "@/tailoring/applyChanges.js";
+import { applyDecisions, keptChanges } from "@/tailoring/review.js";
+import { setActiveSpanAttribute } from "@/utils/spans.js";
 import { mergeRoundIntoChanges } from "@/tailoring/mergeChanges.js";
 import { mergeCoverage, requirementsListedBy } from "@/tailoring/roundCoverage.js";
 import { onlyGapsLeft, routeAfterRound, shouldSkipTailoring } from "@/scoring/exitRouter.js";
@@ -25,6 +27,7 @@ export const NODE_STATUS = {
   validate: "tailoring",
   rejudge: "tailoring",
   review: "awaiting_review",
+  final_rejudge: "tailoring",
 } as const;
 
 /** What one finished round did, for an observer such as the dev script. Plain data; the graph never reads it back. */
@@ -101,7 +104,7 @@ function logRoundFailure(runId: string, round: number, error: unknown): void {
  * tailoring rounds: begin_round, tailor, validate, rejudge, route, and back to begin_round while the exit router
  * says so (at most MAX_ROUNDS). Nodes are thin: each calls functions from `extraction/`, `tailoring/` or `scoring/`
  * and returns a state update. `begin_round` counts the round as started; the `route` node is the only place that
- * commits the pending round. `review` waits in an `interrupt()` for the decisions, then the graph ends.
+ * commits the pending round. `review` waits in an `interrupt()` for the decisions, `final_rejudge` judges again what they undid, then the graph ends.
  */
 export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, checkpointer, onEnter, onRound }: RunGraphDeps) {
   return new StateGraph(RunState)
@@ -246,11 +249,33 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
       };
     })
     // The candidate's turn: the graph waits inside `interrupt()` for the decisions. Like `collect_answers`, the node runs
-    // again from the top on resume, so everything before the `interrupt()` must be pure. For now the decisions are
-    // ignored and the graph goes on to the end.
-    .addNode("review", () => {
-      interrupt<null, ReviewDecision[]>(null);
-      return {};
+    // again from the top on resume, so everything before the `interrupt()` must be pure. It only records the final
+    // statuses; the model work is in `final_rejudge`, so a crash during it resumes from this node's checkpoint.
+    .addNode("review", (state) => {
+      const decisions = interrupt<null, ReviewDecision[]>(null);
+      return { changes: applyDecisions(state.changes, decisions) };
+    })
+    // Judges again the Requirements that rejected or revised Changes list, against the CV the user ends up with. Every
+    // other verdict carries over. A failure here never fails the Run: those Requirements go back to their verdict before
+    // tailoring, so the score errs low.
+    .addNode("final_rejudge", async (state) => {
+      await onEnter(state.runId, "final_rejudge");
+      const { requirements } = state.jobProfile!;
+      const undone = state.changes.filter((c) => c.status === "rejected" || c.status === "revised");
+      const affected = requirementsListedBy(requirements, undone);
+      if (affected.length === 0) return {};
+      try {
+        const reviewed = applyChanges(state.cv!, keptChanges(state.changes));
+        const { coverage } = await assessCoverage(judgeLlm, reviewed, affected, { round: state.rounds });
+        const merged = mergeCoverage(state.coverage!, coverage);
+        return { coverage: merged, scoreAfter: matchScore(requirements, merged) };
+      } catch (error) {
+        console.error(`Run ${state.runId}: final re-judge failed, ${affected.length} verdicts reverted: ${describeFailure(error)}`);
+        setActiveSpanAttribute("final_rejudge.reverted", affected.length);
+        const ids = new Set<string>(affected.map((r) => r.id));
+        const reverted = mergeCoverage(state.coverage!, state.coverageBefore!.filter((c) => ids.has(c.requirementId)));
+        return { coverage: reverted, scoreAfter: matchScore(requirements, reverted) };
+      }
     })
     .addEdge(START, "extract")
     .addEdge("extract", "assess_coverage")
@@ -262,7 +287,8 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
     .addEdge("validate", "rejudge")
     .addEdge("rejudge", "route")
     .addConditionalEdges("route", (state) => (state.exitReason === null ? "begin_round" : "review"), ["begin_round", "review"])
-    .addEdge("review", END)
+    .addEdge("review", "final_rejudge")
+    .addEdge("final_rejudge", END)
     .compile({ checkpointer });
 }
 

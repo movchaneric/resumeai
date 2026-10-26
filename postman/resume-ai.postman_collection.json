@@ -159,6 +159,50 @@
       }
     },
     {
+      "name": "Post review",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('202 with the run id', () => { pm.response.to.have.status(202); pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('runId')); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "description": "Manual check, needs a Run in `awaiting_review`: send Get run until its `status` is `awaiting_review`, and use its `changes[].id` below. One decision per Change: `accept`, `reject`, or `revise` with the user's text (`after` for replace and add, `orderedItemIds` for reorder). `202` means the Run resumes in the background (the final re-judge, then `completed`; keep polling Get run). `409` RUN_NOT_AWAITING_REVIEW if the Run is not waiting (also on a second send); `400` INVALID_REVIEW for decisions that do not cover exactly the Run's Changes, an empty or misplaced revision field, or a revision that fails the stage-1 checks (nothing is resumed).",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"decisions\": [\n    {\n      \"changeId\": \"r1.c1\",\n      \"decision\": \"accept\"\n    },\n    {\n      \"changeId\": \"r1.c2\",\n      \"decision\": \"reject\"\n    },\n    {\n      \"changeId\": \"r1.c3\",\n      \"decision\": \"revise\",\n      \"after\": \"Built and maintained Node.js services.\"\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/runs/{{runId}}/review",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "runs",
+            "{{runId}}",
+            "review"
+          ]
+        }
+      }
+    },
+    {
       "name": "Delete run",
       "event": [
         {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   AnswerSchema,
+  ReviewDecisionSchema,
   RunIdSchema,
   RunViewSchema,
   StepKeySchema,
@@ -21,6 +22,7 @@ import {
   type RunView,
 } from "@resume-ai/shared";
 import { applyChanges } from "@/tailoring/applyChanges.js";
+import { keptChanges, reviewProblem } from "@/tailoring/review.js";
 import type { RecordedRejection } from "@/tailoring/validateChanges.js";
 import { MAX_ROUNDS } from "@/scoring/exitRouter.js";
 import { CoverageError } from "@/scoring/errors.js";
@@ -80,7 +82,7 @@ export interface GraphRunner {
   recover(runId: RunId): Promise<RunSnapshot>;
   /**
    * Resumes a Run paused for review with the decisions (already validated by the caller) and runs to the end, where the
-   * runner writes `completed`; the post-resume work is a new root span with the same session id. Rejects with the original error on failure.
+   * runner writes `completed`. The caller opens the root span for it. Rejects with the original error on failure.
    */
   review(runId: RunId, decisions: ReviewDecision[]): Promise<RunSnapshot>;
   /** The current state, or null when no checkpoint exists yet. */
@@ -226,8 +228,43 @@ export class RunsService {
     this.runInBackground(() => this.runResume(run.id, answers));
   }
 
+  /**
+   * Accepts the Review for a Run paused in `awaiting_review` and resumes it in the background, like `submitAnswers`: 404,
+   * 409, then 400 for decisions that do not fit the Run's Changes (`validateReview`, nothing is resumed), then the claim
+   * (`awaiting_review` to `tailoring`), where losing a race is a 409.
+   */
+  async submitReview(rawId: string, body: unknown): Promise<void> {
+    const { store, graphRunner } = this.deps;
+    const id = RunIdSchema.safeParse(rawId);
+    const run = id.success ? await store.get(id.data) : null;
+    if (!run || run.expiresAt <= this.now()) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
+    if (run.status !== "awaiting_review") throw new ApiError("RUN_NOT_AWAITING_REVIEW", "This Run is not waiting for review.");
+
+    const snapshot = await graphRunner.read(run.id);
+    const decisions = validateReview(body, snapshot);
+    if (!(await store.claimStatus(run.id, "awaiting_review", "tailoring"))) {
+      throw new ApiError("RUN_NOT_AWAITING_REVIEW", "This Run is not waiting for review.");
+    }
+    this.deps.events.publish(run.id);
+    this.runInBackground(() => this.runReview(run.id, decisions));
+  }
+
+  /** The background Review: the graph runs on from the decisions to the end, or the failure is recorded on the Run. Never throws. */
+  async runReview(id: RunId, decisions: ReviewDecision[]): Promise<void> {
+    const { graphRunner } = this.deps;
+    try {
+      try {
+        await withSessionSpan("review", id, async (span) => setOutcomeAttributes(span, await graphRunner.review(id, decisions)));
+      } catch (error) {
+        await this.recordFailure(id, "review", error);
+      }
+    } catch (error) {
+      console.error(`Run ${id}: could not store the review outcome`, error);
+    }
+  }
+
   /** Logs a failed background step and marks the Run failed with the matching code and message. */
-  private async recordFailure(id: RunId, label: "pipeline" | "resume" | "recovery", error: unknown): Promise<void> {
+  private async recordFailure(id: RunId, label: "pipeline" | "resume" | "review" | "recovery", error: unknown): Promise<void> {
     const code: RunErrorCode = failureCode(error);
     // Log the code, the error name (with status and code for LLM failures) and the issue count only. Messages and issues can quote CV values or
     // model output, so they are not logged here (known open item: a safe failure log).
@@ -434,6 +471,25 @@ function validateAnswers(body: unknown, questionIds: Set<string>): Answer[] {
 }
 
 /**
+ * Checks the body of a review request against the Run's Changes and returns the decisions with `after` trimmed. The
+ * rules are `reviewProblem`'s; the messages never echo the user's text.
+ */
+function validateReview(body: unknown, snapshot: RunSnapshot | null): ReviewDecision[] {
+  const invalid = (message: string) => new ApiError("INVALID_REVIEW", message);
+  const list = (body as { decisions?: unknown } | null | undefined)?.decisions;
+  if (!Array.isArray(list)) throw invalid("Send `decisions` as a list.");
+  const decisions = list.map((raw, i): ReviewDecision => {
+    const parsed = ReviewDecisionSchema.safeParse(raw);
+    if (!parsed.success) throw invalid(`Decision ${i + 1} is not valid.`);
+    return parsed.data.after === undefined ? parsed.data : { ...parsed.data, after: parsed.data.after.trim() };
+  });
+  if (!snapshot?.cv) throw invalid("This Run has nothing to review.");
+  const problem = reviewProblem(snapshot.cv, snapshot.changes, decisions, snapshot.userEvidence);
+  if (problem !== null) throw invalid(problem);
+  return decisions;
+}
+
+/**
  * Derives the view from the `runs` row (status, error, timestamps) and the graph state (everything else).
  * A failed Run marks the step that broke as `failed`: `coverage` when the extraction results exist, otherwise
  * `extract`. Scores are rounded here for display. Validating against the schema keeps the response honest.
@@ -479,8 +535,8 @@ function toRunView(run: StoredRun, state: RunSnapshot | null): RunView {
           confirmedGap: state.confirmedGaps.includes(requirement.id),
         };
       }),
-      // The Tailored CV: the original plus the kept Changes (slice 6a ticket 2 narrows this to accepted and revised ones).
-      cv: applyChanges(cv, state.changes),
+      // The Tailored CV: while the user is reviewing, the original plus every proposed Change; once completed, only the accepted and revised ones.
+      cv: applyChanges(cv, run.status === "completed" ? keptChanges(state.changes) : state.changes),
       changes: state.changes,
       userEvidence: state.userEvidence,
       iterations: { used: state.rounds, max: MAX_ROUNDS },
@@ -502,7 +558,12 @@ function toRunView(run: StoredRun, state: RunSnapshot | null): RunView {
       ...common,
       status: "tailoring",
       job,
-      steps: steps({ parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "running" }),
+      // Once the Review is applied the Changes carry their final statuses: this is the final re-judge, so `review` is running.
+      steps: steps(
+        state.changes.every((c) => c.status === "proposed")
+          ? { parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "running" }
+          : { parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "done", review: "running" },
+      ),
       iterations: { used: state.rounds, max: MAX_ROUNDS },
       score: { before: Math.round(state.scoreBefore ?? 0), after: state.scoreAfter === null || state.changes.length === 0 ? null : Math.round(state.scoreAfter) },
     });

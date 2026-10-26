@@ -16,7 +16,7 @@ Organise `backend/src` by layer, one folder per layer, with one file per feature
 
 ```
 backend/src/
-  routes/        index.ts mounts each feature's router and wires store -> service -> controller
+  routes/        index.ts mounts each feature's router and wires service -> controller -> router
   controllers/   the HTTP edge: read the request, call the service, set status and response. No business rules, no DB.
   services/      business rules. No Express (`req`/`res`). Throws `ApiError` to reject.
   stores/        data access (Prisma). Only stores import the Prisma client.
@@ -28,13 +28,13 @@ backend/src/
   prompts/       pure renderers that turn the CV and Requirements into prompt text with IDs. Imports only shared types (`@resume-ai/shared`).
   graph/         the LangGraph Run graph, its thin nodes, the graph runner and the Postgres checkpointer. The only importer of LangGraph (`@langchain/langgraph*`); nodes call `extraction/`, `scoring/` and `tailoring/`, and the service sees the runner only through the `GraphRunner` interface it defines.
   llm/           the `LlmClient` interface and its LangChain implementation. Only `llm/` imports LangChain models (one exception below).
-  utils/         config, db client, errors, tracing (`tracing.ts`), named spans (`spans.ts`)
+  utils/         config, db client, errors, tracing (`tracing.ts`), named spans (`spans.ts`), the in-process Run event bus (`runEvents.ts`), server shutdown (`shutdown.ts`) and the open-stream registry it uses (`openStreams.ts`)
 backend/test/    mirrors src (routes/, services/, graph/, parsing/, prompts/, scoring/, tailoring/, utils/); fixtures live in test/fixtures
 ```
 
 - `utils/tracing.ts` is the one file outside `llm/` that imports LangChain (`@langchain/core/callbacks/manager`, to instrument it). `utils/spans.ts` imports only the OpenTelemetry API and OpenInference semantic conventions, so any layer may use `withSpan`.
 - Routers hold routes and transport middleware (multer) only, with no logic.
-- `app.ts` builds the Express app; `index.ts` starts the server.
+- `app.ts` builds the Express app; `index.ts` starts the server. `index.ts` builds the `RunsService` and passes it to `createApp`, because startup recovery (`recoverRuns`) needs the same instance; tests let `createApp` build it.
 - Dependencies come in through constructors so each layer can be tested alone (a service test uses a fake store; routes are tested with `supertest`).
 
 ## Imports

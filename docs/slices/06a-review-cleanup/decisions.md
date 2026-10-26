@@ -66,3 +66,23 @@ Order: T1 and T3 in parallel worktrees, then T2 and T4 in parallel.
 
 ## No ADR
 Nothing in 6a is hard to reverse. 6b probably needs one (files on disk versus rendering on demand, which changes ADR 0002's wording).
+
+## After implementation
+Changes and findings from the build, the reviews of each ticket and the proof.
+- **`DELETE` order and busy statuses** (#45): `parsing` also counts as busy. The `runs` row goes first in one conditional delete, then the thread. `purgeRun` also publishes, so an open stream on the Run closes on its 404.
+- **Sweep deletes stale busy Runs** (found in review of #46): see "TTL sweep". A pass is scheduled only when the previous one ends; shutdown stops the sweep before closing the server and pools.
+- **One `review` root span**, opened by the service (found in review of #44; the runner opened a second one).
+- **Graph position in one place** (#43, S4): `graph/position.ts`; `RunSnapshot.pausedAt` became `position` (`answers | review | ended | null`).
+- **Notes for slice 7, no change now:**
+  - When an `add` is rejected, later added Items in that list are numbered from the kept ones, so a reorder that listed them may place them slightly differently. Nothing is lost.
+  - A revised reorder must list every Item under the parent as proposed, including Items from `add` Changes the user rejects.
+  - A Run with no Changes shows `tailor` running for the moment before it completes.
+- **`proof-run.sh`** (found in the proof): a bare-array answers file was accepted but rejected by the server; the `--review` summary had a jq quoting error; `revise-first` could not revise an `add`. All three are fixed (checked with `bash -n` and the jq programs on sample JSON; not rerun against a server).
+
+## Proof (2026-10-26)
+Made-up CV fixture (`backend/test/fixtures/cv.docx`) and a made-up Job Description, `gemini-3.5-flash-lite` for both models.
+- **First start:** the sweep removed 417 orphaned checkpoint rows left by older dev Runs.
+- **Run 1, `reject-first`:** two `add` Changes (`r1.c1` for req5, `r2.c1` for req1). Scores from the checkpoint history: 70.3 before tailoring, 79.7 after round 1, 89.1 proposed at Review, 79.7 after rejecting `r1.c1`. Only req5 was re-judged, back to `partially_met`. The `completed` CV holds `r2.c1`'s text and not `r1.c1`'s; `download` is null.
+- **Run 2, revise by hand:** `r1.c1` revised (its own text plus a short edit), `r2.c1` accepted. 202, then 409 on a second POST. The revised text is in the CV, req5 was re-judged against it (still `met`), and the score stays 89.
+- **`DELETE` on Run 1:** 204, then 404 on `GET` and on a second `DELETE`. Rows before: 1 run, 18 checkpoints, 73 blobs, 61 writes; after: none.
+- **Sweep:** restarted with `RUN_TTL_DAYS=0.0007` and `SWEEP_INTERVAL_MS=20000`. A new Run (`failed`, 13 checkpoint rows) was gone from all four tables after it expired; the log shows `deleted 1 expired Runs`.

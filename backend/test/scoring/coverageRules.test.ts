@@ -160,6 +160,16 @@ describe("applyClaimRule", () => {
     expect(downgrades).toBe(1);
   });
 
+  it("turns met on a soft skill that cites only Claims into unmet, as one downgrade", () => {
+    const { coverage, downgrades } = applyClaimRule([req("req1", "soft_skill")], {
+      verdicts: [verdict("req1", "met", ["skill2"])],
+    });
+    expect(coverage).toEqual([
+      { requirementId: "req1", verdict: "unmet", evidenceIds: [], reason: SOFT_SKILL_DOWNGRADE_REASON },
+    ]);
+    expect(downgrades).toBe(1);
+  });
+
   it("leaves met and unmet soft skills alone", () => {
     const { coverage, downgrades } = applyClaimRule([req("req1", "soft_skill"), req("req2", "soft_skill")], {
       verdicts: [verdict("req1", "met", ["exp1.b1"]), verdict("req2", "unmet", [], "not shown")],

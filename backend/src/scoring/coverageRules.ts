@@ -81,7 +81,7 @@ export function coverageIssues(requirements: Requirement[], cv: Cv, answer: Cove
  * Normalizes the model's verdicts. The Claim rule: a `met` verdict whose Evidence is all Claims becomes
  * `partially_met` with a fixed reason, unless the Requirement is a language. An `unmet` verdict has its Evidence
  * list cleared (cited Evidence means "supports the Requirement"); its verdict and reason stay.
- * The soft-skill rule: a `partially_met` verdict on a `soft_skill` Requirement becomes `unmet` with no Evidence and a fixed reason. Returns `Coverage[]` in Requirement order.
+ * The soft-skill rule runs on the verdict left by the Claim rule: a `partially_met` verdict (including one the Claim rule would produce) on a `soft_skill` Requirement becomes `unmet` with no Evidence and a fixed reason. Returns `Coverage[]` in Requirement order.
  * Call it only after `coverageIssues` returned no issues.
  */
 export function applyClaimRule(
@@ -94,22 +94,24 @@ export function applyClaimRule(
     const v = byId.get(requirement.id);
     if (v === undefined) throw new Error(`No verdict for ${requirement.id}; run coverageIssues first`);
     const onlyClaims = v.evidenceIds.length > 0 && v.evidenceIds.every(isClaimId);
-    if (v.verdict === "met" && onlyClaims && requirement.kind !== "language") {
-      downgrades += 1;
-      return CoverageSchema.parse({
-        requirementId: v.requirementId,
-        verdict: "partially_met",
-        evidenceIds: v.evidenceIds,
-        reason: CLAIM_DOWNGRADE_REASON,
-      });
-    }
-    if (v.verdict === "partially_met" && requirement.kind === "soft_skill") {
+    const claimDowngrade = v.verdict === "met" && onlyClaims && requirement.kind !== "language";
+    // The soft-skill rule applies to the verdict after the Claim rule, and counts one downgrade per Requirement.
+    if (requirement.kind === "soft_skill" && (claimDowngrade || v.verdict === "partially_met")) {
       downgrades += 1;
       return CoverageSchema.parse({
         requirementId: v.requirementId,
         verdict: "unmet",
         evidenceIds: [],
         reason: SOFT_SKILL_DOWNGRADE_REASON,
+      });
+    }
+    if (claimDowngrade) {
+      downgrades += 1;
+      return CoverageSchema.parse({
+        requirementId: v.requirementId,
+        verdict: "partially_met",
+        evidenceIds: v.evidenceIds,
+        reason: CLAIM_DOWNGRADE_REASON,
       });
     }
     return CoverageSchema.parse({

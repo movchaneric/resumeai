@@ -80,6 +80,7 @@ describe("a failing status write inside a tailoring round", () => {
       validate: "tailoring",
       rejudge: "tailoring",
       review: "awaiting_review",
+      final_rejudge: "tailoring",
     });
   });
 });

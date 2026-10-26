@@ -1,6 +1,6 @@
 import { END, START, StateGraph, interrupt, type BaseCheckpointSaver } from "@langchain/langgraph";
 import { extractCv } from "@/extraction/extractCv.js";
-import type { LlmClient } from "@/llm/llmClient.js";
+import { describeFailure, type LlmClient } from "@/llm/llmClient.js";
 import { selectQuestions } from "@/tailoring/questions.js";
 import { tailorCv } from "@/tailoring/tailorCv.js";
 import { validateChanges } from "@/tailoring/validateChanges.js";
@@ -89,7 +89,7 @@ function recordAnswers(questions: Question[], answers: Answer[]): { userEvidence
  * and handed to the exit router. The failing span already carries the error status (`withSpan`).
  */
 function logRoundFailure(runId: string, round: number, error: unknown): void {
-  const name = error instanceof Error ? error.name : typeof error;
+  const name = describeFailure(error);
   const issues = (error as { issues?: unknown } | null)?.issues;
   const count = Array.isArray(issues) ? `, ${issues.length} issues` : "";
   console.error(`Run ${runId}: round ${round} failed: ${name}${count}`);

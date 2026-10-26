@@ -22,6 +22,7 @@ import { applyChanges } from "@/tailoring/applyChanges.js";
 import type { RecordedRejection } from "@/tailoring/validateChanges.js";
 import { MAX_ROUNDS } from "@/scoring/exitRouter.js";
 import { CoverageError } from "@/scoring/errors.js";
+import { describeFailure } from "@/llm/llmClient.js";
 import { ExtractionError, NoRequirementsError } from "@/extraction/errors.js";
 import type { Config } from "@/utils/config.js";
 import { ApiError } from "@/utils/errors.js";
@@ -185,9 +186,9 @@ export class RunsService {
   /** Logs a failed background step and marks the Run failed with the matching code and message. */
   private async recordFailure(id: RunId, label: "pipeline" | "resume", error: unknown): Promise<void> {
     const code: RunErrorCode = failureCode(error);
-    // Log the code, the error name and the issue count only. Messages and issues can quote CV values or
+    // Log the code, the error name (with status and code for LLM failures) and the issue count only. Messages and issues can quote CV values or
     // model output, so they are not logged here (known open item: a safe failure log).
-    const name = error instanceof Error ? error.name : typeof error;
+    const name = describeFailure(error);
     const issues = (error as { issues?: unknown } | null)?.issues;
     const count = Array.isArray(issues) ? `, ${issues.length} issues` : "";
     console.error(`Run ${id}: ${label} failed (${code}) ${name}${count}`);

@@ -279,6 +279,21 @@ describe("RunsService", () => {
       expect(logged).toEqual([`Run ${id}: pipeline failed (COVERAGE_FAILED) CoverageError, 1 issues`]);
     });
 
+    it("logs the status and code of an LlmUnavailableError, never its message", async () => {
+      const ctx = setup();
+      ctx.llm
+        .enqueue("extract_job_profile", JOB_PROFILE)
+        .enqueue("extract_cv", extractedCv)
+        .enqueueVoted("assess_coverage", new LlmUnavailableError("quota text that could quote a CV", { status: 429, code: "insufficient_quota" }));
+      const id = await createExtractableRun(ctx);
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      await ctx.settle();
+      const logged = spy.mock.calls.map((c) => c.map(String).join(" "));
+      spy.mockRestore();
+      expect(logged).toEqual([`Run ${id}: pipeline failed (INTERNAL) LlmUnavailableError status=429 code=insufficient_quota`]);
+      expect(logged.join(" ")).not.toContain("quota text");
+    });
+
     it("turns LlmUnavailableError during Coverage into INTERNAL", async () => {
       const ctx = setup();
       ctx.llm

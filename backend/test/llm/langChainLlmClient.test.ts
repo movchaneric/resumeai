@@ -132,4 +132,90 @@ describe("LangChainLlmClient", () => {
     await expect(llm.structured(Schema, [{ role: "user", content: "x".repeat(3000) }], { name: "who" })).rejects.toBeInstanceOf(LlmUnavailableError);
     expect(called).toBe(false);
   });
+
+  describe("failure details and retries", () => {
+    const errorResponse = (status: number, body: unknown) =>
+      new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+    const counting = (...replies: Array<() => Response>) => {
+      const state = { calls: 0 };
+      const fetchImpl = (async () => replies[Math.min(state.calls++, replies.length - 1)]!()) as typeof fetch;
+      return { state, fetchImpl };
+    };
+    const noDelay = { retryDelaysMs: [0, 0] };
+    const unavailable = () => errorResponse(503, { error: { message: "high demand", code: "unavailable" } });
+
+    it("retries a 503 and succeeds on the next attempt", async () => {
+      const { state, fetchImpl } = counting(unavailable, () => completion('{"name":"Ada","age":36}'));
+      const llm = new LangChainLlmClient({ ...options, ...noDelay }, fetchImpl);
+      await expect(llm.structured(Schema, messages, { name: "who" })).resolves.toEqual({ name: "Ada", age: 36 });
+      expect(state.calls).toBe(2);
+    });
+
+    it("gives up after three 503s and reports the status", async () => {
+      const { state, fetchImpl } = counting(unavailable);
+      const err = await new LangChainLlmClient({ ...options, ...noDelay }, fetchImpl).structured(Schema, messages, { name: "who" }).catch((e) => e);
+      expect(err).toBeInstanceOf(LlmUnavailableError);
+      expect((err as LlmUnavailableError).status).toBe(503);
+      expect(state.calls).toBe(3);
+    });
+
+    it("does not retry a 429 insufficient_quota", async () => {
+      const { state, fetchImpl } = counting(() =>
+        errorResponse(429, { error: { message: "You exceeded your quota", type: "insufficient_quota", code: "insufficient_quota" } }),
+      );
+      const err = await new LangChainLlmClient({ ...options, ...noDelay }, fetchImpl).structured(Schema, messages, { name: "who" }).catch((e) => e);
+      expect(err).toBeInstanceOf(LlmUnavailableError);
+      expect((err as LlmUnavailableError).status).toBe(429);
+      expect((err as LlmUnavailableError).code).toBe("insufficient_quota");
+      expect(state.calls).toBe(1);
+    });
+
+    it("retries a plain 429 rate limit", async () => {
+      const { state, fetchImpl } = counting(
+        () => errorResponse(429, { error: { message: "slow down", code: "rate_limit_exceeded" } }),
+        () => completion('{"name":"Ada","age":36}'),
+      );
+      await new LangChainLlmClient({ ...options, ...noDelay }, fetchImpl).structured(Schema, messages, { name: "who" });
+      expect(state.calls).toBe(2);
+    });
+
+    it("does not retry a 400", async () => {
+      const { state, fetchImpl } = counting(() => errorResponse(400, { error: { message: "bad request" } }));
+      const err = await new LangChainLlmClient({ ...options, ...noDelay }, fetchImpl).structured(Schema, messages, { name: "who" }).catch((e) => e);
+      expect((err as LlmUnavailableError).status).toBe(400);
+      expect(state.calls).toBe(1);
+    });
+
+    it("reads status and code from a Gemini-style list error body", async () => {
+      const { state, fetchImpl } = counting(() =>
+        errorResponse(503, [{ error: { code: 503, message: "This model is currently experiencing high demand.", status: "UNAVAILABLE" } }]),
+      );
+      const err = await new LangChainLlmClient({ ...options, ...noDelay }, fetchImpl).structured(Schema, messages, { name: "who" }).catch((e) => e);
+      expect(err).toBeInstanceOf(LlmUnavailableError);
+      expect((err as LlmUnavailableError).status).toBe(503);
+      expect((err as LlmUnavailableError).code).toBe("UNAVAILABLE");
+      expect(state.calls).toBe(3);
+    });
+
+    it('reports code "timeout" for a timeout and does not retry it', async () => {
+      let calls = 0;
+      const hanging = ((_url: unknown, init?: RequestInit) => {
+        calls++;
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        });
+      }) as typeof fetch;
+      const err = await client(hanging, { timeoutMs: 20 }).structured(Schema, messages, { name: "who" }).catch((e) => e);
+      expect((err as LlmUnavailableError).code).toBe("timeout");
+      expect(calls).toBe(1);
+    });
+
+    it('reports code "connection" for a network failure', async () => {
+      const llm = client((async () => {
+        throw new TypeError("fetch failed");
+      }) as typeof fetch);
+      const err = await llm.structured(Schema, messages, { name: "who" }).catch((e) => e);
+      expect((err as LlmUnavailableError).code).toBe("connection");
+    });
+  });
 });

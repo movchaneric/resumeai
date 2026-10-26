@@ -284,8 +284,7 @@ describe("pipeline span", () => {
     });
     await service.runPipeline({ runId: id as RunId, cvText, jobDescriptionText: "Backend developer" });
 
-    const root = finished("pipeline");
-    const rootId = root.spanContext().spanId;
+    finished("pipeline");
     const spans = exporter.getFinishedSpans();
     const byName = (name: string) => spans.filter((s) => s.name === name);
     const ancestors = (span: (typeof spans)[number]) => {

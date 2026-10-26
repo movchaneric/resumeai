@@ -35,5 +35,6 @@ export function skipQuestions(inner: GraphRunner): GraphRunner {
     answer: (runId, answers) => inner.answer(runId, answers),
     recover: (runId) => inner.recover(runId),
     read: (runId) => inner.read(runId),
+    deleteThread: (runId) => inner.deleteThread(runId),
   };
 }

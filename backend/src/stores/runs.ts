@@ -87,6 +87,18 @@ export class RunStore {
     await this.prisma.run.updateMany({ where: { id }, data: { status: "failed", errorCode: code, errorMessage: message } });
   }
 
+  /**
+   * Deletes the Run only if its status is not in `busy` and, when `liveAt` is given, it has not expired at that time, in
+   * one statement, and says whether it did. Like `claimStatus`, the condition and the delete cannot be split by a
+   * simultaneous request.
+   */
+  async deleteUnless(id: RunId, busy: RunStatus[], liveAt?: Date): Promise<boolean> {
+    const { count } = await this.prisma.run.deleteMany({
+      where: { id, status: { notIn: busy }, ...(liveAt && { expiresAt: { gt: liveAt } }) },
+    });
+    return count === 1;
+  }
+
   async delete(id: RunId): Promise<void> {
     await this.prisma.run.deleteMany({ where: { id } });
   }

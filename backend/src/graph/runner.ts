@@ -49,6 +49,7 @@ function toSnapshot(values: Partial<RunStateValues>, next: readonly string[]): R
  */
 export class LangGraphRunner implements GraphRunner {
   private readonly graph: RunGraph;
+  private readonly checkpointer: BaseCheckpointSaver;
   /** The last status written per running Run, so a node that shares its predecessor's status writes nothing. */
   private readonly lastWritten = new Map<string, RunStatus>();
 
@@ -64,6 +65,7 @@ export class LangGraphRunner implements GraphRunner {
     private readonly statuses: StatusWriter,
     private readonly events: Pick<RunEvents, "publish">,
   ) {
+    this.checkpointer = deps.checkpointer;
     this.graph = buildRunGraph({
       ...deps,
       onEnter: async (runId, node) => {
@@ -118,6 +120,10 @@ export class LangGraphRunner implements GraphRunner {
     } finally {
       this.lastWritten.delete(runId);
     }
+  }
+
+  async deleteThread(runId: RunId): Promise<void> {
+    await this.checkpointer.deleteThread(runId);
   }
 
   async read(runId: RunId): Promise<RunSnapshot | null> {

@@ -24,6 +24,12 @@ export class RunsController {
     res.status(202).json({ id: req.params.id });
   };
 
+  /** `204`: the Run and everything stored for it are gone. */
+  remove = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+    await this.service.deleteRun(req.params.id);
+    res.status(204).end();
+  };
+
   get = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
     res.json(await this.service.getRunView(req.params.id));
   };

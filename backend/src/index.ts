@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { createApp } from "@/app.js";
-import { loadConfig } from "@/utils/config.js";
+import { describeLlmSettings, loadConfig } from "@/utils/config.js";
 import { createPrisma } from "@/utils/db.js";
 import { createPostgresCheckpointer } from "@/graph/checkpointer.js";
 import { LangGraphRunner } from "@/graph/runner.js";
@@ -34,7 +34,7 @@ const streams = new OpenStreams();
 const app = createApp(runsDeps, runsService, streams);
 
 const server = app.listen(config.port, () => {
-  console.log(`backend listening on :${config.port}`);
+  console.log(`backend listening on :${config.port} (${describeLlmSettings(config.llm)})`);
   // In the background, so requests are accepted while cut-off Runs are carried on; it never rejects, but a bug must not crash the server.
   runsService.recoverRuns(startedAt).catch((error: unknown) => console.error("Run recovery failed", error));
 });

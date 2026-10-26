@@ -1,0 +1,9 @@
+# Regenerate the Prisma client when a merge or pull changed the schema or the migrations.
+# Quiet when nothing changed; a failure here only warns and never fails the git command.
+if git rev-parse -q --verify ORIG_HEAD >/dev/null 2>&1 \
+  && ! git diff --quiet ORIG_HEAD HEAD -- backend/prisma/schema.prisma backend/prisma/migrations 2>/dev/null; then
+  echo "post-merge: Prisma schema or migrations changed; running prisma generate"
+  pnpm --filter backend exec prisma generate >/dev/null 2>&1 \
+    || echo "warning: prisma generate failed; run it by hand: pnpm --filter backend exec prisma generate" >&2
+fi
+exit 0

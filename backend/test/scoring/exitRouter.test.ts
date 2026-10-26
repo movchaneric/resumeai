@@ -4,6 +4,7 @@ import {
   MAX_ROUNDS,
   MIN_GAIN,
   TARGET_SCORE,
+  onlyGapsLeft,
   routeAfterRound,
   shouldSkipTailoring,
   type RoundOutcome,
@@ -163,5 +164,32 @@ describe("shouldSkipTailoring", () => {
   });
   it("does not skip when there are no Requirements", () => {
     expect(shouldSkipTailoring({ score: 0, verdicts: [] })).toBe(false);
+  });
+});
+
+describe("onlyGapsLeft", () => {
+  const reqs = [
+    { id: "req1", importance: "must_have" },
+    { id: "req2", importance: "must_have" },
+    { id: "req3", importance: "nice_to_have" },
+  ] as never;
+  const cov = (...v: CoverageVerdict[]) => v.map((verdict, i) => ({ requirementId: `req${i + 1}`, verdict })) as never;
+
+  it("is true when every must-have that is not met is a Confirmed Gap", () => {
+    expect(onlyGapsLeft(reqs, cov("met", "unmet", "unmet"), ["req2" as never])).toBe(true);
+  });
+  it("is false when a not-met must-have is not a Gap", () => {
+    expect(onlyGapsLeft(reqs, cov("unmet", "unmet", "met"), ["req2" as never])).toBe(false);
+  });
+  it("is false with no Gaps, and when every must-have is met", () => {
+    expect(onlyGapsLeft(reqs, cov("unmet", "unmet", "met"), [])).toBe(false);
+    expect(onlyGapsLeft(reqs, cov("met", "met", "unmet"), ["req3" as never])).toBe(false);
+  });
+  it("stops a kept round with ceiling when only Gaps are left", () => {
+    expect(routeAfterRound({ consecutiveEmptyRounds: 0, previousScore: 50, round: 1, outcome: ok(2, 60), onlyGapsLeft: true })).toEqual({
+      next: "review",
+      exitReason: "ceiling",
+      keepRound: true,
+    });
   });
 });

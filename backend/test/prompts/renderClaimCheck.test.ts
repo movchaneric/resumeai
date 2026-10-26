@@ -18,3 +18,16 @@ describe("renderClaimCheck", () => {
     expect(text).toContain("Before: (none, new Item)");
   });
 });
+
+describe("renderClaimCheck with User Evidence", () => {
+  it("renders the Answer text as the user's own statement, apart from the CV Evidence", () => {
+    const text = renderClaimCheck([{ id: "r1.c1", before: "", after: "Ran a cluster", evidence: ["Wrote internal tools"], userEvidence: ["Ran a small cluster at Acme."] }]);
+    expect(text).toContain("- Wrote internal tools");
+    expect(text).toContain("The user's own statements");
+    expect(text).toContain("- Ran a small cluster at Acme.");
+  });
+
+  it("has no such section when there is no User Evidence", () => {
+    expect(renderClaimCheck([{ id: "r1.c1", before: "", after: "x", evidence: ["e"] }])).not.toContain("own statements");
+  });
+});

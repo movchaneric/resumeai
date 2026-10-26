@@ -1,4 +1,4 @@
-import type { Change, Coverage, Cv, Requirement } from "@resume-ai/shared";
+import type { Change, Coverage, Cv, Requirement, RequirementId, UserEvidence } from "@resume-ai/shared";
 import { renderCv } from "@/prompts/renderCv.js";
 
 /** A Change that an earlier round rejected, with the readable reason. */
@@ -10,6 +10,10 @@ export type TailorInput = {
   requirements: Requirement[];
   coverage: Coverage[];
   rejections: TailorRejection[];
+  /** What the user said in the Answers. Their Requirements are targeted first. */
+  userEvidence?: UserEvidence[];
+  /** Requirements the user said they lack: left out of the prompt entirely. */
+  confirmedGaps?: RequirementId[];
 };
 
 const IMPORTANCE_LABEL = { must_have: "must-have", nice_to_have: "nice-to-have" } as const;
@@ -26,10 +30,13 @@ function renderChange(change: Change): string {
 }
 
 /**
- * The tailor's user message: the CV with IDs, the Requirements not met first (must-haves first),
- * the met ones as context, then earlier rejections with their reasons. Pure.
+ * The tailor's user message: the CV with IDs, the Requirements not met first (User Evidence first, then must-haves),
+ * the met ones as context, then the User Evidence and earlier rejections with their reasons. Requirements with User
+ * Evidence come first; Confirmed Gaps are left out. Pure.
  */
-export function renderTailorInput({ cv, requirements, coverage, rejections }: TailorInput): string {
+export function renderTailorInput({ cv, requirements: allRequirements, coverage, rejections, userEvidence = [], confirmedGaps = [] }: TailorInput): string {
+  const requirements = allRequirements.filter((r) => !confirmedGaps.includes(r.id));
+  const hasEvidence = new Set<string>(userEvidence.map((u) => u.requirementId));
   const verdictOf = new Map(coverage.map((c) => [c.requirementId as string, c]));
   const line = (r: Requirement) => {
     const c = verdictOf.get(r.id);
@@ -40,14 +47,22 @@ export function renderTailorInput({ cv, requirements, coverage, rejections }: Ta
   const mustFirst = (a: Requirement, b: Requirement) =>
     Number(b.importance === "must_have") - Number(a.importance === "must_have");
 
-  const notMet = requirements.filter((r) => !isMet(r)).sort(mustFirst);
+  const evidenceFirst = (a: Requirement, b: Requirement) => Number(hasEvidence.has(b.id)) - Number(hasEvidence.has(a.id));
+
+  const notMet = requirements.filter((r) => !isMet(r)).sort((a, b) => evidenceFirst(a, b) || mustFirst(a, b));
   const met = requirements.filter(isMet).sort(mustFirst);
 
   const parts = [
     `CV:\n${renderCv(cv)}`,
-    `Requirements not met (target these, must-haves first):\n${notMet.map(line).join("\n") || "(none)"}`,
+    `Requirements not met (target these: those with User Evidence first, then must-haves):\n${notMet.map(line).join("\n") || "(none)"}`,
     `Already met (context only, do not break these):\n${met.map(line).join("\n") || "(none)"}`,
   ];
+  if (userEvidence.length > 0) {
+    const lines = userEvidence.map((u) => `[${u.id}] (for ${u.requirementId}) ${u.text}`);
+    parts.push(
+      `User Evidence (the user's own statements about their experience; cite these IDs like CV Items, and add an Item from them under the job the statement names):\n${lines.join("\n")}`,
+    );
+  }
   if (rejections.length > 0) {
     const lines = rejections.map((x) => `- round ${x.round}: ${renderChange(x.change)}. Rejected because: ${x.reason}`);
     parts.push(`Rejected earlier (do not propose these again):\n${lines.join("\n")}`);

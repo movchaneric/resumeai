@@ -115,6 +115,50 @@
       }
     },
     {
+      "name": "Post answers",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('202 with the run id', () => { pm.response.to.have.status(202); pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('runId')); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "description": "Manual check, needs a Run in `awaiting_answers`: send Get run until its `status` is `awaiting_answers`, and use its `questions[].id` below. Skipped Questions are left out; an empty `answers` list skips all. `202` means the Run resumes in the background (keep polling Get run). `409` RUN_NOT_AWAITING_ANSWERS if the Run is not waiting (also on a second send); `400` INVALID_ANSWERS for an unknown or repeated questionId, blank text or text over 1,000 characters.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"answers\": [\n    {\n      \"kind\": \"has_experience\",\n      \"questionId\": \"q1\",\n      \"text\": \"Ran a small Kubernetes cluster at my last job.\"\n    },\n    {\n      \"kind\": \"no_experience\",\n      \"questionId\": \"q2\"\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/runs/{{runId}}/answers",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "runs",
+            "{{runId}}",
+            "answers"
+          ]
+        }
+      }
+    },
+    {
       "name": "Upload DOCX (happy path)",
       "event": [
         {

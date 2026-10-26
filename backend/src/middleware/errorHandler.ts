@@ -19,5 +19,9 @@ function toApiError(error: unknown): ApiError {
     if (error.code === "LIMIT_FIELD_VALUE") return new ApiError("JOB_DESCRIPTION_TOO_LONG", "The job description is too long.");
     return new ApiError("BAD_REQUEST", "The upload is not valid.");
   }
+  // body-parser (express.json) errors: unparseable or oversized JSON is the client's fault.
+  if (typeof (error as { type?: unknown } | null)?.type === "string" && (error as { type: string }).type.startsWith("entity.")) {
+    return new ApiError("BAD_REQUEST", "The request body is not valid JSON.");
+  }
   return new ApiError("INTERNAL", "Something went wrong.");
 }

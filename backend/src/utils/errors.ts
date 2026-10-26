@@ -1,7 +1,7 @@
 import type { RunErrorCode } from "@resume-ai/shared";
 
 /** Codes returned by the HTTP API: every `RunErrorCode` plus errors that never belong to a Run. */
-export type ApiErrorCode = RunErrorCode | "BAD_REQUEST" | "RUN_NOT_FOUND" | "NOT_FOUND";
+export type ApiErrorCode = RunErrorCode | "BAD_REQUEST" | "INVALID_ANSWERS" | "RUN_NOT_FOUND" | "RUN_NOT_AWAITING_ANSWERS" | "NOT_FOUND";
 
 const STATUS: Record<ApiErrorCode, number> = {
   UNSUPPORTED_FILE: 415,
@@ -16,7 +16,9 @@ const STATUS: Record<ApiErrorCode, number> = {
   COVERAGE_FAILED: 422,
   INTERNAL: 500,
   BAD_REQUEST: 400,
+  INVALID_ANSWERS: 400,
   RUN_NOT_FOUND: 404,
+  RUN_NOT_AWAITING_ANSWERS: 409,
   NOT_FOUND: 404,
 };
 

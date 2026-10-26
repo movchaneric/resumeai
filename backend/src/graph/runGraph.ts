@@ -1,23 +1,25 @@
-import { END, START, StateGraph, type BaseCheckpointSaver } from "@langchain/langgraph";
+import { END, START, StateGraph, interrupt, type BaseCheckpointSaver } from "@langchain/langgraph";
 import { extractCv } from "@/extraction/extractCv.js";
 import type { LlmClient } from "@/llm/llmClient.js";
+import { selectQuestions } from "@/tailoring/questions.js";
 import { tailorCv } from "@/tailoring/tailorCv.js";
 import { validateChanges } from "@/tailoring/validateChanges.js";
 import { applyChanges } from "@/tailoring/applyChanges.js";
 import { mergeRoundIntoChanges } from "@/tailoring/mergeChanges.js";
 import { mergeCoverage, requirementsListedBy } from "@/tailoring/roundCoverage.js";
-import { routeAfterRound, shouldSkipTailoring } from "@/scoring/exitRouter.js";
+import { onlyGapsLeft, routeAfterRound, shouldSkipTailoring } from "@/scoring/exitRouter.js";
 import { assessCoverage } from "@/scoring/assessCoverage.js";
 import { matchScore } from "@/scoring/matchScore.js";
 import { resolveJobProfile, type JobProfileCache } from "@/graph/jobProfileCache.js";
 import { RunState } from "@/graph/state.js";
 import type { RecordedRejection } from "@/tailoring/validateChanges.js";
-import type { Change } from "@resume-ai/shared";
+import { UserEvidenceIdSchema, type Answer, type Change, type Question, type RequirementId, type UserEvidence } from "@resume-ai/shared";
 
 /** The Run status a node writes when the graph enters it (decisions record, "Storage and status"). */
 export const NODE_STATUS = {
   extract: "extracting",
   assess_coverage: "extracting",
+  collect_answers: "awaiting_answers",
   begin_round: "tailoring",
   tailor: "tailoring",
   validate: "tailoring",
@@ -60,6 +62,29 @@ export type RunGraphDeps = {
 };
 
 /**
+ * What the Answers record. A `has_experience` Answer becomes User Evidence (`ue1`, `ue2`, ... in Question order), a
+ * `no_experience` Answer makes its Requirement a Confirmed Gap, and a Question without an Answer records nothing.
+ */
+function recordAnswers(questions: Question[], answers: Answer[]): { userEvidence: UserEvidence[]; confirmedGaps: RequirementId[] } {
+  const userEvidence: UserEvidence[] = [];
+  const confirmedGaps: RequirementId[] = [];
+  for (const question of questions) {
+    const given = answers.find((a) => a.questionId === question.id);
+    if (given?.kind === "has_experience") {
+      userEvidence.push({
+        id: UserEvidenceIdSchema.parse(`ue${userEvidence.length + 1}`),
+        questionId: question.id,
+        requirementId: question.requirementId,
+        text: given.text,
+      });
+    } else if (given?.kind === "no_experience") {
+      confirmedGaps.push(question.requirementId);
+    }
+  }
+  return { userEvidence, confirmedGaps };
+}
+
+/**
  * A failure inside a round is logged by error name and issue count only (messages and issues can quote CV text)
  * and handed to the exit router. The failing span already carries the error status (`withSpan`).
  */
@@ -72,7 +97,8 @@ function logRoundFailure(runId: string, round: number, error: unknown): void {
 
 /**
  * The Run workflow (ADR 0001): extract, first Coverage, then either the pause before `review` (nothing to tailor)
- * or tailoring rounds: begin_round, tailor, validate, rejudge, route, and back to begin_round while the exit router
+ * or `select_questions` (which pauses in `collect_answers` for the user's Answers when there is anything to ask) and then
+ * tailoring rounds: begin_round, tailor, validate, rejudge, route, and back to begin_round while the exit router
  * says so (at most MAX_ROUNDS). Nodes are thin: each calls functions from `extraction/`, `tailoring/` or `scoring/`
  * and returns a state update. `begin_round` counts the round as started; the `route` node is the only place that
  * commits the pending round.
@@ -99,6 +125,20 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
       }
       return base;
     })
+    // Computes the Questions and stores them, so the Run view can show them while the graph is paused.
+    // (Named for what it does: LangGraph forbids a node with the same name as the `questions` state channel.)
+    .addNode("select_questions", (state) => ({ questions: selectQuestions(state.jobProfile!.requirements, state.coverage!) }))
+    // The only `interrupt()`. LangGraph runs this node again from the top on resume, so everything before the
+    // `interrupt()` call must be pure: here it is only a read of `state.questions`.
+    .addNode("collect_answers", (state) => {
+      const answers = interrupt<Question[], Answer[]>(state.questions);
+      const recorded = recordAnswers(state.questions, answers);
+      // Nothing left to tailor when the user lacks every must-have that is not met: skip the rounds.
+      if (onlyGapsLeft(state.jobProfile!.requirements, state.coverage!, recorded.confirmedGaps)) {
+        return { ...recorded, exitReason: "ceiling" as const };
+      }
+      return recorded;
+    })
     .addNode("begin_round", async (state) => {
       const round = state.rounds + 1;
       const pending = { round, proposed: [], valid: [], coverage: null, score: null, failed: false };
@@ -123,6 +163,8 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
           requirements: state.jobProfile!.requirements,
           coverage: state.coverage!,
           rejections: state.rejections.map(({ round, change, reason }) => ({ round, change, reason })),
+          userEvidence: state.userEvidence,
+          confirmedGaps: state.confirmedGaps,
           round,
         });
         return { pending: { ...pending, proposed: changes } };
@@ -141,6 +183,7 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
           draft: applyChanges(state.cv!, state.changes),
           changes: pending.proposed,
           round: pending.round,
+          userEvidence: state.userEvidence,
         });
         return { pending: { ...pending, valid }, rejections: [...state.rejections, ...rejections] };
       } catch (error) {
@@ -177,6 +220,7 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
         outcome: pending.failed
           ? { failed: true }
           : { failed: false, validChanges: pending.valid.length, newScore: pending.score ?? previousScore },
+        onlyGapsLeft: onlyGapsLeft(state.jobProfile!.requirements, pending.coverage ?? state.coverage!, state.confirmedGaps),
       });
       // `null` means another round: the edge after `route` loops back while no exit reason is set.
       const exitReason = decision.next === "review" ? decision.exitReason : null;
@@ -205,7 +249,9 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
     .addNode("review", () => ({}))
     .addEdge(START, "extract")
     .addEdge("extract", "assess_coverage")
-    .addConditionalEdges("assess_coverage", (state) => (state.exitReason === null ? "begin_round" : "review"), ["begin_round", "review"])
+    .addConditionalEdges("assess_coverage", (state) => (state.exitReason === null ? "select_questions" : "review"), ["select_questions", "review"])
+    .addConditionalEdges("select_questions", (state) => (state.questions.length === 0 ? "begin_round" : "collect_answers"), ["begin_round", "collect_answers"])
+    .addConditionalEdges("collect_answers", (state) => (state.exitReason === null ? "begin_round" : "review"), ["begin_round", "review"])
     .addEdge("begin_round", "tailor")
     .addEdge("tailor", "validate")
     .addEdge("validate", "rejudge")

@@ -140,3 +140,29 @@ describe("stage1Checks frozen numbers", () => {
     expect(check(change({ op: "reorder", parentId: "skills", orderedItemIds: ["skill2", "skill1", "skill3"] })).passed).toHaveLength(1);
   });
 });
+
+describe("stage1Checks with User Evidence", () => {
+  const userEvidence = [{ id: "ue1", questionId: "q1", requirementId: "req1", text: "Ran 12 clusters at Acme." }] as never;
+  const cv = testCv();
+  const run = (c: ReturnType<typeof change>) => stage1Checks(cv, cv, [c], userEvidence);
+
+  it("accepts a known ue ID as Evidence, alone or beside a CV Item", () => {
+    const add = change({ op: "add", parentId: "exp1", after: "Ran clusters at Acme", evidenceIds: ["ue1"] });
+    const mixed = change({ op: "add", parentId: "exp1", after: "Ran clusters", evidenceIds: ["exp1.b1", "ue1"] });
+    expect(run(add).passed).toEqual([add]);
+    expect(run(mixed).passed).toEqual([mixed]);
+  });
+
+  it("rejects an unknown ue ID", () => {
+    const c = change({ op: "add", parentId: "exp1", after: "Ran clusters", evidenceIds: ["ue9"] });
+    expect(run(c).rejected).toEqual([{ change: c, reason: STAGE1_REASONS.unknownEvidence }]);
+    expect(stage1Checks(cv, cv, [c]).rejected).toHaveLength(1);
+  });
+
+  it("lets a number from cited User Evidence appear in after, and not one from uncited text", () => {
+    const cited = change({ op: "add", parentId: "exp1", after: "Ran 12 clusters", evidenceIds: ["ue1"] });
+    const other = change({ op: "add", parentId: "exp1", after: "Ran 13 clusters", evidenceIds: ["ue1"] });
+    expect(run(cited).passed).toEqual([cited]);
+    expect(run(other).rejected[0]!.reason).toBe(STAGE1_REASONS.numberAdded);
+  });
+});

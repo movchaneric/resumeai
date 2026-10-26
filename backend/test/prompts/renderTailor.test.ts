@@ -73,3 +73,31 @@ describe("renderTailorInput", () => {
     expect(text).toContain("claims a design role");
   });
 });
+
+describe("renderTailorInput with User Evidence and Confirmed Gaps", () => {
+  const ue = (id: string, requirementId: string, text: string) => ({ id, questionId: "q1", requirementId, text }) as never;
+
+  it("lists User Evidence in its own section as [ueN] (for reqM) text", () => {
+    const text = renderTailorInput({ cv: cv(), requirements, coverage, rejections: [], userEvidence: [ue("ue1", "req3", "Ran a small cluster at Acme.")] });
+    expect(text).toContain("[ue1] (for req3) Ran a small cluster at Acme.");
+    expect(text).toContain("User Evidence");
+    expect(text).toContain("add");
+  });
+
+  it("omits the User Evidence section when there is none", () => {
+    expect(renderTailorInput({ cv: cv(), requirements, coverage, rejections: [] })).not.toContain("User Evidence (");
+  });
+
+  it("targets Requirements with User Evidence first, ahead of the must-haves-first order", () => {
+    const text = renderTailorInput({ cv: cv(), requirements, coverage, rejections: [], userEvidence: [ue("ue1", "req4", "Did a thing.")] });
+    const target = text.slice(text.indexOf("Requirements not met"), text.indexOf("Already met"));
+    expect(target.indexOf("[req4]")).toBeLessThan(target.indexOf("[req3]"));
+    expect(target.indexOf("[req3]")).toBeLessThan(target.indexOf("[req1]"));
+  });
+
+  it("leaves Confirmed Gaps out of the Requirements entirely", () => {
+    const text = renderTailorInput({ cv: cv(), requirements, coverage, rejections: [], confirmedGaps: ["req3" as never] });
+    expect(text).not.toContain("[req3]");
+    expect(text).toContain("[req1]");
+  });
+});

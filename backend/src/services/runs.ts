@@ -1,16 +1,21 @@
 import { randomUUID } from "node:crypto";
 import {
+  AnswerSchema,
   RunIdSchema,
   RunViewSchema,
   StepKeySchema,
+  type Answer,
   type Change,
   type Coverage,
   type Cv,
   type ExitReason,
   type JobProfile,
+  type Question,
+  type RequirementId,
   type RunErrorCode,
   type RunId,
   type StepState,
+  type UserEvidence,
   type RunView,
 } from "@resume-ai/shared";
 import { applyChanges } from "@/tailoring/applyChanges.js";
@@ -36,6 +41,10 @@ export type RunSnapshot = {
   scoreAfter: number | null;
   /** Changes rejected by stage 1 or the claim check, across rounds. */
   rejections: RecordedRejection[];
+  /** The Questions asked after the first Coverage (empty when there was nothing to ask), and what the Answers recorded. */
+  questions: Question[];
+  userEvidence: UserEvidence[];
+  confirmedGaps: RequirementId[];
   /** Tailoring rounds started. */
   rounds: number;
   exitReason: ExitReason | null;
@@ -51,6 +60,11 @@ export type StartRunInput = { runId: RunId; cvText: string; jobDescriptionText: 
 export interface GraphRunner {
   /** Runs until the workflow pauses for review, and returns the state it paused with. */
   start(input: StartRunInput): Promise<RunSnapshot>;
+  /**
+   * Resumes a Run paused for Answers (already validated by the caller) and runs until the next pause, like `start`;
+   * the post-resume work is a new root span with the same session id. Rejects with the original error on failure.
+   */
+  answer(runId: RunId, answers: Answer[]): Promise<RunSnapshot>;
   /** The current state, or null when no checkpoint exists yet. */
   read(runId: RunId): Promise<RunSnapshot | null>;
 }
@@ -83,6 +97,9 @@ function failureCode(error: unknown): keyof typeof FAILURE_MESSAGES {
   if (error instanceof CoverageError) return "COVERAGE_FAILED";
   return "INTERNAL";
 }
+
+/** The longest `has_experience` text, after trimming. */
+export const MAX_ANSWER_LENGTH = 1000;
 
 export type CreateRunInput = { cv: Buffer; jobDescription: unknown };
 
@@ -125,7 +142,7 @@ export class RunsService {
    * It never throws: it runs detached from the request, so a failure has nowhere else to go.
    */
   async runPipeline(input: StartRunInput): Promise<void> {
-    const { store, graphRunner } = this.deps;
+    const { graphRunner } = this.deps;
     const id = input.runId;
     try {
       try {
@@ -137,17 +154,57 @@ export class RunsService {
           if (result.exitReason !== null) span.setAttribute("exit_reason", result.exitReason);
         });
       } catch (error) {
-        const code: RunErrorCode = failureCode(error);
-        // Log the code, the error name and the issue count only. Messages and issues can quote CV values or
-        // model output, so they are not logged here (known open item: a safe failure log).
-        const name = error instanceof Error ? error.name : typeof error;
-        const issues = (error as { issues?: unknown } | null)?.issues;
-        const count = Array.isArray(issues) ? `, ${issues.length} issues` : "";
-        console.error(`Run ${id}: pipeline failed (${code}) ${name}${count}`);
-        await store.markFailed(id, code, FAILURE_MESSAGES[code]);
+        await this.recordFailure(id, "pipeline", error);
       }
     } catch (error) {
       console.error(`Run ${id}: could not store the pipeline outcome`, error);
+    }
+  }
+
+  /**
+   * Accepts the Answers for a Run paused in `awaiting_answers` and resumes it in the background. Checks, in order:
+   * the Run exists (404), it is waiting for Answers (409), the Answers are valid (400). Only then does it claim the
+   * Run by moving it to `tailoring` (the status the resumed graph writes first anyway) in one conditional update, so
+   * a second submission, even a simultaneous one, finds it no longer waiting and gets 409 without resuming twice.
+   */
+  async submitAnswers(rawId: string, body: unknown): Promise<void> {
+    const { store, graphRunner } = this.deps;
+    const id = RunIdSchema.safeParse(rawId);
+    const run = id.success ? await store.get(id.data) : null;
+    if (!run || run.expiresAt <= this.now()) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
+    if (run.status !== "awaiting_answers") throw new ApiError("RUN_NOT_AWAITING_ANSWERS", "This Run is not waiting for answers.");
+
+    const questions = (await graphRunner.read(run.id))?.questions ?? [];
+    const answers = validateAnswers(body, new Set(questions.map((q) => q.id as string)));
+    if (!(await store.claimStatus(run.id, "awaiting_answers", "tailoring"))) {
+      throw new ApiError("RUN_NOT_AWAITING_ANSWERS", "This Run is not waiting for answers.");
+    }
+    this.runInBackground(() => this.runResume(run.id, answers));
+  }
+
+  /** Logs a failed background step and marks the Run failed with the matching code and message. */
+  private async recordFailure(id: RunId, label: "pipeline" | "resume", error: unknown): Promise<void> {
+    const code: RunErrorCode = failureCode(error);
+    // Log the code, the error name and the issue count only. Messages and issues can quote CV values or
+    // model output, so they are not logged here (known open item: a safe failure log).
+    const name = error instanceof Error ? error.name : typeof error;
+    const issues = (error as { issues?: unknown } | null)?.issues;
+    const count = Array.isArray(issues) ? `, ${issues.length} issues` : "";
+    console.error(`Run ${id}: ${label} failed (${code}) ${name}${count}`);
+    await this.deps.store.markFailed(id, code, FAILURE_MESSAGES[code]);
+  }
+
+  /** The background resume: the graph runs on from the Answers to the next pause, or the failure is recorded on the Run. Never throws. */
+  async runResume(id: RunId, answers: Answer[]): Promise<void> {
+    const { graphRunner } = this.deps;
+    try {
+      try {
+        await graphRunner.answer(id, answers);
+      } catch (error) {
+        await this.recordFailure(id, "resume", error);
+      }
+    } catch (error) {
+      console.error(`Run ${id}: could not store the resume outcome`, error);
     }
   }
 
@@ -162,6 +219,29 @@ export class RunsService {
     // A Run with no checkpoint yet (the graph has not started) reads as null.
     return toRunView(run, await this.deps.graphRunner.read(run.id));
   }
+}
+
+/**
+ * Checks the body of an answers request and returns the Answers with their text trimmed. Rejects anything but a list
+ * of valid Answers to the given Questions, each at most once. The messages never echo the text.
+ */
+function validateAnswers(body: unknown, questionIds: Set<string>): Answer[] {
+  const invalid = (message: string) => new ApiError("INVALID_ANSWERS", message);
+  const list = (body as { answers?: unknown } | null | undefined)?.answers;
+  if (!Array.isArray(list)) throw invalid("Send `answers` as a list.");
+  const seen = new Set<string>();
+  return list.map((raw, i) => {
+    const parsed = AnswerSchema.safeParse(raw);
+    if (!parsed.success) throw invalid(`Answer ${i + 1} is not valid.`);
+    const answer: Answer = parsed.data.kind === "has_experience" ? { ...parsed.data, text: parsed.data.text.trim() } : parsed.data;
+    if (answer.kind === "has_experience" && (answer.text === "" || answer.text.length > MAX_ANSWER_LENGTH)) {
+      throw invalid(`Answer ${i + 1} must be between 1 and ${MAX_ANSWER_LENGTH} characters.`);
+    }
+    if (!questionIds.has(answer.questionId)) throw invalid(`Answer ${i + 1} is for a question this Run did not ask.`);
+    if (seen.has(answer.questionId)) throw invalid(`Answer ${i + 1} repeats a question already answered.`);
+    seen.add(answer.questionId);
+    return answer;
+  });
 }
 
 /**
@@ -207,15 +287,24 @@ function toRunView(run: StoredRun, state: RunSnapshot | null): RunView {
           importance: requirement.importance,
           before: before?.verdict ?? "unmet",
           after: { verdict: after?.verdict ?? "unmet", evidenceIds: after?.evidenceIds ?? [], reason: after?.reason ?? "" },
-          confirmedGap: false,
+          confirmedGap: state.confirmedGaps.includes(requirement.id),
         };
       }),
       // The Tailored CV: the original plus the kept Changes.
       cv: applyChanges(cv, state.changes),
       changes: state.changes,
-      userEvidence: [],
+      userEvidence: state.userEvidence,
       iterations: { used: state.rounds, max: MAX_ROUNDS },
       exitReason: state.exitReason,
+    });
+  }
+  if (run.status === "awaiting_answers" && extracted && state) {
+    return RunViewSchema.parse({
+      ...common,
+      status: "awaiting_answers",
+      job,
+      steps: steps({ parse: "done", extract: "done", coverage: "done", questions: "running" }),
+      questions: state.questions,
     });
   }
   if (run.status === "tailoring" && extracted && state) {

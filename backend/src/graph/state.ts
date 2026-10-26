@@ -1,6 +1,6 @@
 import { Annotation } from "@langchain/langgraph";
 import type { RecordedRejection } from "@/tailoring/validateChanges.js";
-import type { Change, Coverage, Cv, ExitReason, JobProfile } from "@resume-ai/shared";
+import type { Change, Coverage, Cv, ExitReason, JobProfile, Question, RequirementId, UserEvidence } from "@resume-ai/shared";
 
 /** A channel that keeps the last value written. `default` is what a node sees before anything wrote to it. */
 const last = <T>(initial: T) => Annotation<T>({ reducer: (_current, update) => update, default: () => initial });
@@ -34,6 +34,10 @@ export const RunState = Annotation.Root({
   /** Coverage from the first call, never changed afterwards, and the verdicts of the last kept round. */
   coverageBefore: last<Coverage[] | null>(null),
   coverage: last<Coverage[] | null>(null),
+  /** The Questions asked once after the first Coverage, what the user said in the Answers, and the Requirements they said they lack. */
+  questions: last<Question[]>([]),
+  userEvidence: last<UserEvidence[]>([]),
+  confirmedGaps: last<RequirementId[]>([]),
   /** The current set of validated Changes (empty until tailoring exists). */
   changes: last<Change[]>([]),
   /** Unrounded Match Scores: before tailoring, and after the last kept round. */

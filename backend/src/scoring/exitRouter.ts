@@ -1,4 +1,4 @@
-import type { CoverageVerdict, ExitReason } from "@resume-ai/shared";
+import type { Coverage, CoverageVerdict, ExitReason, Requirement, RequirementId } from "@resume-ai/shared";
 
 /* Exit router constants (slice 4a decisions). They live here, not in .env. */
 export const TARGET_SCORE = 90;
@@ -17,6 +17,8 @@ export interface RouteInput {
   outcome: RoundOutcome;
   /** Rounds with no valid Changes immediately before this one (0 when the previous round had some, or this is round 1). */
   consecutiveEmptyRounds: number;
+  /** Every must-have still not met is a Confirmed Gap (`onlyGapsLeft`, on the Coverage this round would keep). */
+  onlyGapsLeft?: boolean;
 }
 
 export type RouteDecision =
@@ -26,7 +28,7 @@ export type RouteDecision =
 const stop = (exitReason: ExitReason, keepRound: boolean): RouteDecision => ({ next: "review", exitReason, keepRound });
 
 /** Decides after each round whether to loop or stop for review, and whether the pending round is kept. */
-export function routeAfterRound({ previousScore, round, outcome, consecutiveEmptyRounds }: RouteInput): RouteDecision {
+export function routeAfterRound({ previousScore, round, outcome, consecutiveEmptyRounds, onlyGapsLeft: gapsLeft = false }: RouteInput): RouteDecision {
   if (outcome.failed) return stop("error", false);
   if (outcome.validChanges === 0) {
     // An empty round is never kept. It gets one second chance (its tailor sees the rejections), within the round cap.
@@ -38,6 +40,7 @@ export function routeAfterRound({ previousScore, round, outcome, consecutiveEmpt
   if (outcome.newScore >= TARGET_SCORE) return stop("target_reached", true);
   if (outcome.newScore - previousScore < MIN_GAIN) return stop("plateau", true);
   if (round >= MAX_ROUNDS) return stop("max_iterations", true);
+  if (gapsLeft) return stop("ceiling", true);
   return { next: "another_round", keepRound: true };
 }
 
@@ -45,4 +48,14 @@ export function routeAfterRound({ previousScore, round, outcome, consecutiveEmpt
 export function shouldSkipTailoring(input: { score: number; verdicts: CoverageVerdict[] }): boolean {
   if (input.score >= 100) return true;
   return input.verdicts.length > 0 && input.verdicts.every((v) => v === "met");
+}
+
+/**
+ * True when at least one must-have is not met and every such must-have is a Confirmed Gap: nothing is left that
+ * tailoring could improve, so the Run stops with `ceiling`. False with no Gaps, or when every must-have is met.
+ */
+export function onlyGapsLeft(requirements: Requirement[], coverage: Coverage[], confirmedGaps: RequirementId[]): boolean {
+  const verdictOf = new Map(coverage.map((c) => [c.requirementId as string, c.verdict]));
+  const notMet = requirements.filter((r) => r.importance === "must_have" && verdictOf.get(r.id) !== "met");
+  return notMet.length > 0 && notMet.every((r) => confirmedGaps.includes(r.id));
 }

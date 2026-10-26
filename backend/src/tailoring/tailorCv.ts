@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ChangeSchema } from "@resume-ai/shared";
-import type { Change, Coverage, Cv, Requirement } from "@resume-ai/shared";
+import type { Change, Coverage, Cv, Requirement, RequirementId, UserEvidence } from "@resume-ai/shared";
 import { LlmSchemaError, type LlmClient, type LlmMessage } from "@/llm/llmClient.js";
 import { renderTailorInput, type TailorRejection } from "@/prompts/renderTailor.js";
 import { LIST_IDS } from "@/tailoring/cvItems.js";
@@ -10,8 +10,8 @@ import { withSpan } from "@/utils/spans.js";
 export const TAILOR_SYSTEM_PROMPT = `You tailor a CV to a job by proposing Changes to its Items.
 
 Rules:
-- Target the Requirements that are not met, must-haves first. The met Requirements are context: do not break them.
-- Propose a Change only where the CV already holds Evidence for the Requirement. If there is none, propose nothing. An empty list is a good answer.
+- Target the Requirements that are not met, in the order listed: those with User Evidence first, then must-haves. The met Requirements are context: do not break them.
+- Propose a Change only where the CV or the User Evidence already holds Evidence for the Requirement. If there is none, propose nothing. An empty list is a good answer.
 - A Change's text may reword the Evidence and use the job's wording, but states nothing the Evidence does not state: no new technologies, numbers, scope, roles or achievements. Do not add words such as "designed", "REST" or "API" unless the Evidence says them.
 - Never append qualities, adjectives, soft skills, ways of working, collaboration, ownership, independence or impact that the Evidence does not state, even when the job asks for them. If a Requirement can only be met by adding such a claim, propose nothing for it.
 - Keep every number and date exactly as it is. Never change dates, companies, titles or degrees.
@@ -25,13 +25,15 @@ Rules:
   - "replace": new text for one text Item (a bullet, a skill, the summary or an item in another section). Set targetItemId and text.
   - "add": a new text Item under a job, a project, a section, or a top-level list (${LIST_IDS.join(", ")}). Set parentId and text.
   - "reorder": the same Items in a new order under one parent. Set parentId and orderedItemIds, listing every Item once.
-- Cite Item IDs exactly as shown in brackets in the CV, for example exp1.b2. Never invent an ID. Every Change cites at least one Evidence ID from the CV and lists at least one Requirement ID it addresses.
+- User Evidence is what the user told us about their own experience, listed as [ueN] (for reqM) text. Treat it as true, but state no more than it says. A Change may cite ue IDs as Evidence, alone or with CV Items. An "add" Change built on User Evidence is allowed: put the new Item under the job (or project) the statement names.
+- Cite Item IDs exactly as shown in brackets in the CV, for example exp1.b2, or User Evidence IDs such as ue1. Never invent an ID. Every Change cites at least one Evidence ID and lists at least one Requirement ID it addresses.
 - At most one Change per Item and one reorder per list.
 - Give a short rationale for each Change.
 - Do not propose again anything listed under "Rejected earlier".
 - Fields that do not apply to the operation are null.
 
 Rejected (made up): Evidence [exp1.b2] "Built the billing service in Go" must not become "Built the billing service in Go, ensuring attention to detail". The Evidence never says it, even if the job asks for it.
+Accepted (made up): User Evidence [ue1] (for req2) "Ran a small cluster at Acme" under job exp1. Add to exp1 the Item "Operated a small cluster at Acme", citing ue1.
 Accepted (made up): the job asks for "Golang" and [exp1.b2] says "Built the billing service in Go". Replace it with "Built the billing service in Golang".`;
 
 const RETRY_INSTRUCTION =
@@ -66,6 +68,8 @@ export type TailorInput = {
   /** The current verdict for every Requirement. */
   coverage: Coverage[];
   rejections: TailorRejection[];
+  userEvidence?: UserEvidence[];
+  confirmedGaps?: RequirementId[];
   /** 1-based; used for Change IDs (`r<round>.c<n>`) and the span. */
   round: number;
 };
@@ -160,6 +164,8 @@ export async function tailorCv(llm: LlmClient, input: TailorInput): Promise<{ ch
           requirements: input.requirements,
           coverage: input.coverage,
           rejections: input.rejections,
+          userEvidence: input.userEvidence,
+          confirmedGaps: input.confirmedGaps,
         }),
       },
     ];

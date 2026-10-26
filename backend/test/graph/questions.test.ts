@@ -118,3 +118,63 @@ describe("the select_questions and collect_answers nodes", () => {
     expect(roots.map((s) => s.attributes["session.id"])).toEqual(roots.map(() => runId));
   });
 });
+
+describe("User Evidence and Confirmed Gaps in tailoring", () => {
+  const fromAnswer = {
+    op: "add",
+    targetItemId: null,
+    parentId: "exp1",
+    text: "Operated a small cluster at Acme",
+    orderedItemIds: null,
+    evidenceIds: ["ue1"],
+    requirementIds: ["req3"],
+    rationale: "The user said so.",
+  };
+  const emptyRounds = { changes: [] };
+
+  it("applies and re-judges an add Change that cites only User Evidence, and Coverage never sees the Answer", async () => {
+    const { runner, judge } = setup();
+    judge
+      .enqueue("tailor", { changes: [fromAnswer] }, emptyRounds, emptyRounds)
+      .enqueue("claim_check", { verdicts: [{ id: "r1.c1", reason: "stated by the user", verdict: "supported" }] })
+      .enqueueVoted("assess_coverage", { verdicts: [{ requirementId: "req3", reason: "r", evidenceIds: ["exp1.b2"], verdict: "met" }] });
+    await runner.start(input);
+    const snapshot = await runner.answer(runId, [answer({ kind: "has_experience", questionId: "q2", text: "Ran a small cluster at Acme." })]);
+
+    const tailorPrompt = judge.calls.find((c) => c.name === "tailor")!.messages.map((m) => m.content).join("\n");
+    expect(tailorPrompt).toContain("[ue1] (for req3) Ran a small cluster at Acme.");
+    const claimPrompt = judge.calls.find((c) => c.name === "claim_check")!.messages.map((m) => m.content).join("\n");
+    expect(claimPrompt).toContain("- Ran a small cluster at Acme.");
+
+    expect(snapshot.changes.map((c) => c.id)).toEqual(["r1.c1"]);
+    expect(snapshot.coverage!.find((c) => c.requirementId === "req3")!.verdict).toBe("met");
+
+    const coveragePrompts = judge.calls.filter((c) => c.name === "assess_coverage").map((c) => c.messages.map((m) => m.content).join("\n"));
+    const rejudge = coveragePrompts.slice(-1)[0]!;
+    expect(rejudge).toContain("Operated a small cluster at Acme");
+    for (const prompt of coveragePrompts) {
+      expect(prompt).not.toContain("Ran a small cluster");
+      expect(prompt).not.toContain("User Evidence");
+    }
+  });
+
+  it("does not target Confirmed Gaps", async () => {
+    const { runner, judge } = setup();
+    noChanges(judge);
+    await runner.start(input);
+    await runner.answer(runId, [answer({ kind: "no_experience", questionId: "q1" })]);
+    const tailorPrompt = judge.calls.find((c) => c.name === "tailor")!.messages.map((m) => m.content).join("\n");
+    expect(tailorPrompt).not.toContain("[req2]");
+    expect(tailorPrompt).toContain("[req3]");
+  });
+
+  it("stops with ceiling before any round when every not-met must-have is a Confirmed Gap", async () => {
+    const { runner, statuses, judge } = setup(verdicts("met", "unmet", "unmet", "met"));
+    await runner.start(input);
+    const snapshot = await runner.answer(runId, [answer({ kind: "no_experience", questionId: "q1" }), answer({ kind: "no_experience", questionId: "q2" })]);
+    expect(snapshot.exitReason).toBe("ceiling");
+    expect(snapshot.rounds).toBe(0);
+    expect(judge.calls.some((c) => c.name === "tailor")).toBe(false);
+    expect(statuses).toEqual(["extracting", "awaiting_answers", "awaiting_review"]);
+  });
+});

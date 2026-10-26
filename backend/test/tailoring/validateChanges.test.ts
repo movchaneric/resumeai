@@ -71,3 +71,23 @@ describe("validate span", () => {
     expect(JSON.stringify(validate.attributes)).not.toContain("SECRET");
   });
 });
+
+describe("validateChanges with User Evidence", () => {
+  const userEvidence = [{ id: "ue1", questionId: "q1", requirementId: "req1", text: "Ran 12 clusters at Acme." }] as never;
+  const fromAnswer = change({ id: "r1.c1", op: "add", parentId: "exp1", after: "Ran 12 clusters at Acme", evidenceIds: ["ue1"] });
+
+  it("hands the claim check the Answer text as the user's own statement and applies a supported Change", async () => {
+    const llm = new FakeLlmClient().enqueue("claim_check", { verdicts: [verdict("r1.c1", "supported")] });
+    const result = await validateChanges(llm, { original, draft: original, changes: [fromAnswer], round: 1, userEvidence });
+    const prompt = llm.calls[0]!.messages.map((m) => m.content).join("\n");
+    expect(prompt).toContain("The user's own statements");
+    expect(prompt).toContain("- Ran 12 clusters at Acme.");
+    expect(result.valid).toEqual([fromAnswer]);
+  });
+
+  it("rejects a Change citing User Evidence when the claim check does not support it", async () => {
+    const llm = new FakeLlmClient().enqueue("claim_check", { verdicts: [verdict("r1.c1", "not_supported", "scale is new")] });
+    const result = await validateChanges(llm, { original, draft: original, changes: [fromAnswer], round: 1, userEvidence });
+    expect(result.rejections).toMatchObject([{ stage: "claim_check", reason: "scale is new" }]);
+  });
+});

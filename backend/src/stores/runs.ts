@@ -90,19 +90,27 @@ export class RunStore {
   /**
    * Deletes the Run only if its status is not in `busy` and, when `liveAt` is given, it has not expired at that time, in
    * one statement, and says whether it did. Like `claimStatus`, the condition and the delete cannot be split by a
-   * simultaneous request.
+   * simultaneous request. With `cutOffBefore`, a busy Run created before it also goes (a stop cut it off and nothing is
+   * running it, as in recovery); the condition is still the same statement.
    */
-  async deleteUnless(id: RunId, busy: RunStatus[], liveAt?: Date): Promise<boolean> {
+  async deleteUnless(id: RunId, busy: RunStatus[], liveAt?: Date, cutOffBefore?: Date): Promise<boolean> {
     const { count } = await this.prisma.run.deleteMany({
-      where: { id, status: { notIn: busy }, ...(liveAt && { expiresAt: { gt: liveAt } }) },
+      where: {
+        id,
+        OR: [{ status: { notIn: busy } }, ...(cutOffBefore ? [{ createdAt: { lt: cutOffBefore } }] : [])],
+        ...(liveAt && { expiresAt: { gt: liveAt } }),
+      },
     });
     return count === 1;
   }
 
-  /** The ids of the Runs that have expired at `now` and whose status is not in `busy`, oldest first. */
-  async listExpiredIds(now: Date, busy: RunStatus[]): Promise<RunId[]> {
+  /**
+   * The ids of the Runs that have expired at `now`, oldest first, except the busy ones created at or after `startedAt`
+   * (this process may be running those). A busy Run created before it was cut off by a stop.
+   */
+  async listExpiredIds(now: Date, busy: RunStatus[], startedAt: Date): Promise<RunId[]> {
     const rows = await this.prisma.run.findMany({
-      where: { expiresAt: { lte: now }, status: { notIn: busy } },
+      where: { expiresAt: { lte: now }, OR: [{ status: { notIn: busy } }, { createdAt: { lt: startedAt } }] },
       select: { id: true },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     });

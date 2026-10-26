@@ -9,7 +9,9 @@ export type SweepDeps = {
   jobProfiles: Pick<JobProfileStore, "deleteExpired">;
   checkpoints: Pick<CheckpointStore, "deleteOrphans">;
   /** `RunsService.purgeRun`: the one "delete this Run" operation (row, then checkpoints). */
-  purgeRun: (id: RunId) => Promise<boolean>;
+  purgeRun: (id: RunId, liveAt?: Date, cutOffBefore?: Date) => Promise<boolean>;
+  /** When this process started, as passed to `recoverRuns`: a busy Run created before it is not being worked on (one instance). */
+  startedAt: Date;
   now?: () => Date;
 };
 
@@ -20,20 +22,21 @@ export class SweepService {
   constructor(private readonly deps: SweepDeps) {}
 
   /**
-   * One pass: expired Runs that are not busy (an expired busy Run waits for the next pass), expired Job Profiles, then
+   * One pass: expired Runs, except busy ones created since this process started (it may be running them; they are
+   * picked up once they rest), expired Job Profiles, then
    * checkpoint threads with no Run. A step that fails is logged and does not stop the others. Never throws. Logs one
    * summary line with counts (and the ids of the Runs it could not delete), never content.
    */
   async sweep(): Promise<SweepResult> {
-    const { store, jobProfiles, checkpoints, purgeRun } = this.deps;
+    const { store, jobProfiles, checkpoints, purgeRun, startedAt } = this.deps;
     const now = (this.deps.now ?? (() => new Date()))();
     const result: SweepResult = { runs: 0, jobProfiles: 0, orphanRows: 0 };
     const failed: string[] = [];
 
     try {
-      for (const id of await store.listExpiredIds(now, BUSY_STATUSES)) {
+      for (const id of await store.listExpiredIds(now, BUSY_STATUSES, startedAt)) {
         try {
-          if (await purgeRun(id)) result.runs += 1;
+          if (await purgeRun(id, undefined, startedAt)) result.runs += 1;
         } catch (error) {
           failed.push(id);
           console.error(`Sweep: could not delete Run ${id}`, error);

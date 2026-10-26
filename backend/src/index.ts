@@ -34,7 +34,7 @@ const startedAt = new Date();
 const runsDeps = { store, config, graphRunner, events };
 const runsService = new RunsService(runsDeps);
 const streams = new OpenStreams();
-const sweep = new SweepService({ store, jobProfiles: jobProfileCache, checkpoints: new CheckpointStore(prisma), purgeRun: (id) => runsService.purgeRun(id) });
+const sweep = new SweepService({ store, jobProfiles: jobProfileCache, checkpoints: new CheckpointStore(prisma), purgeRun: (id, liveAt, cutOffBefore) => runsService.purgeRun(id, liveAt, cutOffBefore), startedAt });
 const sweeper = createSweepScheduler(() => sweep.sweep(), config.sweepIntervalMs);
 const app = createApp(runsDeps, runsService, streams);
 

@@ -24,6 +24,8 @@ import { coverageAnswer, extractedCv, extractedJob } from "../runFixtures.js";
 const url = process.env.DATABASE_URL!;
 const config = loadConfig(process.env);
 const prisma = createPrisma(config.databaseUrl);
+// Runs seeded below are created after this, so they count as "this process's own" unless a test makes them older.
+const startedAt = new Date();
 const store = new RunStore(prisma);
 const pool = new pg.Pool({ connectionString: url });
 const checkpointer = createPostgresCheckpointer(`${url}?schema=app`);
@@ -32,7 +34,7 @@ const events = new InProcessRunEvents();
 const graphRunner = makeGraphRunner(store, llm, llm, undefined, events, checkpointer);
 const runs = new RunsService({ store, config, graphRunner, events });
 const profiles = new JobProfileStore(prisma, { ttlMs: 1000 });
-const sweep = new SweepService({ store, jobProfiles: profiles, checkpoints: new CheckpointStore(prisma), purgeRun: (id) => runs.purgeRun(id) });
+const sweep = new SweepService({ store, jobProfiles: profiles, checkpoints: new CheckpointStore(prisma), purgeRun: (id, liveAt, cutOffBefore) => runs.purgeRun(id, liveAt, cutOffBefore), startedAt });
 
 const cvText = await parseCv(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf")), config.limits);
 const HOUR = 60 * 60 * 1000;
@@ -47,9 +49,9 @@ const expectThread = async (id: string, present: boolean) => {
 };
 
 /** A Run row with a real checkpoint thread, set to `status` and expiring `expiresInMs` from now (negative: already expired). */
-async function seedRun(status: RunStatus, expiresInMs: number): Promise<RunId> {
+async function seedRun(status: RunStatus, expiresInMs: number, createdAt = new Date()): Promise<RunId> {
   const id = RunIdSchema.parse(randomUUID());
-  await store.create({ id, status: "extracting", createdAt: new Date(), expiresAt: new Date(Date.now() + HOUR) });
+  await store.create({ id, status: "extracting", createdAt, expiresAt: new Date(Date.now() + HOUR) });
   llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueueVoted("assess_coverage", coverageAnswer);
   await graphRunner.start({ runId: id, cvText, jobDescriptionText: "Backend developer with Node.js and PostgreSQL." });
   await prisma.run.update({ where: { id }, data: { status, expiresAt: new Date(Date.now() + expiresInMs) } });
@@ -94,7 +96,7 @@ describe("SweepService.sweep with Postgres", () => {
     await expectThread(live, true);
   });
 
-  it("skips an expired Run that is busy", async () => {
+  it("skips an expired busy Run created since this process started", async () => {
     const ids = [await seedRun("parsing", -HOUR), await seedRun("extracting", -HOUR), await seedRun("tailoring", -HOUR)];
     const result = await sweep.sweep();
     expect(result.runs).toBe(0);
@@ -102,6 +104,24 @@ describe("SweepService.sweep with Postgres", () => {
       expect(await store.get(id)).not.toBeNull();
       await expectThread(id, true);
     }
+  });
+
+  it("deletes an expired busy Run created before this process started, with all its checkpoints", async () => {
+    const before = new Date(startedAt.getTime() - HOUR);
+    const ids = [await seedRun("parsing", -HOUR, before), await seedRun("extracting", -HOUR, before), await seedRun("tailoring", -HOUR, before)];
+    const result = await sweep.sweep();
+    expect(result.runs).toBe(3);
+    for (const id of ids) {
+      expect(await store.get(id)).toBeNull();
+      await expectThread(id, false);
+    }
+  });
+
+  it("leaves a busy Run created before this process started alone while it has not expired", async () => {
+    const id = await seedRun("tailoring", HOUR, new Date(startedAt.getTime() - HOUR));
+    await sweep.sweep();
+    expect(await store.get(id)).not.toBeNull();
+    await expectThread(id, true);
   });
 
   it("deletes expired Job Profiles and keeps fresh ones", async () => {
@@ -148,6 +168,7 @@ describe("SweepService.sweep when a step fails", () => {
     jobProfiles: { deleteExpired: vi.fn(async () => 2) },
     checkpoints: { deleteOrphans: vi.fn(async () => 5) },
     purgeRun: vi.fn(async () => true),
+    startedAt: new Date(),
   });
 
   it("still runs the other steps when the Job Profile delete throws", async () => {

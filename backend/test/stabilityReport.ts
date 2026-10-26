@@ -1,14 +1,14 @@
 // Pure helpers for the score-stability dev script (test/stability.ts): argument parsing, matching Requirements across runs,
 // stats and the markdown report. No model, no database. The report holds Requirement text (from the job description)
 // and Item IDs only. It never takes CV text or Coverage reasons as input, so none can leak into the output.
-import type { Coverage, CoverageVerdict, Requirement } from "@resume-ai/shared";
+import type { Coverage, CoverageVerdict, Cv, Requirement } from "@resume-ai/shared";
 import { isClaimId } from "@/scoring/coverageRules.js";
 import { VERDICT_CREDITS, requirementWeight } from "@/scoring/weights.js";
 
-export const DEFAULTS = { runs: 5, coverageRuns: 10, parallel: 3 };
+export const DEFAULTS = { runs: 5, coverageRuns: 10, parallel: 3, votes: 1 };
 
 export type StabilityArgs =
-  | { ok: true; cvArg: string; jdArg: string; runs: number; coverageRuns: number; parallel: number; out?: string; noCache?: boolean; dumpEvidence?: boolean }
+  | { ok: true; cvArg: string; jdArg: string; runs: number; coverageRuns: number; parallel: number; votes: number; out?: string; noCache?: boolean; dumpEvidence?: boolean }
   | { ok: false };
 
 const positiveInt = (value: string | undefined): number | undefined => {
@@ -17,21 +17,24 @@ const positiveInt = (value: string | undefined): number | undefined => {
   return n >= 1 ? n : undefined;
 };
 
-/** `<cv> <jd> [--runs N] [--coverage-runs M] [--parallel K] [--out file] [--no-cache] [--dump-evidence]`. Exactly two paths. */
+/** `<cv> <jd> [--runs N] [--coverage-runs M] [--parallel K] [--votes N] [--out file] [--no-cache] [--dump-evidence]`. Exactly two paths. */
 export function parseStabilityArgs(args: string[]): StabilityArgs {
-  const opts = { runs: DEFAULTS.runs, coverageRuns: DEFAULTS.coverageRuns, parallel: DEFAULTS.parallel };
+  const opts = { runs: DEFAULTS.runs, coverageRuns: DEFAULTS.coverageRuns, parallel: DEFAULTS.parallel, votes: DEFAULTS.votes };
   let out: string | undefined;
   let noCache = false;
   let dumpEvidence = false;
   const paths: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
-    if (arg === "--runs" || arg === "--coverage-runs" || arg === "--parallel") {
+    if (arg === "--runs" || arg === "--coverage-runs" || arg === "--parallel" || arg === "--votes") {
       const n = positiveInt(args[++i]);
       if (n === undefined) return { ok: false };
       if (arg === "--runs") opts.runs = n;
       else if (arg === "--coverage-runs") opts.coverageRuns = n;
-      else opts.parallel = n;
+      else if (arg === "--votes") {
+        if (n % 2 === 0) return { ok: false };
+        opts.votes = n;
+      } else opts.parallel = n;
     } else if (arg === "--out") {
       out = args[++i];
       if (!out || out.startsWith("--")) return { ok: false };
@@ -99,6 +102,92 @@ export function normaliseText(text: string): string {
     .toLowerCase()
     .replace(/\s+/g, " ")
     .replace(/^[\s\p{P}\p{S}]+|[\s\p{P}\p{S}]+$/gu, "");
+}
+
+/* ---------- Majority vote over Coverage calls (--votes) ---------- */
+
+/**
+ * Collapses N Coverage answers on the same inputs into one, per Requirement.
+ * Verdict: the one given by a strict majority of the calls that judged that Requirement; with no strict majority
+ * (e.g. met / partially_met / unmet at N=3) it is `partially_met`.
+ * Evidence IDs and reason: those of the first call that gave the winning verdict; a fallback `partially_met` that no call gave has `[]` and "".
+ * Requirements keep the order in which they first appear across the calls.
+ */
+export function voteCoverage(calls: Coverage[][]): Coverage[] {
+  const order: string[] = [];
+  const byId = new Map<string, Coverage[]>();
+  for (const call of calls) {
+    for (const c of call) {
+      if (!byId.has(c.requirementId)) {
+        order.push(c.requirementId);
+        byId.set(c.requirementId, []);
+      }
+      byId.get(c.requirementId)!.push(c);
+    }
+  }
+  return order.map((id) => {
+    const answers = byId.get(id)!;
+    const winner = VERDICTS.find((v) => answers.filter((a) => a.verdict === v).length * 2 > answers.length) ?? "partially_met";
+    const first = answers.find((a) => a.verdict === winner);
+    return first ? { ...first, evidenceIds: [...first.evidenceIds] } : ({ requirementId: id, verdict: winner, evidenceIds: [], reason: "" } as unknown as Coverage);
+  });
+}
+
+/* ---------- CV shape (experiment A) ---------- */
+
+/** Item counts of an extracted CV, nothing else. No text, names, companies, titles or dates. */
+export type CvShape = {
+  summary: boolean;
+  experience: number;
+  experienceBullets: number;
+  education: number;
+  educationBullets: number;
+  skills: number;
+  projects: number;
+  projectBullets: number;
+  certifications: number;
+  additionalSections: number;
+  additionalItems: number;
+};
+
+const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
+
+export function cvShape(cv: Cv): CvShape {
+  return {
+    summary: cv.summary !== null,
+    experience: cv.experience.length,
+    experienceBullets: sum(cv.experience.map((e) => e.bullets.length)),
+    education: cv.education.length,
+    educationBullets: sum(cv.education.map((e) => e.bullets.length)),
+    skills: cv.skills.length,
+    projects: cv.projects.length,
+    projectBullets: sum(cv.projects.map((p) => p.bullets.length)),
+    certifications: cv.certifications.length,
+    additionalSections: cv.additionalSections.length,
+    additionalItems: sum(cv.additionalSections.map((s) => s.items.length)),
+  };
+}
+
+/** Compact one-cell form: "sum 1, exp 3/12, edu 1/0, skills 20, proj 2/5, cert 1, add 1/4" (entries/bullets, sections/items). */
+export function formatCvShape(s: CvShape): string {
+  return [
+    `sum ${s.summary ? 1 : 0}`,
+    `exp ${s.experience}/${s.experienceBullets}`,
+    `edu ${s.education}/${s.educationBullets}`,
+    `skills ${s.skills}`,
+    `proj ${s.projects}/${s.projectBullets}`,
+    `cert ${s.certifications}`,
+    `add ${s.additionalSections}/${s.additionalItems}`,
+  ].join(", ");
+}
+
+/** One line saying whether every successful A run extracted a CV of the same shape. */
+export function cvShapeSummary(shapes: CvShape[]): string {
+  if (shapes.length === 0) return "CV shape: no successful runs.";
+  const distinct = new Set(shapes.map(formatCvShape)).size;
+  return distinct === 1
+    ? `CV shape: identical across the ${shapes.length} successful runs.`
+    : `CV shape: differs between runs (${distinct} distinct shapes in ${shapes.length} successful runs).`;
 }
 
 /* ---------- Experiment B: Job Profile stability ---------- */
@@ -199,7 +288,7 @@ export function summarise(aRange: number | undefined, cRange: number | undefined
 /* ---------- Report ---------- */
 
 export type EndToEndRun =
-  | { ok: true; score: number; requirements: Requirement[]; coverage: Coverage[] }
+  | { ok: true; score: number; requirements: Requirement[]; coverage: Coverage[]; cvShape?: CvShape; softMismatches?: number }
   | { ok: false; error: string };
 
 export type CoverageRun = { ok: true; coverage: Coverage[]; score: number } | { ok: false; error: string };
@@ -211,6 +300,8 @@ export type ReportInput = {
   /** The Requirements Experiment C ran against (run 1's Job Profile), or undefined if no run produced one. */
   baseRequirements?: Requirement[];
   coverageOnly: CoverageRun[];
+  /** Coverage calls per C run (majority vote). Stated in the C header when above 1. */
+  votes?: number;
   /** Adds the cited Item IDs per C run for each flipped Requirement. Item IDs only, never reasons or CV text. */
   dumpEvidence?: boolean;
 };
@@ -273,15 +364,21 @@ export function renderReport(input: ReportInput): string {
 
   lines.push("## Experiment A: end to end", "", ...failures("A", input.endToEnd), "", `Score: ${statsLine(aStats)}`, "");
   if (okA.length > 0) {
-    lines.push("| Run | Score | Requirements | Importance | Kind | Verdicts (met / partial / unmet) |", "|---|---|---|---|---|---|");
+    const withShape = okA.some((r) => r.cvShape);
+    lines.push(
+      `| Run | Score | Requirements | Importance | Kind | Verdicts (met / partial / unmet) |${withShape ? " CV Items (summary, entries/bullets, counts) | softMismatches |" : ""}`,
+      `|---|---|---|---|---|---|${withShape ? "---|---|" : ""}`,
+    );
     input.endToEnd.forEach((r, i) => {
-      if (!r.ok) return void lines.push(`| ${i + 1} | failed | | | | |`);
+      if (!r.ok) return void lines.push(`| ${i + 1} | failed | | | | |${withShape ? " | |" : ""}`);
       const v = countVerdicts(r.coverage);
+      const shapeCells = withShape ? ` ${r.cvShape ? formatCvShape(r.cvShape) : ""} | ${r.softMismatches ?? ""} |` : "";
       lines.push(
-        `| ${i + 1} | ${f1(r.score)} | ${r.requirements.length} | ${cell(fmtCounts(countBy(r.requirements, (x) => x.importance)))} | ${cell(fmtCounts(countBy(r.requirements, (x) => x.kind)))} | ${v.met} / ${v.partially_met} / ${v.unmet} |`,
+        `| ${i + 1} | ${f1(r.score)} | ${r.requirements.length} | ${cell(fmtCounts(countBy(r.requirements, (x) => x.importance)))} | ${cell(fmtCounts(countBy(r.requirements, (x) => x.kind)))} | ${v.met} / ${v.partially_met} / ${v.unmet} |${shapeCells}`,
       );
     });
     lines.push("");
+    if (withShape) lines.push(cvShapeSummary(okA.flatMap((r) => (r.cvShape ? [r.cvShape] : []))), "");
   }
 
   lines.push("## Experiment B: Job Profile", "");
@@ -305,7 +402,7 @@ export function renderReport(input: ReportInput): string {
     }
   }
 
-  lines.push("## Experiment C: Coverage only", "", ...failures("C", input.coverageOnly), "", `Score: ${statsLine(cStats)}`, "");
+  lines.push("## Experiment C: Coverage only", "", ...(input.votes && input.votes > 1 ? [`Votes per run: ${input.votes} Coverage calls, majority verdict per Requirement (no strict majority gives partially_met).`, ""] : []), ...failures("C", input.coverageOnly), "", `Score: ${statsLine(cStats)}`, "");
   let analysis: CoverageAnalysis | undefined;
   if (input.baseRequirements && okC.length > 0) {
     analysis = analyseCoverage(input.baseRequirements, okC.map((r) => r.coverage));

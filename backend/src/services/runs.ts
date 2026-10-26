@@ -283,8 +283,11 @@ export class RunsService {
         close();
       });
     });
+    // The first view goes through the same chain, so a change published while it is being built queues behind it.
+    const first = chain.then(emit);
+    chain = first.catch(() => {});
     try {
-      await emit();
+      await first;
     } catch (error) {
       stop();
       throw error;

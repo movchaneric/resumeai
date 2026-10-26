@@ -159,6 +159,7 @@ const questionsCoverage = {
 const enqueueToQuestions = () => llm.enqueue("extract_job_profile", questionsJob).enqueue("extract_cv", extractedCv).enqueueVoted("assess_coverage", questionsCoverage);
 const enqueueToReview = () => llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueueVoted("assess_coverage", coverageAnswer);
 
+const order = (status: string) => ["extracting", "tailoring", "awaiting_review"].indexOf(status);
 const stepState = (view: RunView, key: string) => view.steps.find((s) => s.key === key)?.state;
 
 beforeEach(async () => {
@@ -198,10 +199,14 @@ describe("GET /runs/:id/events", () => {
   it("pushes the Run through extraction and Coverage to the Questions, then closes", async () => {
     enqueueToQuestions();
     const release = llm.hold("extract_job_profile");
+    const releaseCoverage = llm.hold("assess_coverage");
     const id = await upload();
     const client = await openStream(server, `/runs/${id}/events`);
     await until(() => client.views.length === 1, "the first view");
     release();
+    // Coverage is held, so the view with extraction done is observable rather than coalesced into the final one.
+    await until(() => client.views.some((v) => stepState(v, "coverage") === "running"), "Coverage to start");
+    releaseCoverage();
     await until(() => client.ended, "the stream to close");
 
     const last = client.views.at(-1)!;
@@ -347,6 +352,40 @@ describe("GET /runs/:id/events", () => {
     const client = await opening;
     await until(() => client.ended, "the stream to close");
     expect(client.views.at(-1)!.status).toBe("awaiting_answers");
+  });
+
+  it("sends views in order when a change is published while the first view is being built", async () => {
+    const release = llm.hold("extract_job_profile");
+    enqueueToReview();
+    const id = await upload();
+    // Hold the first view build; its result is the older state.
+    const original = RunsService.prototype.getRunView;
+    let releaseFirst!: () => void;
+    const firstHeld = new Promise<void>((resolve) => (releaseFirst = resolve));
+    let calls = 0;
+    const spy = vi.spyOn(RunsService.prototype, "getRunView").mockImplementation(async function (this: RunsService, rawId: string) {
+      const view = await original.call(this, rawId);
+      if (++calls === 1) await firstHeld;
+      return view;
+    });
+    try {
+      const opening = openStream(server, `/runs/${id}/events`);
+      await until(() => calls === 1, "the first build to start");
+      // The Run moves on and a push arrives while the first build is held.
+      release();
+      await settle();
+      events.publish(id);
+      await until(() => calls >= 1, "the push");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      releaseFirst();
+      const client = await opening;
+      await until(() => client.ended, "the stream to close");
+      expect(client.views[0]!.status).toBe("extracting");
+      expect(client.views.at(-1)!.status).toBe("awaiting_review");
+      expect(client.views.map((v) => v.status)).toEqual(client.views.map((v) => v.status).sort((a, b) => order(a) - order(b)));
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("gives every client on the Run every update", async () => {

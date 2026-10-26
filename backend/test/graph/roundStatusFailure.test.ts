@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Command } from "@langchain/langgraph";
 import { describe, expect, it, vi } from "vitest";
 import { createMemoryCheckpointer } from "@/graph/memoryCheckpointer.js";
 import { NODE_STATUS, buildRunGraph } from "@/graph/runGraph.js";
@@ -56,7 +57,10 @@ describe("a failing status write inside a tailoring round", () => {
       });
       const spy = vi.spyOn(console, "error").mockImplementation(() => {});
       try {
-        const state = await graph.invoke({ runId: "run-1", cvText, jobDescriptionText: "Backend developer" }, { configurable: { thread_id: "run-1" } });
+        const config = { configurable: { thread_id: "run-1" } };
+        await graph.invoke({ runId: "run-1", cvText, jobDescriptionText: "Backend developer" }, config);
+        // The unmet must-haves pause the graph for Answers; this test is about the rounds, so skip every Question.
+        const state = await graph.invoke(new Command({ resume: [] }), config);
         expect(state.exitReason).toBe("error");
         expect(state.changes.map((c) => c.id)).toEqual(["r1.c1"]);
         expect(state.scoreAfter).toBeGreaterThan(state.scoreBefore!);
@@ -70,6 +74,7 @@ describe("a failing status write inside a tailoring round", () => {
     expect(NODE_STATUS).toEqual({
       extract: "extracting",
       assess_coverage: "extracting",
+      collect_answers: "awaiting_answers",
       begin_round: "tailoring",
       tailor: "tailoring",
       validate: "tailoring",

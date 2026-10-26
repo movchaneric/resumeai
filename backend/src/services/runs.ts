@@ -3,14 +3,18 @@ import {
   RunIdSchema,
   RunViewSchema,
   StepKeySchema,
+  type Answer,
   type Change,
   type Coverage,
   type Cv,
   type ExitReason,
   type JobProfile,
+  type Question,
+  type RequirementId,
   type RunErrorCode,
   type RunId,
   type StepState,
+  type UserEvidence,
   type RunView,
 } from "@resume-ai/shared";
 import { applyChanges } from "@/tailoring/applyChanges.js";
@@ -36,6 +40,10 @@ export type RunSnapshot = {
   scoreAfter: number | null;
   /** Changes rejected by stage 1 or the claim check, across rounds. */
   rejections: RecordedRejection[];
+  /** The Questions asked after the first Coverage (empty when there was nothing to ask), and what the Answers recorded. */
+  questions: Question[];
+  userEvidence: UserEvidence[];
+  confirmedGaps: RequirementId[];
   /** Tailoring rounds started. */
   rounds: number;
   exitReason: ExitReason | null;
@@ -51,6 +59,11 @@ export type StartRunInput = { runId: RunId; cvText: string; jobDescriptionText: 
 export interface GraphRunner {
   /** Runs until the workflow pauses for review, and returns the state it paused with. */
   start(input: StartRunInput): Promise<RunSnapshot>;
+  /**
+   * Resumes a Run paused for Answers (already validated by the caller) and runs until the next pause, like `start`;
+   * the post-resume work is a new root span with the same session id. Rejects with the original error on failure.
+   */
+  answer(runId: RunId, answers: Answer[]): Promise<RunSnapshot>;
   /** The current state, or null when no checkpoint exists yet. */
   read(runId: RunId): Promise<RunSnapshot | null>;
 }
@@ -207,15 +220,24 @@ function toRunView(run: StoredRun, state: RunSnapshot | null): RunView {
           importance: requirement.importance,
           before: before?.verdict ?? "unmet",
           after: { verdict: after?.verdict ?? "unmet", evidenceIds: after?.evidenceIds ?? [], reason: after?.reason ?? "" },
-          confirmedGap: false,
+          confirmedGap: state.confirmedGaps.includes(requirement.id),
         };
       }),
       // The Tailored CV: the original plus the kept Changes.
       cv: applyChanges(cv, state.changes),
       changes: state.changes,
-      userEvidence: [],
+      userEvidence: state.userEvidence,
       iterations: { used: state.rounds, max: MAX_ROUNDS },
       exitReason: state.exitReason,
+    });
+  }
+  if (run.status === "awaiting_answers" && extracted && state) {
+    return RunViewSchema.parse({
+      ...common,
+      status: "awaiting_answers",
+      job,
+      steps: steps({ parse: "done", extract: "done", coverage: "done", questions: "running" }),
+      questions: state.questions,
     });
   }
   if (run.status === "tailoring" && extracted && state) {

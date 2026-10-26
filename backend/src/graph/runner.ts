@@ -1,6 +1,8 @@
-import type { RunId, RunStatus } from "@resume-ai/shared";
+import { Command } from "@langchain/langgraph";
+import type { Answer, RunId, RunStatus } from "@resume-ai/shared";
 import type { GraphRunner, RunSnapshot, StartRunInput } from "@/services/runs.js";
 import type { BaseCheckpointSaver } from "@langchain/langgraph";
+import { withSessionSpan } from "@/utils/spans.js";
 import type { LlmClient } from "@/llm/llmClient.js";
 import { NODE_STATUS, buildRunGraph, type RoundSummary, type RunGraph } from "@/graph/runGraph.js";
 import type { JobProfileCache } from "@/graph/jobProfileCache.js";
@@ -23,6 +25,9 @@ function toSnapshot(values: Partial<RunStateValues>): RunSnapshot {
     scoreBefore: values.scoreBefore ?? null,
     scoreAfter: values.scoreAfter ?? null,
     rejections: values.rejections ?? [],
+    questions: values.questions ?? [],
+    userEvidence: values.userEvidence ?? [],
+    confirmedGaps: values.confirmedGaps ?? [],
     rounds: values.rounds ?? 0,
     exitReason: values.exitReason ?? null,
   };
@@ -62,10 +67,23 @@ export class LangGraphRunner implements GraphRunner {
   }
 
   async start({ runId, cvText, jobDescriptionText }: StartRunInput): Promise<RunSnapshot> {
+    return this.runUntilPause(runId, { runId, cvText, jobDescriptionText });
+  }
+
+  /**
+   * Resumes the Run paused in `collect_answers`, with the Answers as the value of its `interrupt()`. The resumed work
+   * is a new root span with the Run id as `session.id`, like the one the service opens around `start`.
+   */
+  async answer(runId: RunId, answers: Answer[]): Promise<RunSnapshot> {
+    return withSessionSpan("answers", runId, () => this.runUntilPause(runId, new Command({ resume: answers })));
+  }
+
+  /** Runs the graph from `input` until it ends or pauses, and writes the status of the pause. */
+  private async runUntilPause(runId: RunId, input: Parameters<RunGraph["invoke"]>[0]): Promise<RunSnapshot> {
     const config = { configurable: { thread_id: runId } };
     try {
-      await this.graph.invoke({ runId, cvText, jobDescriptionText }, config);
-      // The graph stops before `review`, so that node never starts: its status is written at the pause.
+      await this.graph.invoke(input, config);
+      // The graph stops before `review` and inside `collect_answers`, so those nodes' statuses are written at the pause.
       const state = await this.graph.getState(config);
       if (state.next.length > 0) await this.write(runId, statusOf(state.next[0]!) ?? "awaiting_review");
       return toSnapshot(state.values);

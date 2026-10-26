@@ -10,7 +10,7 @@ import { RunsService } from "@/services/runs.js";
 import { ExtractionError, NoRequirementsError } from "@/extraction/errors.js";
 import { LlmSchemaError, LlmUnavailableError } from "@/llm/llmClient.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
-import { makeGraphRunner } from "../fakes/runGraph.js";
+import { makeGraphRunner, skipQuestions } from "../fakes/runGraph.js";
 import { coverageAnswer, extractedCv, extractedJob } from "../runFixtures.js";
 import { COVERAGE_VOTES } from "@/scoring/assessCoverage.js";
 
@@ -48,7 +48,7 @@ const COVERAGE_ANSWER = coverageAnswer;
 function setup(now = () => new Date(), judgeLlm?: FakeLlmClient) {
   const store = new FakeStore();
   const llm = new FakeLlmClient();
-  const graphRunner = makeGraphRunner(store, llm, judgeLlm);
+  const graphRunner = skipQuestions(makeGraphRunner(store, llm, judgeLlm));
   // Tasks are held back until `settle`, so a test can look at the Run before the pipeline starts.
   const tasks: (() => Promise<void>)[] = [];
   const runInBackground = (task: () => Promise<void>) => {
@@ -360,7 +360,7 @@ describe("RunsService", () => {
       const llm = new FakeLlmClient();
       enqueueHappyPath(llm);
       // No runInBackground: this is the production runner.
-      const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner: makeGraphRunner(store, llm) });
+      const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner: skipQuestions(makeGraphRunner(store, llm)) });
       const unhandled: unknown[] = [];
       const onUnhandled = (reason: unknown) => unhandled.push(reason);
       process.on("unhandledRejection", onUnhandled);
@@ -581,7 +581,7 @@ describe("RunsService tailoring round", () => {
     await ctx.settle();
     // `iterations.used` counts rounds started, so it is already 1 while round 1 runs.
     expect(seen).toEqual({ status: "tailoring", used: 1 });
-    expect(ctx.store.statusLog).toEqual(["extracting", "tailoring", "awaiting_review"]);
+    expect(ctx.store.statusLog).toEqual(["extracting", "awaiting_answers", "tailoring", "awaiting_review"]);
   });
 
   describe("the loop", () => {
@@ -835,5 +835,52 @@ describe("RunsService tailoring round", () => {
         expect(logged).not.toContain("secret");
       });
     });
+  });
+});
+
+describe("RunsService awaiting answers", () => {
+  it("shows the Questions while the Run is paused, then the review summary with its User Evidence and Confirmed Gaps once answered", async () => {
+    const store = new FakeStore();
+    const llm = new FakeLlmClient();
+    const judge = new FakeLlmClient()
+      .enqueue("extract_job_profile", {
+        ...JOB_PROFILE,
+        requirements: [
+          { text: "Node.js", source: "Node.js", kind: "skill", importance: "must_have" },
+          { text: "Kubernetes", source: "Kubernetes", kind: "skill", importance: "must_have" },
+          { text: "Terraform", source: "Terraform", kind: "skill", importance: "must_have" },
+        ],
+      })
+      .enqueueVoted("assess_coverage", {
+        verdicts: [
+          { requirementId: "req1", reason: "r", evidenceIds: ["exp1.b1"], verdict: "met" },
+          { requirementId: "req2", reason: "r", evidenceIds: [], verdict: "unmet" },
+          { requirementId: "req3", reason: "r", evidenceIds: ["exp1.b1"], verdict: "partially_met" },
+        ],
+      })
+      .enqueue("tailor", { changes: [] }, { changes: [] });
+    llm.enqueue("extract_cv", extractedCv);
+    const graphRunner = makeGraphRunner(store, llm, judge);
+    const tasks: (() => Promise<void>)[] = [];
+    const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner, runInBackground: (t) => void tasks.push(t) });
+    const id = await service.createRun({ cv, jobDescription: "Backend developer" });
+    await Promise.all(tasks.map((t) => t()));
+
+    const paused = await service.getRunView(id);
+    if (paused.status !== "awaiting_answers") throw new Error(`unexpected status ${paused.status}`);
+    expect(paused.questions.map((q) => [q.id, q.requirementId, q.text])).toEqual([
+      ["q1", "req2", "The job asks for: Kubernetes. Have you done this? Describe where and how."],
+      ["q2", "req3", "The job asks for: Terraform. Have you done this? Describe where and how."],
+    ]);
+    expect(stepStates(paused)).toEqual(["parse:done", "extract:done", "coverage:done", "questions:running"]);
+
+    await graphRunner.answer(id as RunId, [
+      { kind: "has_experience", questionId: "q1" as never, text: "Ran clusters at Acme." },
+      { kind: "no_experience", questionId: "q2" as never },
+    ]);
+    const review = await service.getRunView(id);
+    if (review.status !== "awaiting_review") throw new Error(`unexpected status ${review.status}`);
+    expect(review.userEvidence.map((u) => [u.id, u.requirementId, u.text])).toEqual([["ue1", "req2", "Ran clusters at Acme."]]);
+    expect(review.requirements.map((r) => r.confirmedGap)).toEqual([false, false, true]);
   });
 });

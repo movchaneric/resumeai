@@ -94,7 +94,9 @@ export async function runTailorInMemory(input: {
     { llm: input.llm, judgeLlm: input.judgeLlm, judgeModel: "report", jobProfileCache: NO_CACHE, checkpointer: createMemoryCheckpointer(), onRound: input.onRound },
     { setStatus: async () => {} },
   );
-  return runner.start({ runId: input.runId, cvText: input.cvText, jobDescriptionText: input.jobDescriptionText });
+  const snapshot = await runner.start({ runId: input.runId, cvText: input.cvText, jobDescriptionText: input.jobDescriptionText });
+  // Nobody is here to answer the Questions, so the report skips them all.
+  return snapshot.questions.length > 0 && snapshot.exitReason === null ? runner.answer(input.runId, []) : snapshot;
 }
 
 /** The report always extracts afresh, so it gets a cache that never holds anything. */

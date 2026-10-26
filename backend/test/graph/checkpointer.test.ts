@@ -69,4 +69,27 @@ describe("Postgres checkpointer", () => {
     }
     expect(await tablesIn("app")).toContain("runs");
   });
+  it("pauses for Answers and resumes from the checkpoint, even through a fresh runner", async () => {
+    const job = { ...extractedJob, requirements: [...extractedJob.requirements, { text: "Kubernetes", source: "Kubernetes", kind: "skill", importance: "must_have" }] };
+    const coverage = {
+      verdicts: [
+        { requirementId: "req1", reason: "r", evidenceIds: ["exp1.b1"], verdict: "met" },
+        { requirementId: "req2", reason: "r", evidenceIds: [], verdict: "unmet" },
+      ],
+    };
+    const llm = new FakeLlmClient().enqueue("extract_job_profile", job).enqueue("extract_cv", extractedCv).enqueueVoted("assess_coverage", coverage).enqueue("tailor", { changes: [] }, { changes: [] });
+    const statuses: string[] = [];
+    const make = (cp: ReturnType<typeof createPostgresCheckpointer>) =>
+      new LangGraphRunner({ llm, judgeLlm: llm, judgeModel: "test-judge", jobProfileCache: new FakeJobProfileCache(), checkpointer: cp }, { setStatus: async (_id, status) => void statuses.push(status) });
+    const runId = randomUUID() as RunId;
+    const paused = await make(checkpointer).start({ runId, cvText: await parseCv(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf")), config.limits), jobDescriptionText: "Backend developer" });
+    expect(paused.questions.map((q) => q.requirementId)).toEqual(["req2"]);
+
+    const resumeCheckpointer = createPostgresCheckpointer(url);
+    const resumed = await make(resumeCheckpointer).answer(runId, [{ kind: "has_experience", questionId: paused.questions[0]!.id, text: "Ran clusters at Acme." }]);
+    await resumeCheckpointer.end();
+    expect(resumed.userEvidence).toEqual([{ id: "ue1", questionId: "q1", requirementId: "req2", text: "Ran clusters at Acme." }]);
+    expect(resumed.exitReason).toBe("ceiling");
+    expect(statuses).toEqual(["extracting", "awaiting_answers", "tailoring", "awaiting_review"]);
+  });
 });

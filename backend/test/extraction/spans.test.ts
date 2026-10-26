@@ -20,7 +20,7 @@ import type { RunStore } from "@/stores/runs.js";
 import { loadConfig } from "@/utils/config.js";
 import { withSpan } from "@/utils/spans.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
-import { makeGraphRunner } from "../fakes/runGraph.js";
+import { makeGraphRunner, skipQuestions } from "../fakes/runGraph.js";
 import { fullCv } from "./cvFixture.js";
 
 const cvText = `Ada Lovelace
@@ -243,7 +243,7 @@ describe("pipeline span", () => {
     const service = new RunsService({
       store: store as unknown as RunStore,
       config: loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" }),
-      graphRunner: makeGraphRunner(store, llm),
+      graphRunner: skipQuestions(makeGraphRunner(store, llm)),
     });
     await service.runPipeline({ runId: id as RunId, cvText, jobDescriptionText: "Backend developer" });
 
@@ -280,7 +280,7 @@ describe("pipeline span", () => {
     const service = new RunsService({
       store: store as unknown as RunStore,
       config: loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" }),
-      graphRunner: makeGraphRunner(store, llm),
+      graphRunner: skipQuestions(makeGraphRunner(store, llm)),
     });
     await service.runPipeline({ runId: id as RunId, cvText, jobDescriptionText: "Backend developer" });
 
@@ -305,7 +305,8 @@ describe("pipeline span", () => {
     }
     expect(byName("assess_coverage").map((s) => s.attributes["round"])).toEqual([0, 1]);
     expect(ancestors(byName("claim_check")[0]!)[0]).toBe("validate");
-    expect(byName("validate")[0]!.parentSpanContext?.spanId).toBe(rootId);
+    // The skipped Questions resume under their own span, which nests here only because the test wrapper calls it inside the pipeline.
+    expect(ancestors(byName("validate")[0]!)).toEqual(["answers", "pipeline"]);
   });
   it("marks the failing round step's span as an error and ends the root with exit_reason error", async () => {
     const id = "3f0c1d4e-5b2a-4c8e-9a71-0d6e2f8b7a13";
@@ -318,7 +319,7 @@ describe("pipeline span", () => {
     const service = new RunsService({
       store: store as unknown as RunStore,
       config: loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" }),
-      graphRunner: makeGraphRunner(store, llm),
+      graphRunner: skipQuestions(makeGraphRunner(store, llm)),
     });
     await service.runPipeline({ runId: id as RunId, cvText, jobDescriptionText: "Backend developer" });
 

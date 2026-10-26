@@ -1,0 +1,177 @@
+import { RunIdSchema, type RunId, type RunStatus } from "@resume-ai/shared";
+import pg from "pg";
+import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createPostgresCheckpointer } from "@/graph/checkpointer.js";
+import { parseCv } from "@/parsing/parseCv.js";
+import { RunsService } from "@/services/runs.js";
+import { SweepService } from "@/services/sweep.js";
+import { CheckpointStore } from "@/stores/checkpoints.js";
+import { JobProfileStore } from "@/stores/jobProfiles.js";
+import { RunStore } from "@/stores/runs.js";
+import { loadConfig } from "@/utils/config.js";
+import { createPrisma } from "@/utils/db.js";
+import { InProcessRunEvents } from "@/utils/runEvents.js";
+import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
+import { makeGraphRunner } from "../fakes/runGraph.js";
+import { coverageAnswer, extractedCv, extractedJob } from "../runFixtures.js";
+
+// Real Postgres store and checkpointer: a pass must leave no row in `app.runs` or any checkpoint table for what it deletes.
+
+const url = process.env.DATABASE_URL!;
+const config = loadConfig(process.env);
+const prisma = createPrisma(config.databaseUrl);
+const store = new RunStore(prisma);
+const pool = new pg.Pool({ connectionString: url });
+const checkpointer = createPostgresCheckpointer(`${url}?schema=app`);
+const llm = new FakeLlmClient();
+const events = new InProcessRunEvents();
+const graphRunner = makeGraphRunner(store, llm, llm, undefined, events, checkpointer);
+const runs = new RunsService({ store, config, graphRunner, events });
+const profiles = new JobProfileStore(prisma, { ttlMs: 1000 });
+const sweep = new SweepService({ store, jobProfiles: profiles, checkpoints: new CheckpointStore(prisma), purgeRun: (id) => runs.purgeRun(id) });
+
+const cvText = await parseCv(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf")), config.limits);
+const HOUR = 60 * 60 * 1000;
+const CHECKPOINT_TABLES = ["checkpoints", "checkpoint_blobs", "checkpoint_writes"];
+const rowsFor = async (table: string, id: string) =>
+  (await pool.query(`SELECT count(*)::int AS n FROM checkpoints.${table} WHERE thread_id = $1`, [id])).rows[0].n as number;
+const expectThread = async (id: string, present: boolean) => {
+  for (const table of CHECKPOINT_TABLES) {
+    if (present) expect(await rowsFor(table, id), table).toBeGreaterThan(0);
+    else expect(await rowsFor(table, id), table).toBe(0);
+  }
+};
+
+/** A Run row with a real checkpoint thread, set to `status` and expiring `expiresInMs` from now (negative: already expired). */
+async function seedRun(status: RunStatus, expiresInMs: number): Promise<RunId> {
+  const id = RunIdSchema.parse(randomUUID());
+  await store.create({ id, status: "extracting", createdAt: new Date(), expiresAt: new Date(Date.now() + HOUR) });
+  llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueueVoted("assess_coverage", coverageAnswer);
+  await graphRunner.start({ runId: id, cvText, jobDescriptionText: "Backend developer with Node.js and PostgreSQL." });
+  await prisma.run.update({ where: { id }, data: { status, expiresAt: new Date(Date.now() + expiresInMs) } });
+  await expectThread(id, true);
+  return id;
+}
+
+beforeAll(async () => {
+  await checkpointer.setup();
+});
+beforeEach(async () => {
+  vi.restoreAllMocks();
+  await store.deleteAll();
+  await prisma.jobProfile.deleteMany();
+  await pool.query("TRUNCATE checkpoints.checkpoints, checkpoints.checkpoint_blobs, checkpoints.checkpoint_writes");
+});
+afterAll(async () => {
+  await checkpointer.end();
+  await pool.end();
+  await prisma.$disconnect();
+});
+
+describe("SweepService.sweep with Postgres", () => {
+  it("deletes expired Runs that are not busy, with all their checkpoints", async () => {
+    const paused = await seedRun("awaiting_review", -HOUR);
+    const failed = await seedRun("failed", -HOUR);
+    const done = await seedRun("completed", -HOUR);
+
+    const result = await sweep.sweep();
+
+    expect(result.runs).toBe(3);
+    for (const id of [paused, failed, done]) {
+      expect(await store.get(id)).toBeNull();
+      await expectThread(id, false);
+    }
+  });
+
+  it("leaves a Run that has not expired alone", async () => {
+    const live = await seedRun("awaiting_review", HOUR);
+    await sweep.sweep();
+    expect(await store.get(live)).not.toBeNull();
+    await expectThread(live, true);
+  });
+
+  it("skips an expired Run that is busy", async () => {
+    const ids = [await seedRun("parsing", -HOUR), await seedRun("extracting", -HOUR), await seedRun("tailoring", -HOUR)];
+    const result = await sweep.sweep();
+    expect(result.runs).toBe(0);
+    for (const id of ids) {
+      expect(await store.get(id)).not.toBeNull();
+      await expectThread(id, true);
+    }
+  });
+
+  it("deletes expired Job Profiles and keeps fresh ones", async () => {
+    const data = { profile: { title: "Made-up" }, createdAt: new Date() };
+    await prisma.jobProfile.createMany({
+      data: [
+        { key: "old", expiresAt: new Date(Date.now() - HOUR), ...data },
+        { key: "fresh", expiresAt: new Date(Date.now() + HOUR), ...data },
+      ],
+    });
+    const result = await sweep.sweep();
+    expect(result.jobProfiles).toBe(1);
+    expect((await prisma.jobProfile.findMany()).map((row) => row.key)).toEqual(["fresh"]);
+  });
+
+  it("deletes an orphaned checkpoint thread from every table and keeps a live Run's", async () => {
+    const orphan = await seedRun("awaiting_review", HOUR);
+    const live = await seedRun("awaiting_review", HOUR);
+    await store.delete(orphan);
+    await expectThread(orphan, true);
+
+    const result = await sweep.sweep();
+
+    expect(result.orphanRows).toBeGreaterThan(0);
+    await expectThread(orphan, false);
+    await expectThread(live, true);
+    expect(await store.get(live)).not.toBeNull();
+  });
+
+  it("removes a thread whose delete failed when its Run was purged", async () => {
+    const id = await seedRun("awaiting_review", -HOUR);
+    vi.spyOn(graphRunner, "deleteThread").mockRejectedValueOnce(new Error("db down"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect((await sweep.sweep()).runs).toBe(1);
+    expect(await store.get(id)).toBeNull();
+    await expectThread(id, false);
+  });
+});
+
+describe("SweepService.sweep when a step fails", () => {
+  const fakes = () => ({
+    store: { listExpiredIds: vi.fn(async () => ["a", "b"] as RunId[]) },
+    jobProfiles: { deleteExpired: vi.fn(async () => 2) },
+    checkpoints: { deleteOrphans: vi.fn(async () => 5) },
+    purgeRun: vi.fn(async () => true),
+  });
+
+  it("still runs the other steps when the Job Profile delete throws", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const deps = fakes();
+    deps.jobProfiles.deleteExpired.mockRejectedValue(new Error("boom"));
+    expect(await new SweepService(deps).sweep()).toEqual({ runs: 2, jobProfiles: 0, orphanRows: 5 });
+  });
+
+  it("still runs the other steps when listing Runs throws, and when one Run's delete throws", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const listFails = fakes();
+    listFails.store.listExpiredIds.mockRejectedValue(new Error("boom"));
+    expect(await new SweepService(listFails).sweep()).toEqual({ runs: 0, jobProfiles: 2, orphanRows: 5 });
+
+    const oneFails = fakes();
+    oneFails.purgeRun.mockRejectedValueOnce(new Error("boom"));
+    expect(await new SweepService(oneFails).sweep()).toEqual({ runs: 1, jobProfiles: 2, orphanRows: 5 });
+  });
+
+  it("still deletes Runs and Job Profiles when the orphan scan throws", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const deps = fakes();
+    deps.checkpoints.deleteOrphans.mockRejectedValue(new Error("boom"));
+    expect(await new SweepService(deps).sweep()).toEqual({ runs: 2, jobProfiles: 2, orphanRows: 0 });
+  });
+});

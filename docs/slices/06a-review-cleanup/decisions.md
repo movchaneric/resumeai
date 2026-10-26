@@ -2,7 +2,7 @@
 
 Settled in a grilling session (2026-10-26). All decisions are owner-approved. Terms follow `CONTEXT.md`, which was updated in the same session (**Review**, and the **Change** entry: a revised Change goes into the Tailored CV exactly as written).
 
-Spec: _to be created_ "Slice 6a: Review and cleanup"; tickets are linked from it.
+Spec: #42 "Slice 6a: Review and cleanup"; tickets #43 to #46.
 
 ## Split
 - Slice 6 is split. **6a**: the Review, the P6 fix, `DELETE /runs/:id` and the TTL sweep. **6b** (`06b-export`): DOCX/PDF export, which then extends `DELETE` and the sweep to exported files. Export has its own design questions (template, libraries, files on disk versus rendering on demand) and probably an ADR touching ADR 0002.
@@ -46,10 +46,10 @@ Spec: _to be created_ "Slice 6a: Review and cleanup"; tickets are linked from it
 ## Tickets
 | Ticket | Scope | Depends on |
 |---|---|---|
-| T1 | Review as an `interrupt()`, P6 fix with S4, `completed` at the end, recovery row | — |
-| T2 | `POST /runs/:id/review`: validation, stage 1 for revisions, final re-judge and fallback, `completed` view | T1 |
-| T3 | `DELETE /runs/:id` and the delete-a-Run helper (row and checkpoints) | — |
-| T4 | TTL sweep: expired Runs, `job_profiles`, orphaned threads; interval and shutdown | T3 |
+| T1 (#43) | Review as an `interrupt()`, P6 fix with S4, `completed` at the end, recovery row | — |
+| T2 (#44) | `POST /runs/:id/review`: validation, stage 1 for revisions, final re-judge and fallback, `completed` view | T1 (#43) |
+| T3 (#45) | `DELETE /runs/:id` and the delete-a-Run helper (row and checkpoints) | — |
+| T4 (#46) | TTL sweep: expired Runs, `job_profiles`, orphaned threads; interval and shutdown | T3 (#45) |
 
 Order: T1 and T3 in parallel worktrees, then T2 and T4 in parallel.
 

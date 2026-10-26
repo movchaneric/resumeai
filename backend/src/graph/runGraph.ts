@@ -13,7 +13,7 @@ import { matchScore } from "@/scoring/matchScore.js";
 import { resolveJobProfile, type JobProfileCache } from "@/graph/jobProfileCache.js";
 import { RunState } from "@/graph/state.js";
 import type { RecordedRejection } from "@/tailoring/validateChanges.js";
-import { UserEvidenceIdSchema, type Answer, type Change, type Question, type RequirementId, type UserEvidence } from "@resume-ai/shared";
+import { UserEvidenceIdSchema, type Answer, type Change, type Question, type RequirementId, type ReviewDecision, type UserEvidence } from "@resume-ai/shared";
 
 /** The Run status a node writes when the graph enters it (decisions record, "Storage and status"). */
 export const NODE_STATUS = {
@@ -96,12 +96,12 @@ function logRoundFailure(runId: string, round: number, error: unknown): void {
 }
 
 /**
- * The Run workflow (ADR 0001): extract, first Coverage, then either the pause before `review` (nothing to tailor)
+ * The Run workflow (ADR 0001): extract, first Coverage, then either `review` (nothing to tailor)
  * or `select_questions` (which pauses in `collect_answers` for the user's Answers when there is anything to ask) and then
  * tailoring rounds: begin_round, tailor, validate, rejudge, route, and back to begin_round while the exit router
  * says so (at most MAX_ROUNDS). Nodes are thin: each calls functions from `extraction/`, `tailoring/` or `scoring/`
  * and returns a state update. `begin_round` counts the round as started; the `route` node is the only place that
- * commits the pending round.
+ * commits the pending round. `review` waits in an `interrupt()` for the decisions, then the graph ends.
  */
 export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, checkpointer, onEnter, onRound }: RunGraphDeps) {
   return new StateGraph(RunState)
@@ -245,8 +245,13 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
         scoreAfter: pending.score!,
       };
     })
-    // The candidate's turn. The graph stops before it; slice 6 resumes it.
-    .addNode("review", () => ({}))
+    // The candidate's turn: the graph waits inside `interrupt()` for the decisions. Like `collect_answers`, the node runs
+    // again from the top on resume, so everything before the `interrupt()` must be pure. For now the decisions are
+    // ignored and the graph goes on to the end.
+    .addNode("review", () => {
+      interrupt<null, ReviewDecision[]>(null);
+      return {};
+    })
     .addEdge(START, "extract")
     .addEdge("extract", "assess_coverage")
     .addConditionalEdges("assess_coverage", (state) => (state.exitReason === null ? "select_questions" : "review"), ["select_questions", "review"])
@@ -258,7 +263,7 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
     .addEdge("rejudge", "route")
     .addConditionalEdges("route", (state) => (state.exitReason === null ? "begin_round" : "review"), ["begin_round", "review"])
     .addEdge("review", END)
-    .compile({ checkpointer, interruptBefore: ["review"] });
+    .compile({ checkpointer });
 }
 
 export type RunGraph = ReturnType<typeof buildRunGraph>;

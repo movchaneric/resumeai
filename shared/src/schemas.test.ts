@@ -7,6 +7,7 @@ import {
   ExtractedCvSchema,
   ExtractedJobProfileSchema,
   ItemIdSchema,
+  ReviewDecisionSchema,
   PartialDateSchema,
   RequirementIdSchema,
   ExitReasonSchema,
@@ -154,6 +155,21 @@ describe("change", () => {
   it("rejects remove, and the dropped `origin` field is not required", () => {
     expect(ChangeSchema.safeParse({ ...common, op: "remove", targetItemId: "exp-1-b1" }).success).toBe(false);
     expect(ChangeSchema.safeParse({ ...common, op: "add", parentId: "exp-1", after: "b" }).success).toBe(true);
+  });
+});
+
+describe("review decision", () => {
+  it("accepts each decision and the optional revision fields", () => {
+    expect(ReviewDecisionSchema.safeParse({ changeId: "c1", decision: "accept" }).success).toBe(true);
+    expect(ReviewDecisionSchema.safeParse({ changeId: "c1", decision: "reject" }).success).toBe(true);
+    expect(ReviewDecisionSchema.safeParse({ changeId: "c1", decision: "revise", after: "My text" }).success).toBe(true);
+    expect(ReviewDecisionSchema.safeParse({ changeId: "c2", decision: "revise", orderedItemIds: ["a", "b"] }).success).toBe(true);
+  });
+
+  it("rejects an unknown decision, a missing change id and a non-text `after`", () => {
+    expect(ReviewDecisionSchema.safeParse({ changeId: "c1", decision: "skip" }).success).toBe(false);
+    expect(ReviewDecisionSchema.safeParse({ decision: "accept" }).success).toBe(false);
+    expect(ReviewDecisionSchema.safeParse({ changeId: "c1", decision: "revise", after: 3 }).success).toBe(false);
   });
 });
 

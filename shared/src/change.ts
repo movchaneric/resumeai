@@ -47,3 +47,17 @@ export const ChangeSchema = z.discriminatedUnion("op", [
   }),
 ]);
 export type Change = z.infer<typeof ChangeSchema>;
+
+/**
+ * The user's decision on one Change at Review. A plain shape: whether `after` / `orderedItemIds` fit the Change's `op`
+ * (and that a revision has text) is checked by the service, which knows the Run's Changes.
+ */
+export const ReviewDecisionSchema = z.object({
+  changeId: ChangeIdSchema,
+  decision: z.enum(["accept", "reject", "revise"]),
+  /** The user's text for a revised `replace` or `add`. */
+  after: z.string().optional(),
+  /** The user's order for a revised `reorder`. */
+  orderedItemIds: z.array(ItemIdSchema).optional(),
+});
+export type ReviewDecision = z.infer<typeof ReviewDecisionSchema>;

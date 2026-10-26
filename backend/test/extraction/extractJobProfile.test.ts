@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ExtractedJobProfile } from "@resume-ai/shared";
-import { extractJobProfile } from "@/extraction/extractJobProfile.js";
+import { JOB_PROFILE_SYSTEM_PROMPT, extractJobProfile } from "@/extraction/extractJobProfile.js";
 import { ExtractionError, NoRequirementsError } from "@/extraction/errors.js";
 import { LlmSchemaError, LlmUnavailableError } from "@/llm/llmClient.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
@@ -75,5 +75,12 @@ describe("extractJobProfile", () => {
 
     await expect(extractJobProfile(llm, "job text")).rejects.toBeInstanceOf(LlmUnavailableError);
     expect(llm.calls).toHaveLength(1);
+  });
+});
+
+describe("JOB_PROFILE_SYSTEM_PROMPT", () => {
+  it("offers the soft_skill kind and keeps duties as responsibility", () => {
+    expect(JOB_PROFILE_SYSTEM_PROMPT).toContain("responsibility, soft_skill, other");
+    expect(JOB_PROFILE_SYSTEM_PROMPT).toContain("Duties stay \"responsibility\"");
   });
 });

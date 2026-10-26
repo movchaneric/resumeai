@@ -6,8 +6,11 @@ import type { CoverageVerdict, Importance, Requirement } from "@resume-ai/shared
  */
 export const IMPORTANCE_WEIGHTS: Record<Importance, number> = { must_have: 3, nice_to_have: 1 };
 
-/** Multiplies the importance weight: a responsibility is rarely provable from a CV, so it weighs half as much. */
-export const KIND_FACTORS: Partial<Record<Requirement["kind"], number>> = { responsibility: 0.5 };
+/**
+ * Multiplies the importance weight: a responsibility is rarely provable from a CV, and a soft skill is a judgement call
+ * (ADR 0004), so each weighs half as much.
+ */
+export const KIND_FACTORS: Partial<Record<Requirement["kind"], number>> = { responsibility: 0.5, soft_skill: 0.5 };
 
 /** The weight a Requirement carries in the Match Score: importance weight × kind factor. */
 export function requirementWeight(requirement: Requirement): number {

@@ -16,7 +16,7 @@ Rules:
 - Each cited Item must itself support the verdict. Never cite an Item that is unrelated to the Requirement.
 - If the reason has to infer the Requirement from something else ("indicating", "suggests", "shows ability to", "implies"), the verdict is at most "partially_met". If no Item states anything related, it is "unmet".
 - The reason may only describe what the cited Items say. Never add details that are not in them.
-- Soft skills and ways of working (ownership, attention to detail, collaboration, iterating quickly) are "met" only when an Item describes that behaviour. Otherwise they are "partially_met" when an Item is related, or "unmet".
+- Requirements of kind soft_skill (ownership, attention to detail, collaboration, iterating quickly) are "met" only when an Item describes that behaviour. Otherwise they are "unmet". Never use "partially_met" for them.
 - A duration such as "3+ years" is "met" only when the dates of the cited Items prove it. A bare year cannot prove a duration, so use "partially_met" and say so in the reason.
 - "unmet" cites no Evidence. "met" and "partially_met" cite at least one Item.
 - Write the reason first (1 to 2 sentences), then the Evidence IDs, then the verdict.
@@ -24,7 +24,7 @@ Rules:
 
 Examples (made up):
 - Requirement "Experience with Kubernetes". Item [exp2.b1] "Deployed services to Kubernetes with Helm" gives "met". Item [exp2.b3] "Improved deployment reliability" alone gives "partially_met": it is related but does not state the Requirement.
-- Requirement "Iterate quickly and prototype". Item [exp1.b4] "Built an internal billing dashboard" gives "unmet": building a dashboard does not describe iterating or prototyping, and inferring it is not allowed.`;
+- Requirement "Iterate quickly and prototype" (soft_skill). Item [exp1.b4] "Built an internal billing dashboard" gives "unmet": building a dashboard does not describe iterating or prototyping, and inferring it is not allowed.`;
 
 const RETRY_INSTRUCTION =
   "Your previous answer had problems:\n{issues}\n\nAnswer again for all the listed Requirements with a corrected result that follows the rules and the schema exactly.";

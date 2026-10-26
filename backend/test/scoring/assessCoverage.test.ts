@@ -134,4 +134,25 @@ describe("assessCoverage", () => {
     expect(system).toContain("at most \"partially_met\"");
     expect(system).toContain("Never add details that are not in them");
   });
+
+  it("makes soft_skill Requirements binary in the system prompt", async () => {
+    const llm = new FakeLlmClient().enqueue("assess_coverage", good);
+    await assessCoverage(llm, cv(), requirements);
+
+    const system = llm.calls[0]!.messages[0]!.content;
+    expect(system).toContain("kind soft_skill");
+    expect(system).toContain("Never use \"partially_met\" for them");
+  });
+
+  it("downgrades a partially_met soft skill to unmet and counts it", async () => {
+    const soft = [RequirementSchema.parse({ id: "req1", text: "Ownership", source: "s", kind: "soft_skill", importance: "must_have" })];
+    const llm = new FakeLlmClient().enqueue("assess_coverage", {
+      verdicts: [{ requirementId: "req1", reason: "related", evidenceIds: ["exp1.b1"], verdict: "partially_met" }],
+    });
+    const result = await assessCoverage(llm, cv(), soft);
+
+    expect(result.coverage[0]).toMatchObject({ verdict: "unmet", evidenceIds: [] });
+    expect(result.downgrades).toBe(1);
+    expect(llm.calls).toHaveLength(1);
+  });
 });

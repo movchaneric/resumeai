@@ -15,6 +15,7 @@ import {
   type RequirementId,
   type RunErrorCode,
   type RunId,
+  type RunStatus,
   type StepState,
   type UserEvidence,
   type RunView,
@@ -84,6 +85,8 @@ export interface GraphRunner {
   review(runId: RunId, decisions: ReviewDecision[]): Promise<RunSnapshot>;
   /** The current state, or null when no checkpoint exists yet. */
   read(runId: RunId): Promise<RunSnapshot | null>;
+  /** Removes every checkpoint stored for the Run. Only safe once nothing is running it. */
+  deleteThread(runId: RunId): Promise<void>;
 }
 
 /**
@@ -137,6 +140,9 @@ function setOutcomeAttributes(span: Span, result: RunSnapshot): void {
 
 /** The statuses after which a Run's stream ends: the Run is at a Pause (waiting for the user), Interrupted, failed or completed. */
 const STREAM_END_STATUSES: ReadonlySet<RunView["status"]> = new Set(["awaiting_answers", "awaiting_review", "failed", "interrupted", "completed"]);
+
+/** The statuses in which the graph runner may still write checkpoints for the Run. */
+const BUSY_STATUSES: RunStatus[] = ["parsing", "extracting", "tailoring"];
 
 /** What a client connection gives `openRunStream`: `send` writes one view, `close` ends the stream. */
 export type RunStreamSink = { send: (view: RunView) => void; close: () => void };
@@ -300,6 +306,40 @@ export class RunsService {
     } catch (error) {
       await this.recordFailure(run.id, "recovery", error);
     }
+  }
+
+  /**
+   * Deletes a Run: its row, then its checkpoints. 404 for a malformed, unknown, expired or already-deleted ID, 409
+   * `RUN_BUSY` while it is `parsing`, `extracting` or `tailoring` (the runner would write checkpoints after the delete),
+   * and then nothing is deleted. The row goes first, in one conditional statement, so a simultaneous `POST /answers`
+   * either claims the Run first (this gets 409) or finds it gone (that gets 404).
+   */
+  async deleteRun(rawId: string): Promise<void> {
+    const { store } = this.deps;
+    const id = RunIdSchema.safeParse(rawId);
+    if (!id.success) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
+    if (await this.purgeRun(id.data, this.now())) return;
+    // Nothing was deleted: re-read to say why.
+    const run = await store.get(id.data);
+    if (run && run.expiresAt > this.now()) throw new ApiError("RUN_BUSY", "This Run is still working. Try again when it pauses or ends.");
+    throw new ApiError("RUN_NOT_FOUND", "Run not found.");
+  }
+
+  /**
+   * Deletes the Run's row unless it is busy (or, with `liveAt`, expired at that time), then its checkpoints, and says
+   * whether the row was deleted. It is the one "delete this Run" operation; the TTL sweep calls it without `liveAt`.
+   */
+  async purgeRun(id: RunId, liveAt?: Date): Promise<boolean> {
+    const { store, graphRunner } = this.deps;
+    if (!(await store.deleteUnless(id, BUSY_STATUSES, liveAt))) return false;
+    try {
+      await graphRunner.deleteThread(id);
+    } catch (error) {
+      // The row is already gone and the caller's job is done: the sweep removes checkpoint threads that have no Run (ADR 0002).
+      console.error(`Run ${id}: could not delete the checkpoints, left for the sweep`, error);
+    }
+    this.deps.events.publish(id);
+    return true;
   }
 
   /**

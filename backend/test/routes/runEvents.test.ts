@@ -308,6 +308,7 @@ describe("GET /runs/:id/events", () => {
       answer: (runId, answers) => graphRunner.answer(runId, answers),
       review: (runId, decisions) => graphRunner.review(runId, decisions),
       recover: (runId) => graphRunner.recover(runId),
+      deleteThread: (runId) => graphRunner.deleteThread(runId),
       async read(runId) {
         const snapshot = await graphRunner.read(runId);
         const mine = gate;
@@ -460,6 +461,7 @@ describe("GET /runs/:id/events", () => {
       answer: (runId, answers) => graphRunner.answer(runId, answers),
       review: (runId, decisions) => graphRunner.review(runId, decisions),
       recover: (runId) => graphRunner.recover(runId),
+      deleteThread: (runId) => graphRunner.deleteThread(runId),
       async read(runId) {
         const snapshot = await graphRunner.read(runId);
         reached();

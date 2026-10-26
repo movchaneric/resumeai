@@ -6,6 +6,7 @@ import { createPostgresCheckpointer } from "@/graph/checkpointer.js";
 import { LangGraphRunner } from "@/graph/runner.js";
 import { LangChainLlmClient } from "@/llm/langChainLlmClient.js";
 import { JobProfileStore } from "@/stores/jobProfiles.js";
+import { RunsService } from "@/services/runs.js";
 import { RunStore } from "@/stores/runs.js";
 import { InProcessRunEvents } from "@/utils/runEvents.js";
 import { setupTracing } from "@/utils/tracing.js";
@@ -23,10 +24,14 @@ const checkpointer = createPostgresCheckpointer(config.databaseUrl);
 await checkpointer.setup();
 const events = new InProcessRunEvents();
 const graphRunner = new LangGraphRunner({ llm, judgeLlm, judgeModel: config.llm.judgeModel, jobProfileCache, checkpointer }, store, events);
-const app = createApp({ store, config, graphRunner, events });
+const runsDeps = { store, config, graphRunner, events };
+const runsService = new RunsService(runsDeps);
+const app = createApp(runsDeps, runsService);
 
 const server = app.listen(config.port, () => {
   console.log(`backend listening on :${config.port}`);
+  // In the background, so requests are accepted while cut-off Runs are carried on; it never rejects, but a bug must not crash the server.
+  runsService.recoverRuns().catch((error: unknown) => console.error("Run recovery failed", error));
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

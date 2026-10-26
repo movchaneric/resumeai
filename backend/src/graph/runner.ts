@@ -15,8 +15,17 @@ export interface StatusWriter {
 
 const statusOf = (node: string): RunStatus | undefined => (NODE_STATUS as Record<string, RunStatus>)[node];
 
-function toSnapshot(values: Partial<RunStateValues>): RunSnapshot {
+/** Where the graph is stopped, from the nodes it runs next: `collect_answers` waits for Answers, `review` for the user. */
+function pausedAtOf(next: readonly string[]): RunSnapshot["pausedAt"] {
+  if (next.includes("collect_answers")) return "answers";
+  // Nothing left to run also reads as review: the graph only ends after review, which no slice reaches yet.
+  if (next.length === 0 || next.includes("review")) return "review";
+  return null;
+}
+
+function toSnapshot(values: Partial<RunStateValues>, next: readonly string[]): RunSnapshot {
   return {
+    pausedAt: pausedAtOf(next),
     jobProfile: values.jobProfile ?? null,
     cv: values.cv ?? null,
     coverageBefore: values.coverageBefore ?? null,
@@ -84,6 +93,14 @@ export class LangGraphRunner implements GraphRunner {
     return withSessionSpan("answers", runId, () => this.runUntilPause(runId, new Command({ resume: answers })));
   }
 
+  /**
+   * Carries on a Run the process stopped in: runs the graph from its last checkpoint, with no new input, until the next
+   * pause or the end. The node that was cut off runs again from its start. Rejects with the original error, like `start`.
+   */
+  async recover(runId: RunId): Promise<RunSnapshot> {
+    return this.runUntilPause(runId, null);
+  }
+
   /** Runs the graph from `input` until it ends or pauses, and writes the status of the pause. */
   private async runUntilPause(runId: RunId, input: Parameters<RunGraph["invoke"]>[0]): Promise<RunSnapshot> {
     const config = { configurable: { thread_id: runId } };
@@ -95,7 +112,7 @@ export class LangGraphRunner implements GraphRunner {
       const state = await this.graph.getState(config);
       if (state.next.length > 0) await this.write(runId, statusOf(state.next[0]!) ?? "awaiting_review");
       this.events.publish(runId);
-      return toSnapshot(state.values);
+      return toSnapshot(state.values, state.next);
     } finally {
       this.lastWritten.delete(runId);
     }
@@ -103,6 +120,6 @@ export class LangGraphRunner implements GraphRunner {
 
   async read(runId: RunId): Promise<RunSnapshot | null> {
     const state = await this.graph.getState({ configurable: { thread_id: runId } });
-    return state.createdAt === undefined ? null : toSnapshot(state.values);
+    return state.createdAt === undefined ? null : toSnapshot(state.values, state.next);
   }
 }

@@ -910,7 +910,7 @@ describe("RunsService.submitAnswers", () => {
   ];
   const snapshot = {
     jobProfile: null, cv: null, coverageBefore: null, coverage: null, changes: [], scoreBefore: null, scoreAfter: null,
-    rejections: [], questions, userEvidence: [], confirmedGaps: [], rounds: 0, exitReason: null,
+    pausedAt: "answers", rejections: [], questions, userEvidence: [], confirmedGaps: [], rounds: 0, exitReason: null,
   } as unknown as RunSnapshot;
 
   /** A store (extended with the atomic claim) holding a Run in `status`, and a runner whose `answer` is a spy. */
@@ -923,7 +923,7 @@ describe("RunsService.submitAnswers", () => {
     };
     store.rows.set(runId, { id: runId, status, createdAt: now(), expiresAt: new Date(now().getTime() + 1000), exportPath: null, error: null });
     const answer = vi.fn<GraphRunner["answer"]>(async () => snapshot);
-    const graphRunner: GraphRunner = { start: async () => snapshot, answer, read: async () => snapshot };
+    const graphRunner: GraphRunner = { start: async () => snapshot, answer, recover: async () => snapshot, read: async () => snapshot };
     const tasks: (() => Promise<void>)[] = [];
     const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner, events: new InProcessRunEvents(), now, runInBackground: (t) => void tasks.push(t) });
     return { store, answer, tasks, service };

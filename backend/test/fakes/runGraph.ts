@@ -1,3 +1,4 @@
+import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import { createMemoryCheckpointer } from "@/graph/memoryCheckpointer.js";
 import { LangGraphRunner, type StatusWriter } from "@/graph/runner.js";
 import type { LlmClient } from "@/llm/llmClient.js";
@@ -12,9 +13,10 @@ export function makeGraphRunner(
   judgeLlm: LlmClient = llm,
   jobProfileCache: FakeJobProfileCache = new FakeJobProfileCache(),
   events: Pick<RunEvents, "publish"> = new InProcessRunEvents(),
+  checkpointer: BaseCheckpointSaver = createMemoryCheckpointer(),
 ): LangGraphRunner {
   return new LangGraphRunner(
-    { llm, judgeLlm, judgeModel: "test-judge", jobProfileCache, checkpointer: createMemoryCheckpointer() },
+    { llm, judgeLlm, judgeModel: "test-judge", jobProfileCache, checkpointer },
     statuses,
     events,
   );
@@ -31,6 +33,7 @@ export function skipQuestions(inner: GraphRunner): GraphRunner {
       return snapshot.questions.length > 0 && snapshot.exitReason === null ? inner.answer(input.runId, []) : snapshot;
     },
     answer: (runId, answers) => inner.answer(runId, answers),
+    recover: (runId) => inner.recover(runId),
     read: (runId) => inner.read(runId),
   };
 }

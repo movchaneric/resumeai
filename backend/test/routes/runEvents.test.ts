@@ -7,43 +7,20 @@ import { RunIdSchema, RunViewSchema, type RunId, type RunView } from "@resume-ai
 import request from "supertest";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Express } from "express";
-import type { z } from "zod";
 import { createApp } from "@/app.js";
 import { ExtractionError } from "@/extraction/errors.js";
-import type { LlmMessage } from "@/llm/llmClient.js";
 import { RunsService, type GraphRunner } from "@/services/runs.js";
 import { RunStore } from "@/stores/runs.js";
 import { loadConfig } from "@/utils/config.js";
 import { createPrisma } from "@/utils/db.js";
 import { InProcessRunEvents } from "@/utils/runEvents.js";
-import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
+import { GatedLlm } from "../fakes/gatedLlm.js";
 import { FakeJobProfileCache } from "../fakes/jobProfileCache.js";
 import { makeGraphRunner } from "../fakes/runGraph.js";
 import { coverageAnswer, extractedCv, extractedJob } from "../runFixtures.js";
 
 const cvFile = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf"));
 const JOB_DESCRIPTION = "We are hiring a backend developer with Node.js and PostgreSQL experience.";
-
-/** A fake model whose calls to a named step wait until the test releases them, so a Run can be held mid-flight. */
-class GatedLlm extends FakeLlmClient {
-  private readonly gates = new Map<string, Promise<void>>();
-
-  hold(name: string): () => void {
-    let release!: () => void;
-    this.gates.set(name, new Promise<void>((resolve) => (release = resolve)));
-    return release;
-  }
-
-  reset(): void {
-    this.gates.clear();
-    this.calls.length = 0;
-  }
-
-  override async structured<T>(schema: z.ZodType<T>, messages: LlmMessage[], options: { name: string }): Promise<T> {
-    await this.gates.get(options.name);
-    return super.structured(schema, messages, options);
-  }
-}
 
 /** The bus, plus a count of the subscriptions still open. */
 class CountingEvents extends InProcessRunEvents {
@@ -322,6 +299,7 @@ describe("GET /runs/:id/events", () => {
     const slowRead: GraphRunner = {
       start: (input) => graphRunner.start(input),
       answer: (runId, answers) => graphRunner.answer(runId, answers),
+      recover: (runId) => graphRunner.recover(runId),
       async read(runId) {
         const snapshot = await graphRunner.read(runId);
         const mine = gate;

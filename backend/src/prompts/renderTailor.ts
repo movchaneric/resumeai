@@ -30,7 +30,7 @@ function renderChange(change: Change): string {
 }
 
 /**
- * The tailor's user message: the CV with IDs, the Requirements not met first (must-haves first),
+ * The tailor's user message: the CV with IDs, the Requirements not met first (User Evidence first, then must-haves),
  * the met ones as context, then the User Evidence and earlier rejections with their reasons. Requirements with User
  * Evidence come first; Confirmed Gaps are left out. Pure.
  */
@@ -54,7 +54,7 @@ export function renderTailorInput({ cv, requirements: allRequirements, coverage,
 
   const parts = [
     `CV:\n${renderCv(cv)}`,
-    `Requirements not met (target these, must-haves first):\n${notMet.map(line).join("\n") || "(none)"}`,
+    `Requirements not met (target these: those with User Evidence first, then must-haves):\n${notMet.map(line).join("\n") || "(none)"}`,
     `Already met (context only, do not break these):\n${met.map(line).join("\n") || "(none)"}`,
   ];
   if (userEvidence.length > 0) {

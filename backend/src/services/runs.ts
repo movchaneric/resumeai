@@ -142,7 +142,7 @@ export class RunsService {
    * It never throws: it runs detached from the request, so a failure has nowhere else to go.
    */
   async runPipeline(input: StartRunInput): Promise<void> {
-    const { store, graphRunner } = this.deps;
+    const { graphRunner } = this.deps;
     const id = input.runId;
     try {
       try {
@@ -154,14 +154,7 @@ export class RunsService {
           if (result.exitReason !== null) span.setAttribute("exit_reason", result.exitReason);
         });
       } catch (error) {
-        const code: RunErrorCode = failureCode(error);
-        // Log the code, the error name and the issue count only. Messages and issues can quote CV values or
-        // model output, so they are not logged here (known open item: a safe failure log).
-        const name = error instanceof Error ? error.name : typeof error;
-        const issues = (error as { issues?: unknown } | null)?.issues;
-        const count = Array.isArray(issues) ? `, ${issues.length} issues` : "";
-        console.error(`Run ${id}: pipeline failed (${code}) ${name}${count}`);
-        await store.markFailed(id, code, FAILURE_MESSAGES[code]);
+        await this.recordFailure(id, "pipeline", error);
       }
     } catch (error) {
       console.error(`Run ${id}: could not store the pipeline outcome`, error);
@@ -189,17 +182,26 @@ export class RunsService {
     this.runInBackground(() => this.runResume(run.id, answers));
   }
 
+  /** Logs a failed background step and marks the Run failed with the matching code and message. */
+  private async recordFailure(id: RunId, label: "pipeline" | "resume", error: unknown): Promise<void> {
+    const code: RunErrorCode = failureCode(error);
+    // Log the code, the error name and the issue count only. Messages and issues can quote CV values or
+    // model output, so they are not logged here (known open item: a safe failure log).
+    const name = error instanceof Error ? error.name : typeof error;
+    const issues = (error as { issues?: unknown } | null)?.issues;
+    const count = Array.isArray(issues) ? `, ${issues.length} issues` : "";
+    console.error(`Run ${id}: ${label} failed (${code}) ${name}${count}`);
+    await this.deps.store.markFailed(id, code, FAILURE_MESSAGES[code]);
+  }
+
   /** The background resume: the graph runs on from the Answers to the next pause, or the failure is recorded on the Run. Never throws. */
   async runResume(id: RunId, answers: Answer[]): Promise<void> {
-    const { store, graphRunner } = this.deps;
+    const { graphRunner } = this.deps;
     try {
       try {
         await graphRunner.answer(id, answers);
       } catch (error) {
-        const code: RunErrorCode = failureCode(error);
-        const name = error instanceof Error ? error.name : typeof error;
-        console.error(`Run ${id}: resume failed (${code}) ${name}`);
-        await store.markFailed(id, code, FAILURE_MESSAGES[code]);
+        await this.recordFailure(id, "resume", error);
       }
     } catch (error) {
       console.error(`Run ${id}: could not store the resume outcome`, error);

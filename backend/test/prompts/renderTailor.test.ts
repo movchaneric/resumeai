@@ -85,7 +85,7 @@ describe("renderTailorInput with User Evidence and Confirmed Gaps", () => {
   });
 
   it("omits the User Evidence section when there is none", () => {
-    expect(renderTailorInput({ cv: cv(), requirements, coverage, rejections: [] })).not.toContain("User Evidence");
+    expect(renderTailorInput({ cv: cv(), requirements, coverage, rejections: [] })).not.toContain("User Evidence (");
   });
 
   it("targets Requirements with User Evidence first, ahead of the must-haves-first order", () => {

@@ -16,6 +16,11 @@ describe("selectQuestions", () => {
     ]);
   });
 
+  it("does not double the full stop when the Requirement text already ends in one", () => {
+    const requirement = RequirementSchema.parse({ id: "req1", text: "Thing 1. ", source: "Thing 1.", kind: "skill", importance: "must_have" });
+    expect(selectQuestions([requirement], [verdict(1, "unmet")])[0]?.text).toBe("The job asks for: Thing 1. Have you done this? Describe where and how.");
+  });
+
   it("skips nice-to-haves", () => {
     expect(selectQuestions([req(1, "nice_to_have")], [verdict(1, "unmet")])).toEqual([]);
   });

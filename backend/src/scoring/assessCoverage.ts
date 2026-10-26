@@ -32,7 +32,7 @@ const RETRY_INSTRUCTION =
 const CALL_NAME = "assess_coverage";
 
 /**
- * Coverage calls per judgement. One strict call can flip several Requirements at once (slice 18), so the first
+ * Coverage calls per judgement. One strict call can flip several Requirements at once (#18), so the first
  * Coverage and every re-judge make this many calls in parallel and keep the median verdict per Requirement.
  * Odd, so that 3 calls give the majority verdict whenever there is one.
  */
@@ -72,7 +72,6 @@ const CoverageAnswerSchema = z.object({
 }) satisfies z.ZodType<CoverageAnswer>;
 
 const asLines = (issues: string[]) => issues.map((i) => `- ${i}`).join("\n");
-
 
 type CallResult = { coverage: Coverage[]; downgrades: number };
 

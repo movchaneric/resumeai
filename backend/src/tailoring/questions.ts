@@ -18,6 +18,6 @@ export function selectQuestions(requirements: Requirement[], coverage: Coverage[
     .map(({ requirement }, i) => ({
       id: QuestionIdSchema.parse(`q${i + 1}`),
       requirementId: requirement.id,
-      text: `The job asks for: ${requirement.text}. Have you done this? Describe where and how.`,
+      text: `The job asks for: ${requirement.text.replace(/[\s.]+$/, "")}. Have you done this? Describe where and how.`,
     }));
 }

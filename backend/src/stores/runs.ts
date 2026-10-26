@@ -99,6 +99,16 @@ export class RunStore {
     return count === 1;
   }
 
+  /** The ids of the Runs that have expired at `now` and whose status is not in `busy`, oldest first. */
+  async listExpiredIds(now: Date, busy: RunStatus[]): Promise<RunId[]> {
+    const rows = await this.prisma.run.findMany({
+      where: { expiresAt: { lte: now }, status: { notIn: busy } },
+      select: { id: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
+    return rows.map((row) => row.id as RunId);
+  }
+
   async delete(id: RunId): Promise<void> {
     await this.prisma.run.deleteMany({ where: { id } });
   }

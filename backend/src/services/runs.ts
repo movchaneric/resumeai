@@ -142,7 +142,7 @@ function setOutcomeAttributes(span: Span, result: RunSnapshot): void {
 const STREAM_END_STATUSES: ReadonlySet<RunView["status"]> = new Set(["awaiting_answers", "awaiting_review", "failed", "interrupted", "completed"]);
 
 /** The statuses in which the graph runner may still write checkpoints for the Run. */
-const BUSY_STATUSES: RunStatus[] = ["parsing", "extracting", "tailoring"];
+export const BUSY_STATUSES: RunStatus[] = ["parsing", "extracting", "tailoring"];
 
 /** What a client connection gives `openRunStream`: `send` writes one view, `close` ends the stream. */
 export type RunStreamSink = { send: (view: RunView) => void; close: () => void };

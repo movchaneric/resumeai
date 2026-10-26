@@ -32,4 +32,10 @@ export class JobProfileStore {
       skipDuplicates: true,
     });
   }
+
+  /** Deletes the rows that have expired, in one statement, and returns how many there were. */
+  async deleteExpired(): Promise<number> {
+    const { count } = await this.prisma.jobProfile.deleteMany({ where: { expiresAt: { lte: this.now() } } });
+    return count;
+  }
 }

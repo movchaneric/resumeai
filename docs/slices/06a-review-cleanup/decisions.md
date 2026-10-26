@@ -41,7 +41,7 @@ Spec: #42 "Slice 6a: Review and cleanup"; tickets #43 to #46.
 - **In the backend process** (one instance assumed, as in 5b), at startup and every `SWEEP_INTERVAL_MS` (default 3 600 000). Rejected: `pg_cron`, an external cron job.
 - **Startup order:** `listen` → `recoverRuns` → first sweep → interval. Recovery already skips expired Runs; sweeping after it means a recovered Run is never deleted halfway through.
 - **Deletes:** expired Runs (row and checkpoints; exported files from 6b), expired `job_profiles` rows, and **orphaned checkpoint threads** (a `thread_id` with no `runs` row), so ADR 0002's promise holds even after a partial failure.
-- **Skips** a Run in `extracting` or `tailoring` even if it has expired (same rule as `DELETE`).
+- **Skips** an expired busy Run (`parsing`, `extracting`, `tailoring`) only if it was created since this process started, because this process may be running it. An expired busy Run created before the process started is stale (recovery skips expired Runs), so the sweep deletes it; otherwise it would never be deleted. `DELETE` still refuses every busy Run. (Found in review of #46.)
 - Deletes go through the checkpointer's `deleteThread` where possible; raw SQL only for the orphan scan, and it lives in a store.
 - **Shutdown** clears the interval and waits for a sweep in progress.
 

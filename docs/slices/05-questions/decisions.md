@@ -2,7 +2,7 @@
 
 Settled in a grilling session (2026-10-26). All decisions are owner-approved. Terms follow `CONTEXT.md`, which was updated in the same session.
 
-Spec: see the "Slice 5a: Questions" issue; tickets are linked from it.
+Spec: [#30](https://github.com/movchaneric/resumeai/issues/30) "Slice 5a: Questions"; tickets #31 to #34 are linked from it.
 
 ## Scope
 - **Slice 5 is split in two.**
@@ -66,3 +66,17 @@ extract → assess_coverage → questions ──(none to ask)──→ begin_rou
   | 5a-4 | Tailor, stage-1 checks and claim check use User Evidence; Gaps excluded from targeting; exit router `ceiling` on Gaps; review summary lists Gaps | 5a-2 |
 
 - **Proof:** a manual Run on the owner's CV and job 1, answering 2 or 3 Questions: at least one Change citing User Evidence is accepted and the score rises.
+
+## After implementation
+Written at the end of the slice (2026-10-26).
+
+### How it was built
+- 4 tickets (#31 to #34), each done by a Sonnet agent in its own worktree, made from the slice branch. 5a-3 and 5a-4 ran in parallel after 5a-2.
+- Opus checked each ticket by red-checking before a `--no-ff` merge. 5a-3 gained a real-Postgres test for `RunStore.claimStatus`, including a simultaneous claim.
+- Review fixes in `01174a4` (`review.md`).
+
+### Proof
+- Run on the owner's CV and job 1, on `gemini-3.5-flash-lite` (the OpenAI account ran out of credits; see `retrospective.md`). The Run paused with 4 Questions; 2 were answered (duration and ownership).
+- Result: `awaiting_review`, exit `ceiling` after 3 of 3 rounds. One Change was accepted, citing `ue2` (the ownership answer) for the "work independently and take ownership" Requirement. The score rose from **68 to 75**. No Change was made from the "2 years" answer to the "3+ years" Requirement, as expected.
+- A duplicate submit got 409.
+- The scores are not comparable with the gpt-4.1 numbers from #18; the proof checks the flow, not calibration.

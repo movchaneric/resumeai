@@ -5,6 +5,10 @@ import { randomUUID } from "node:crypto";
 import type { Change, Coverage, Requirement, RunId } from "@resume-ai/shared";
 import { FakeLlmClient } from "./fakes/fakeLlmClient.js";
 import { extractedCv } from "./runFixtures.js";
+import { COVERAGE_VOTES } from "@/scoring/assessCoverage.js";
+
+/** One Coverage judgement is COVERAGE_VOTES parallel calls. */
+const COVERAGE = Array.from({ length: COVERAGE_VOTES }, () => "assess_coverage");
 import {
   formatChange,
   formatCoverage,
@@ -156,10 +160,10 @@ describe("runTailorInMemory", () => {
     const llm = new FakeLlmClient().enqueue("extract_cv", extractedCv);
     const judge = new FakeLlmClient()
       .enqueue("extract_job_profile", job)
-      .enqueue("assess_coverage", { verdicts: [verdict("req1", "met", ["exp1.b1"]), verdict("req2", "unmet", [])] })
+      .enqueueVoted("assess_coverage", { verdicts: [verdict("req1", "met", ["exp1.b1"]), verdict("req2", "unmet", [])] })
       .enqueue("tailor", { changes: [modelChange] })
       .enqueue("claim_check", { verdicts: [{ id: "r1.c1", reason: "ok", verdict: "supported" }] })
-      .enqueue("assess_coverage", { verdicts: [verdict("req2", "met", ["exp1.b1"])] });
+      .enqueueVoted("assess_coverage", { verdicts: [verdict("req2", "met", ["exp1.b1"])] });
     const rounds: number[] = [];
     const snapshot = await runTailorInMemory({
       runId: id(), llm, judgeLlm: judge, cvText: CV_TEXT, jobDescriptionText: "made-up job",
@@ -167,7 +171,7 @@ describe("runTailorInMemory", () => {
     });
 
     expect(llm.calls.map((c) => c.name)).toEqual(["extract_cv"]);
-    expect(judge.calls.map((c) => c.name)).toEqual(["extract_job_profile", "assess_coverage", "tailor", "claim_check", "assess_coverage"]);
+    expect(judge.calls.map((c) => c.name)).toEqual(["extract_job_profile", ...COVERAGE, "tailor", "claim_check", ...COVERAGE]);
     expect(rounds).toEqual([1]);
     expect(snapshot.exitReason).toBe("target_reached");
     expect(snapshot.scoreAfter).toBeGreaterThan(snapshot.scoreBefore!);

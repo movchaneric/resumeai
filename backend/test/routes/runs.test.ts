@@ -11,6 +11,7 @@ import { RunStore } from "@/stores/runs.js";
 import { ExtractionError } from "@/extraction/errors.js";
 import { LlmSchemaError } from "@/llm/llmClient.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
+import { FakeJobProfileCache } from "../fakes/jobProfileCache.js";
 import { makeGraphRunner } from "../fakes/runGraph.js";
 import { coverageAnswer, extractedCv, extractedJob } from "../runFixtures.js";
 
@@ -30,7 +31,8 @@ const settle = async () => {
   await Promise.all(tasks);
   tasks = [];
 };
-const graphRunner = makeGraphRunner(store, llm);
+const jobProfileCache = new FakeJobProfileCache();
+const graphRunner = makeGraphRunner(store, llm, llm, jobProfileCache);
 const app = createApp({ store, config, graphRunner, runInBackground });
 
 const JOB_DESCRIPTION = "We are hiring a backend developer with Node.js and PostgreSQL experience.";
@@ -44,6 +46,7 @@ const upload = (file: string | null, jobDescription: string | null = JOB_DESCRIP
 
 beforeEach(async () => {
   await store.deleteAll();
+  jobProfileCache.rows.clear();
   tasks = [];
   llm.calls.length = 0;
 });
@@ -93,7 +96,7 @@ describe("POST /runs", () => {
   });
 
   it("strips NUL characters instead of failing on them", async () => {
-    llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueue("assess_coverage", coverageAnswer);
+    llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueueVoted("assess_coverage", coverageAnswer);
     const res = await upload("cv.pdf", "Backend\u0000 developer");
     expect(res.status).toBe(201);
     await settle();
@@ -123,7 +126,7 @@ describe("GET /runs/:id", () => {
   });
 
   it("shows the Run as awaiting_review, with its scores and requirements, once the pipeline has finished", async () => {
-    llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueue("assess_coverage", coverageAnswer);
+    llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueueVoted("assess_coverage", coverageAnswer);
     const { body } = await upload("cv.pdf");
     await settle();
 
@@ -157,7 +160,7 @@ describe("GET /runs/:id", () => {
     llm
       .enqueue("extract_job_profile", extractedJob)
       .enqueue("extract_cv", extractedCv)
-      .enqueue("assess_coverage", new LlmSchemaError("bad", ["a: wrong"]), new LlmSchemaError("bad", ["b: wrong"]));
+      .enqueueVoted("assess_coverage", new LlmSchemaError("bad", ["a: wrong"]), new LlmSchemaError("bad", ["b: wrong"]));
     const { body } = await upload("cv.pdf");
     await settle();
 

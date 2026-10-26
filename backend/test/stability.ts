@@ -1,33 +1,47 @@
 // Dev script: measures why the Match Score varies on identical input (issue #18). Calls a real model.
-// Run with `pnpm --filter backend stability <cv-file> <job-description-file> [--runs N] [--coverage-runs M] [--parallel K] [--out <file>]`.
+// Run with `pnpm --filter backend stability <cv-file> <job-description-file> [--runs N] [--coverage-runs M] [--parallel K] [--votes N] [--out <file>] [--no-cache] [--dump-evidence]`.
 // The markdown report goes to stdout (and to --out); progress goes to stderr. The report never contains CV text.
 import "dotenv/config";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { Cv, RunId } from "@resume-ai/shared";
+import type { Cv, JobProfile, RunId } from "@resume-ai/shared";
 import { extractCv } from "@/extraction/extractCv.js";
 import { extractJobProfile } from "@/extraction/extractJobProfile.js";
-import { assessCoverage } from "@/scoring/assessCoverage.js";
+import { resolveJobProfile } from "@/graph/jobProfileCache.js";
+import { JobProfileStore } from "@/stores/jobProfiles.js";
+import { createPrisma } from "@/utils/db.js";
+import { assessCoverage, COVERAGE_VOTES } from "@/scoring/assessCoverage.js";
 import { matchScore } from "@/scoring/matchScore.js";
 import { LangChainLlmClient } from "@/llm/langChainLlmClient.js";
 import { parseCv } from "@/parsing/parseCv.js";
 import { loadConfig } from "@/utils/config.js";
 import { setupTracing } from "@/utils/tracing.js";
 import { runInPipelineSpan } from "./extractReport.js";
-import { mapPool, parseStabilityArgs, renderReport, type CoverageRun, type EndToEndRun } from "./stabilityReport.js";
+import { cvShape, mapPool, parseStabilityArgs, renderReport, type CoverageRun, type EndToEndRun } from "./stabilityReport.js";
 
-const USAGE = `Usage: pnpm --filter backend stability <cv-file> <job-description-file> [--runs N] [--coverage-runs M] [--parallel K] [--out <file>]
+const USAGE = `Usage: pnpm --filter backend stability <cv-file> <job-description-file> [--runs N] [--coverage-runs M] [--parallel K] [--votes N] [--out <file>] [--no-cache] [--dump-evidence]
 
   <cv-file>               PDF or DOCX
   <job-description-file>  plain text
   --runs N                end-to-end runs for experiments A and B (default 5)
   --coverage-runs M       Coverage-only runs for experiment C, on run 1's Job Profile and CV (default 10)
+  --votes N               Coverage calls per judgement, in experiment C (default ${COVERAGE_VOTES}, the product default). The run keeps the
+                          median verdict per Requirement (unmet < partially_met < met): the majority when there is one,
+                          partially_met when three calls all differ, the lower verdict of two. Evidence IDs come from the
+                          first call giving the winning verdict. --votes 1 is one call, no vote. Experiment A always
+                          uses the product default
   --parallel K            at most K model calls in flight (default 3)
   --out <file>            also write the markdown report to this file
+  --no-cache              extract a fresh Job Profile in every run of experiment A (the behaviour before the cache).
+                          Without it, experiment A reads the Job Profile through the real cache (needs the database):
+                          the first run misses and extracts, the later runs hit. A profile cached by an earlier
+                          run of this script, less than 7 days ago, is hit by run 1 too.
+  --dump-evidence         add a section listing, for each flipped Requirement, the Item IDs each Coverage run cited
+                          and whether met and partially_met runs cite the same Items (IDs only, no reasons or CV text)
 
 Paths are relative to the directory you ran pnpm from (pnpm sets INIT_CWD), or absolute.
-Reads backend/.env. DATABASE_URL is not needed; a placeholder is used when it is unset.
+Reads backend/.env. DATABASE_URL is needed unless --no-cache is given (a placeholder is used then).
 The report holds Requirement text and Item IDs only, never CV text.`;
 
 const base = process.env.INIT_CWD ?? process.cwd();
@@ -41,7 +55,7 @@ async function main(): Promise<number> {
     console.error(USAGE);
     return 1;
   }
-  const { cvArg, jdArg, runs, coverageRuns, parallel, out } = parsed;
+  const { cvArg, jdArg, runs, coverageRuns, parallel, votes, out, noCache, dumpEvidence } = parsed;
 
   let cvBuffer: Buffer;
   let jdText: string;
@@ -53,11 +67,17 @@ async function main(): Promise<number> {
     return 1;
   }
 
-  process.env.DATABASE_URL ??= "postgresql://unused:unused@localhost:5432/unused";
+  if (noCache) process.env.DATABASE_URL ??= "postgresql://unused:unused@localhost:5432/unused";
   const config = loadConfig();
   const provider = setupTracing(config);
   const llm = new LangChainLlmClient(config.llm);
   const judgeLlm = new LangChainLlmClient({ ...config.llm, model: config.llm.judgeModel });
+  const prisma = noCache ? undefined : createPrisma(config.databaseUrl);
+  const jobProfileCache = prisma ? new JobProfileStore(prisma, { ttlMs: config.runTtlMs }) : undefined;
+  const profileOf = (): Promise<JobProfile> =>
+    jobProfileCache
+      ? resolveJobProfile({ cache: jobProfileCache, judgeLlm, judgeModel: config.llm.judgeModel }, jdText)
+      : extractJobProfile(judgeLlm, jdText);
   console.error(`models: extraction ${config.llm.model} (Job Profile ${config.llm.judgeModel}), judge ${config.llm.judgeModel}`);
 
   const start = performance.now();
@@ -68,15 +88,18 @@ async function main(): Promise<number> {
     return await runInPipelineSpan(randomUUID() as RunId, async () => {
       const cvText = await parseCv(cvBuffer, config.limits);
 
+      // With the cache, run 1 must be the one that misses: fill the cache before the parallel runs start.
+      if (jobProfileCache) await profileOf();
+
       let doneA = 0;
       const cvs: (Cv | undefined)[] = [];
       const endToEnd = await mapPool<EndToEndRun>(runs, parallel, async (i) => {
         try {
-          const { requirements } = await extractJobProfile(judgeLlm, jdText);
-          const { cv } = await extractCv(llm, cvText);
+          const { requirements } = await profileOf();
+          const { cv, softMismatches } = await extractCv(llm, cvText);
           const { coverage } = await assessCoverage(judgeLlm, cv as Cv, requirements);
           cvs[i] = cv as Cv;
-          return { ok: true, score: matchScore(requirements, coverage), requirements, coverage };
+          return { ok: true, score: matchScore(requirements, coverage), requirements, coverage, cvShape: cvShape(cv as Cv), softMismatches };
         } catch (error) {
           return { ok: false, error: errorName(error) };
         } finally {
@@ -91,10 +114,11 @@ async function main(): Promise<number> {
 
       let coverageOnly: CoverageRun[] = [];
       if (baseRequirements && baseCv) {
+        // Each run makes `votes` Coverage calls at once, so the pool runs about parallel / votes runs at a time.
         let doneC = 0;
-        coverageOnly = await mapPool<CoverageRun>(coverageRuns, parallel, async () => {
+        coverageOnly = await mapPool<CoverageRun>(coverageRuns, Math.max(1, Math.floor(parallel / votes)), async () => {
           try {
-            const { coverage } = await assessCoverage(judgeLlm, baseCv, baseRequirements);
+            const { coverage } = await assessCoverage(judgeLlm, baseCv, baseRequirements, { votes });
             return { ok: true, coverage, score: matchScore(baseRequirements, coverage) };
           } catch (error) {
             return { ok: false, error: errorName(error) };
@@ -104,7 +128,7 @@ async function main(): Promise<number> {
         });
       } else console.error("C skipped: no end-to-end run succeeded");
 
-      const report = renderReport({ runs, coverageRuns, endToEnd, baseRequirements, coverageOnly });
+      const report = renderReport({ runs, coverageRuns, votes, endToEnd, baseRequirements, coverageOnly, dumpEvidence });
       console.log(report);
       if (out) {
         writeFileSync(resolve(base, out), report + "\n");
@@ -117,6 +141,7 @@ async function main(): Promise<number> {
     return 1;
   } finally {
     await provider?.shutdown().catch(() => undefined);
+    await prisma?.$disconnect().catch(() => undefined);
   }
 }
 

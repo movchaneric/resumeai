@@ -22,3 +22,14 @@ model Run {
   @@map("runs")
   @@schema("app")
 }
+
+// A Job Profile cached per Job Description (ADR 0007). The key is a hash, so the raw Job Description text is never stored.
+model JobProfile {
+  key       String   @id
+  profile   Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  @@map("job_profiles")
+  @@schema("app")
+}

@@ -29,7 +29,7 @@ The raw text of the target job posting supplied by the candidate.
 _Avoid_: JD, posting, vacancy
 
 **Job Profile**:
-The Job Description in structured form: title, company, and its list of Requirements.
+The Job Description in structured form: title, company, and its list of Requirements. It is cached per Job Description text (ADR 0007), so every Run on the same text gets the same Requirements.
 _Avoid_: Parsed job, job data
 
 **Run**:
@@ -65,11 +65,15 @@ The user's reply to a Question: either a description of their experience, which 
 _Avoid_: Response, input
 
 **Requirement**:
-A single skill, qualification, or responsibility extracted from the Job Description, marked must-have or nice-to-have.
+A single skill, qualification, responsibility or Soft Skill extracted from the Job Description, marked must-have or nice-to-have.
 _Avoid_: Keyword, criterion
 
+**Soft Skill**:
+A Requirement (kind `soft_skill`) that asks for a behaviour or way of working, such as ownership, attention to detail, collaboration or iterating quickly, rather than a tool, task or duty. Its Coverage is met or unmet, never partially met.
+_Avoid_: Trait, quality, people skill
+
 **Requirement Coverage**:
-A judgment of how well the CV satisfies one Requirement (met, partially met, unmet), with the CV evidence cited. A Requirement is met only when an Item shows it in use; a Claim alone makes it partially met at most, except for a language, which a Claim can meet. A duration ("3+ years") that the cited Items' dates cannot prove is partially met.
+A judgment of how well the CV satisfies one Requirement (met, partially met, unmet), with the CV evidence cited. A Requirement is met only when an Item shows it in use; a Claim alone makes it partially met at most, except for a language, which a Claim can meet. A duration ("3+ years") that the cited Items' dates cannot prove is partially met. A Soft Skill is met only when an Item describes the behaviour; otherwise it is unmet.
 _Avoid_: Match, hit
 
 **Claim**:
@@ -77,5 +81,5 @@ A mention of a skill or quality in the candidate's skills list or summary, witho
 _Avoid_: Keyword, buzzword, self-reported skill
 
 **Match Score**:
-A reproducible number from 0 to 100, aggregated deterministically from all Requirement Coverage verdicts, weighting must-haves above nice-to-haves and responsibilities below the other kinds of Requirement. It is not an ATS score and is not keyword-based.
+A reproducible number from 0 to 100, aggregated deterministically from all Requirement Coverage verdicts, weighting must-haves above nice-to-haves, and responsibilities and Soft Skills below the other kinds of Requirement. It is not an ATS score and is not keyword-based.
 _Avoid_: ATS score, rating, fit

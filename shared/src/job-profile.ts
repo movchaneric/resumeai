@@ -8,6 +8,7 @@ export const RequirementKindSchema = z.enum([
   "certification",
   "language",
   "responsibility",
+  "soft_skill",
   "other",
 ]);
 export type RequirementKind = z.infer<typeof RequirementKindSchema>;

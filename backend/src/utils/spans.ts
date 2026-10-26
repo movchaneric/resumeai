@@ -35,3 +35,8 @@ export async function withSpan<T>(
 export async function withSessionSpan<T>(name: string, sessionId: string, fn: (span: Span) => Promise<T>): Promise<T> {
   return withSpan(name, fn, { attributes: { [SemanticConventions.SESSION_ID]: sessionId } });
 }
+
+/** Sets an attribute on the span that is active now, if there is one (a no-op otherwise). */
+export function setActiveSpanAttribute(key: string, value: string | number | boolean): void {
+  trace.getActiveSpan()?.setAttribute(key, value);
+}

@@ -12,6 +12,10 @@ import { LlmSchemaError, LlmUnavailableError } from "@/llm/llmClient.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
 import { makeGraphRunner } from "../fakes/runGraph.js";
 import { coverageAnswer, extractedCv, extractedJob } from "../runFixtures.js";
+import { COVERAGE_VOTES } from "@/scoring/assessCoverage.js";
+
+/** One Coverage judgement is COVERAGE_VOTES parallel calls. */
+const COVERAGE = Array.from({ length: COVERAGE_VOTES }, () => "assess_coverage");
 
 const cv = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf"));
 const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" });
@@ -60,7 +64,7 @@ function setup(now = () => new Date(), judgeLlm?: FakeLlmClient) {
 
 /** Queues a full successful pipeline: extraction, then the first Coverage. */
 function enqueueHappyPath(llm: FakeLlmClient) {
-  llm.enqueue("extract_job_profile", JOB_PROFILE).enqueue("extract_cv", extractedCv).enqueue("assess_coverage", COVERAGE_ANSWER);
+  llm.enqueue("extract_job_profile", JOB_PROFILE).enqueue("extract_cv", extractedCv).enqueueVoted("assess_coverage", COVERAGE_ANSWER);
 }
 
 const createExtractableRun = (ctx: ReturnType<typeof setup>) => ctx.service.createRun({ cv, jobDescription: "Backend developer" });
@@ -137,14 +141,14 @@ describe("RunsService", () => {
     });
 
     it("sends the Job Profile extraction and Coverage to judgeLlm and the CV extraction to llm", async () => {
-      const judgeLlm = new FakeLlmClient().enqueue("extract_job_profile", JOB_PROFILE).enqueue("assess_coverage", COVERAGE_ANSWER);
+      const judgeLlm = new FakeLlmClient().enqueue("extract_job_profile", JOB_PROFILE).enqueueVoted("assess_coverage", COVERAGE_ANSWER);
       const ctx = setup(undefined, judgeLlm);
       ctx.llm.enqueue("extract_cv", extractedCv);
       await createExtractableRun(ctx);
       await ctx.settle();
 
       expect(ctx.llm.calls.map((c) => c.name)).toEqual(["extract_cv"]);
-      expect(judgeLlm.calls.map((c) => c.name)).toEqual(["extract_job_profile", "assess_coverage"]);
+      expect(judgeLlm.calls.map((c) => c.name)).toEqual(["extract_job_profile", ...COVERAGE]);
     });
 
     it("uses llm for Coverage when no judge client is given", async () => {
@@ -152,7 +156,7 @@ describe("RunsService", () => {
       enqueueHappyPath(ctx.llm);
       await createExtractableRun(ctx);
       await ctx.settle();
-      expect(ctx.llm.calls.map((c) => c.name)).toEqual(["extract_job_profile", "extract_cv", "assess_coverage"]);
+      expect(ctx.llm.calls.map((c) => c.name)).toEqual(["extract_job_profile", "extract_cv", ...COVERAGE]);
     });
 
     it("ends at awaiting_review with zero rounds when every Requirement is met: before equals after, no Changes, target_reached", async () => {
@@ -203,7 +207,7 @@ describe("RunsService", () => {
           ],
         })
         .enqueue("extract_cv", extractedCv)
-        .enqueue("assess_coverage", {
+        .enqueueVoted("assess_coverage", {
           verdicts: [
             { requirementId: "req3", reason: "No Docker.", evidenceIds: [], verdict: "unmet" },
             { requirementId: "req1", reason: "Built Node.js services.", evidenceIds: ["exp1.b1"], verdict: "met" },
@@ -258,7 +262,7 @@ describe("RunsService", () => {
       ctx.llm
         .enqueue("extract_job_profile", JOB_PROFILE)
         .enqueue("extract_cv", extractedCv)
-        .enqueue("assess_coverage", new LlmSchemaError("bad", ["a: wrong"]), new LlmSchemaError("bad", ["b: wrong"]));
+        .enqueueVoted("assess_coverage", new LlmSchemaError("bad", ["a: wrong"]), new LlmSchemaError("bad", ["b: wrong"]));
       const id = await createExtractableRun(ctx);
       const spy = vi.spyOn(console, "error").mockImplementation(() => {});
       await ctx.settle();
@@ -279,7 +283,7 @@ describe("RunsService", () => {
       ctx.llm
         .enqueue("extract_job_profile", JOB_PROFILE)
         .enqueue("extract_cv", extractedCv)
-        .enqueue("assess_coverage", new LlmUnavailableError("model down"));
+        .enqueueVoted("assess_coverage", new LlmUnavailableError("model down"));
       const id = await createExtractableRun(ctx);
       await ctx.settle();
 
@@ -421,7 +425,7 @@ describe("RunsService tailoring round", () => {
   function tailoringSetup(judge = new FakeLlmClient()) {
     const ctx = setup(undefined, judge);
     ctx.llm.enqueue("extract_cv", extractedCv);
-    judge.enqueue("extract_job_profile", THREE_REQS).enqueue("assess_coverage", firstCoverage);
+    judge.enqueue("extract_job_profile", THREE_REQS).enqueueVoted("assess_coverage", firstCoverage);
     return { ...ctx, judge };
   }
   const finish = async (ctx: ReturnType<typeof tailoringSetup>) => {
@@ -437,7 +441,7 @@ describe("RunsService tailoring round", () => {
     ctx.judge
       .enqueue("tailor", { changes: [reword, addSkill] })
       .enqueue("claim_check", { verdicts: [verdict("r1.c1", "supported"), verdict("r1.c2", "supported")] })
-      .enqueue("assess_coverage", { verdicts: [{ requirementId: "req2", reason: "Shown now.", evidenceIds: ["exp1.b1"], verdict: "met" }] })
+      .enqueueVoted("assess_coverage", { verdicts: [{ requirementId: "req2", reason: "Shown now.", evidenceIds: ["exp1.b1"], verdict: "met" }] })
       .enqueue("tailor", { changes: [] }, { changes: [] });
     const view = await finish(ctx);
 
@@ -461,11 +465,11 @@ describe("RunsService tailoring round", () => {
     ctx.judge
       .enqueue("tailor", { changes: [addSkill] })
       .enqueue("claim_check", { verdicts: [verdict("r1.c1", "supported")] })
-      .enqueue("assess_coverage", { verdicts: [{ requirementId: "req2", reason: "Shown now.", evidenceIds: ["exp1.b1"], verdict: "met" }] })
+      .enqueueVoted("assess_coverage", { verdicts: [{ requirementId: "req2", reason: "Shown now.", evidenceIds: ["exp1.b1"], verdict: "met" }] })
       .enqueue("tailor", { changes: [] }, { changes: [] });
     await finish(ctx);
     expect(ctx.llm.calls.map((c) => c.name)).toEqual(["extract_cv"]);
-    expect(ctx.judge.calls.map((c) => c.name)).toEqual(["extract_job_profile", "assess_coverage", "tailor", "claim_check", "assess_coverage", "tailor", "tailor"]);
+    expect(ctx.judge.calls.map((c) => c.name)).toEqual(["extract_job_profile", ...COVERAGE, "tailor", "claim_check", ...COVERAGE, "tailor", "tailor"]);
   });
 
   it("re-judges only the Requirements the valid Changes list", async () => {
@@ -473,10 +477,10 @@ describe("RunsService tailoring round", () => {
     ctx.judge
       .enqueue("tailor", { changes: [addSkill] })
       .enqueue("claim_check", { verdicts: [verdict("r1.c1", "supported")] })
-      .enqueue("assess_coverage", { verdicts: [{ requirementId: "req2", reason: "Shown now.", evidenceIds: ["exp1.b1"], verdict: "met" }] })
+      .enqueueVoted("assess_coverage", { verdicts: [{ requirementId: "req2", reason: "Shown now.", evidenceIds: ["exp1.b1"], verdict: "met" }] })
       .enqueue("tailor", { changes: [] }, { changes: [] });
     await finish(ctx);
-    const rejudge = JSON.stringify(ctx.judge.calls[4]!.messages);
+    const rejudge = JSON.stringify(ctx.judge.calls.filter((c) => c.name === "assess_coverage")[COVERAGE_VOTES]!.messages);
     expect(rejudge).toContain("req2");
     expect(rejudge).not.toContain("req1");
     expect(rejudge).not.toContain("req3");
@@ -496,7 +500,7 @@ describe("RunsService tailoring round", () => {
     expect(view.score.after).toBe(view.score.before);
     expect(view.cv.skills).toHaveLength(2);
     expect(view.iterations.used).toBe(2);
-    expect(ctx.judge.calls.map((c) => c.name)).toEqual(["extract_job_profile", "assess_coverage", "tailor", "claim_check", "tailor"]);
+    expect(ctx.judge.calls.map((c) => c.name)).toEqual(["extract_job_profile", ...COVERAGE, "tailor", "claim_check", "tailor"]);
   });
 
   it("never sends a stage-1 rejection to the claim check", async () => {
@@ -504,7 +508,7 @@ describe("RunsService tailoring round", () => {
     const unknownTarget = modelChange({ targetItemId: "exp9.b9", text: "Something" });
     ctx.judge.enqueue("tailor", { changes: [unknownTarget, addSkill] }).enqueue("claim_check", { verdicts: [verdict("r1.c2", "not_supported")] }).enqueue("tailor", { changes: [] });
     const view = await finish(ctx);
-    const prompt = JSON.stringify(ctx.judge.calls[3]!.messages);
+    const prompt = JSON.stringify(ctx.judge.calls.find((c) => c.name === "claim_check")!.messages);
     expect(prompt).toContain("r1.c2");
     expect(prompt).not.toContain("r1.c1");
     expect(view.exitReason).toBe("ceiling");
@@ -516,11 +520,11 @@ describe("RunsService tailoring round", () => {
     ctx.judge.enqueue("tailor", bad, bad);
     const view = await finish(ctx);
     expect(view.exitReason).toBe("ceiling");
-    expect(ctx.judge.calls.map((c) => c.name)).toEqual(["extract_job_profile", "assess_coverage", "tailor", "tailor"]);
+    expect(ctx.judge.calls.map((c) => c.name)).toEqual(["extract_job_profile", ...COVERAGE, "tailor", "tailor"]);
   });
 
   it("does not tailor at all when every Requirement is already met", async () => {
-    const judge = new FakeLlmClient().enqueue("extract_job_profile", JOB_PROFILE).enqueue("assess_coverage", coverageAnswer);
+    const judge = new FakeLlmClient().enqueue("extract_job_profile", JOB_PROFILE).enqueueVoted("assess_coverage", coverageAnswer);
     const ctx = setup(undefined, judge);
     ctx.llm.enqueue("extract_cv", extractedCv);
     const id = await createExtractableRun(ctx);
@@ -529,7 +533,7 @@ describe("RunsService tailoring round", () => {
     if (view.status !== "awaiting_review") throw new Error("expected awaiting_review");
     expect(view.exitReason).toBe("target_reached");
     expect(view.iterations.used).toBe(0);
-    expect(judge.calls.map((c) => c.name)).toEqual(["extract_job_profile", "assess_coverage"]);
+    expect(judge.calls.map((c) => c.name)).toEqual(["extract_job_profile", ...COVERAGE]);
   });
 
   it("stops at awaiting_review with exit reason error, keeping nothing, when the round fails", async () => {
@@ -594,13 +598,13 @@ describe("RunsService tailoring round", () => {
       const judge = new FakeLlmClient();
       const ctx = setup(undefined, judge);
       ctx.llm.enqueue("extract_cv", extractedCv);
-      judge.enqueue("extract_job_profile", THREE_REQS).enqueue("assess_coverage", first);
+      judge.enqueue("extract_job_profile", THREE_REQS).enqueueVoted("assess_coverage", first);
       return { ...ctx, judge };
     }
     /** One round: the tailor answer, the claim verdicts for r<round>.c<n>, and the re-judge answer. */
     function round(judge: FakeLlmClient, n: number, changes: unknown[], rejudge: unknown, claim: ("supported" | "not_supported")[] = changes.map(() => "supported")) {
       judge.enqueue("tailor", { changes }).enqueue("claim_check", { verdicts: claim.map((c, i) => verdict(`r${n}.c${i + 1}`, c, `claim reason ${n}.${i + 1}`)) });
-      if (rejudge !== null) judge.enqueue("assess_coverage", rejudge);
+      if (rejudge !== null) judge.enqueueVoted("assess_coverage", rejudge);
     }
 
     it("runs a second round and stops with target_reached when the score reaches 90", async () => {
@@ -800,7 +804,7 @@ describe("RunsService tailoring round", () => {
         const ctx = loopSetup(cov("met", "unmet", "unmet"));
         round(ctx.judge, 1, [addSkillFor("PostgreSQL", "req2")], rejudged("req2", "partially_met"));
         round(ctx.judge, 2, [addSkillFor("Docker", "req3")], null);
-        ctx.judge.enqueue("assess_coverage", new LlmSchemaError("bad", ["x"]), new LlmSchemaError("bad", ["x"]));
+        ctx.judge.enqueueVoted("assess_coverage", new LlmSchemaError("bad", ["x"]), new LlmSchemaError("bad", ["x"]));
         const view = await finish(ctx);
         expect(view.exitReason).toBe("error");
         expect(view.changes.map((c) => c.id)).toEqual(["r1.c1"]);
@@ -810,7 +814,7 @@ describe("RunsService tailoring round", () => {
       it("a failure in round 1 gives zero Changes and before = after", async () => {
         const ctx = loopSetup(cov("met", "unmet", "unmet"));
         round(ctx.judge, 1, [addSkillFor("PostgreSQL", "req2")], null);
-        ctx.judge.enqueue("assess_coverage", new LlmUnavailableError("down"));
+        ctx.judge.enqueueVoted("assess_coverage", new LlmUnavailableError("down"));
         const view = await finish(ctx);
         expect(view.exitReason).toBe("error");
         expect(view.changes).toEqual([]);

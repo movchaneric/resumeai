@@ -155,7 +155,7 @@ describe("coverage spans", () => {
       verdicts: [v("req1", "met", ["skill1"]), v("req2", "met", ["exp1"]), v("req3", "unmet", [])],
     };
     const llm = new FakeLlmClient().enqueue("assess_coverage", { verdicts: [] }, answer);
-    await assessCoverage(llm, cvValue(), reqs);
+    await assessCoverage(llm, cvValue(), reqs, { votes: 1 });
 
     const span = finished("assess_coverage");
     expect(span.attributes["coverage.retries"]).toBe(1);
@@ -168,9 +168,24 @@ describe("coverage spans", () => {
     expect(JSON.stringify(span.attributes)).not.toContain("secret");
   });
 
+  it("records votes, failed calls and disagreements on the one assess_coverage span", async () => {
+    const all = (verdict: "met" | "unmet") => ({
+      verdicts: reqs.map((r) => v(r.id, verdict, verdict === "met" ? ["exp1.b1"] : [])),
+    });
+    const llm = new FakeLlmClient().enqueue("assess_coverage", all("met"), all("unmet"), new LlmUnavailableError("down"));
+    await assessCoverage(llm, cvValue(), reqs);
+
+    const spans = exporter.getFinishedSpans().filter((s) => s.name === "assess_coverage");
+    expect(spans).toHaveLength(1);
+    expect(spans[0]!.attributes["coverage.votes"]).toBe(3);
+    expect(spans[0]!.attributes["coverage.failed_calls"]).toBe(1);
+    expect(spans[0]!.attributes["coverage.disagreements"]).toBe(reqs.length);
+    expect(spans[0]!.attributes["coverage.unmet"]).toBe(reqs.length);
+  });
+
   it("records zero retries on a clean first answer", async () => {
     const answer = { verdicts: reqs.map((r) => v(r.id, "unmet", [])) };
-    await assessCoverage(new FakeLlmClient().enqueue("assess_coverage", answer), cvValue(), reqs);
+    await assessCoverage(new FakeLlmClient().enqueue("assess_coverage", answer), cvValue(), reqs, { votes: 1 });
 
     expect(finished("assess_coverage").attributes["coverage.retries"]).toBe(0);
   });
@@ -181,7 +196,7 @@ describe("coverage spans", () => {
       new LlmSchemaError("bad", ["secret-issue-one: wrong"]),
       new LlmSchemaError("bad", ["secret-issue-two: wrong"]),
     );
-    await expect(assessCoverage(llm, cvValue(), reqs)).rejects.toBeInstanceOf(CoverageError);
+    await expect(assessCoverage(llm, cvValue(), reqs, { votes: 1 })).rejects.toBeInstanceOf(CoverageError);
 
     const span = finished("assess_coverage");
     expect(span.status.code).toBe(SpanStatusCode.ERROR);
@@ -206,7 +221,7 @@ describe("pipeline span", () => {
     const llm = new FakeLlmClient()
       .enqueue("extract_job_profile", profile)
       .enqueue("extract_cv", fullCv())
-      .enqueue("assess_coverage", COVERAGE_ANSWER, {
+      .enqueueVoted("assess_coverage", COVERAGE_ANSWER, {
         verdicts: [{ requirementId: "req1", reason: "Built it.", evidenceIds: ["exp1.b1"], verdict: "met" }],
       })
       .enqueue("tailor", {
@@ -252,7 +267,7 @@ describe("pipeline span", () => {
     const llm = new FakeLlmClient()
       .enqueue("extract_job_profile", profile)
       .enqueue("extract_cv", fullCv())
-      .enqueue("assess_coverage", COVERAGE_ANSWER, {
+      .enqueueVoted("assess_coverage", COVERAGE_ANSWER, {
         verdicts: [{ requirementId: "req1", reason: "Built it.", evidenceIds: ["exp1.b1"], verdict: "met" }],
       })
       .enqueue("tailor", {
@@ -297,7 +312,7 @@ describe("pipeline span", () => {
     const llm = new FakeLlmClient()
       .enqueue("extract_job_profile", profile)
       .enqueue("extract_cv", fullCv())
-      .enqueue("assess_coverage", COVERAGE_ANSWER)
+      .enqueueVoted("assess_coverage", COVERAGE_ANSWER)
       .enqueue("tailor", new LlmUnavailableError("down"));
     const store = fakeStore();
     const service = new RunsService({

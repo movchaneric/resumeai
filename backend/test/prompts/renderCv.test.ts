@@ -86,11 +86,20 @@ describe("renderCv", () => {
 });
 
 describe("renderRequirements", () => {
-  it("renders one line per Requirement with its ID and importance", () => {
+  it("renders one line per Requirement with its ID, kind and importance", () => {
     const requirements: Requirement[] = [
       RequirementSchema.parse({ id: "req1", text: "Node.js, 5+ years", source: "s", kind: "skill", importance: "must_have" }),
       RequirementSchema.parse({ id: "req2", text: "Docker", source: "s", kind: "skill", importance: "nice_to_have" }),
     ];
-    expect(renderRequirements(requirements)).toBe("[req1] (must-have) Node.js, 5+ years\n[req2] (nice-to-have) Docker");
+    expect(renderRequirements(requirements)).toBe(
+      "[req1] (skill, must-have) Node.js, 5+ years\n[req2] (skill, nice-to-have) Docker",
+    );
+  });
+
+  it("shows a soft skill's kind", () => {
+    const requirements: Requirement[] = [
+      RequirementSchema.parse({ id: "req1", text: "Ownership", source: "s", kind: "soft_skill", importance: "must_have" }),
+    ];
+    expect(renderRequirements(requirements)).toBe("[req1] (soft_skill, must-have) Ownership");
   });
 });

@@ -1,15 +1,20 @@
 import { describe, expect, it } from "vitest";
 import type { Coverage, Cv, Requirement } from "@resume-ai/shared";
+import { COVERAGE_VOTES } from "@/scoring/assessCoverage.js";
 import {
   analyseCoverage,
   listStability,
   mapPool,
+  evidenceSection,
   normaliseText,
   parseStabilityArgs,
   renderReport,
   scoreSwing,
   stats,
   summarise,
+  cvShape,
+  formatCvShape,
+  cvShapeSummary,
   type CoverageRun,
   type EndToEndRun,
 } from "./stabilityReport.js";
@@ -24,12 +29,32 @@ const reqs = [req("req1", "Node.js"), req("req2", "5+ years backend"), req("req3
 
 describe("parseStabilityArgs", () => {
   it("uses the defaults", () => {
-    expect(parseStabilityArgs(["cv.pdf", "jd.txt"])).toEqual({ ok: true, cvArg: "cv.pdf", jdArg: "jd.txt", runs: 5, coverageRuns: 10, parallel: 3 });
+    expect(parseStabilityArgs(["cv.pdf", "jd.txt"])).toEqual({ ok: true, cvArg: "cv.pdf", jdArg: "jd.txt", runs: 5, coverageRuns: 10, parallel: 3, votes: COVERAGE_VOTES });
   });
   it("reads the options in any position", () => {
     expect(parseStabilityArgs(["--runs", "2", "cv.pdf", "--coverage-runs", "4", "jd.txt", "--parallel", "1", "--out", "r.md"])).toEqual({
-      ok: true, cvArg: "cv.pdf", jdArg: "jd.txt", runs: 2, coverageRuns: 4, parallel: 1, out: "r.md",
+      ok: true, cvArg: "cv.pdf", jdArg: "jd.txt", runs: 2, coverageRuns: 4, parallel: 1, votes: COVERAGE_VOTES, out: "r.md",
     });
+  });
+  it("reads --no-cache", () => {
+    expect(parseStabilityArgs(["cv.pdf", "jd.txt", "--no-cache"])).toEqual({
+      ok: true, cvArg: "cv.pdf", jdArg: "jd.txt", runs: 5, coverageRuns: 10, parallel: 3, votes: COVERAGE_VOTES, noCache: true,
+    });
+  });
+  it("reads --dump-evidence", () => {
+    expect(parseStabilityArgs(["cv.pdf", "jd.txt", "--dump-evidence"])).toEqual({
+      ok: true, cvArg: "cv.pdf", jdArg: "jd.txt", runs: 5, coverageRuns: 10, parallel: 3, votes: COVERAGE_VOTES, dumpEvidence: true,
+    });
+  });
+  it("reads --votes and accepts 20 coverage runs", () => {
+    expect(parseStabilityArgs(["cv.pdf", "jd.txt", "--votes", "3", "--coverage-runs", "20"])).toMatchObject({ ok: true, votes: 3, coverageRuns: 20 });
+  });
+  it("accepts any positive votes, including 1 and even numbers", () => {
+    for (const good of ["1", "2", "4"]) expect(parseStabilityArgs(["a", "b", "--votes", good])).toMatchObject({ ok: true, votes: Number(good) });
+  });
+  it("rejects non-positive votes", () => {
+    for (const bad of ["0", "-1", "x"]) expect(parseStabilityArgs(["a", "b", "--votes", bad]).ok).toBe(false);
+    expect(parseStabilityArgs(["a", "b", "--votes"]).ok).toBe(false);
   });
   it("rejects missing paths, bad numbers and unknown flags", () => {
     expect(parseStabilityArgs([]).ok).toBe(false);
@@ -186,5 +211,120 @@ describe("renderReport", () => {
     expect(report).toContain("Node.js");
     expect(report).not.toContain(MARKER);
     expect(report).not.toContain("exp1.b1");
+  });
+});
+
+describe("evidenceSection", () => {
+  const covE = (requirementId: string, verdict: string, evidenceIds: string[]) =>
+    ({ requirementId, verdict, evidenceIds, reason: "SECRET-REASON" }) as unknown as Coverage;
+  const okRun = (...coverage: Coverage[]): CoverageRun => ({ ok: true, score: 0, coverage });
+  const flip = (id: string, text: string) => ({ id, importance: "must_have", kind: "skill", text, counts: { met: 1, partially_met: 1, unmet: 0 }, swing: 1 });
+
+  it("lists one row per run with cited IDs and a Claims-only column, then a summary line", () => {
+    const lines = evidenceSection(
+      [flip("req4", "Node.js"), flip("req5", "Docker")],
+      [
+        okRun(covE("req4", "met", ["exp1.b2"]), covE("req5", "met", ["skill1", "summary"])),
+        { ok: false, error: "LlmUnavailableError" },
+        okRun(covE("req4", "partially_met", ["skill3"]), covE("req5", "partially_met", [])),
+        okRun(covE("req4", "met", ["exp1.b2", "skill3"]), covE("req5", "met", ["skill1", "summary"])),
+      ],
+    ).join("\n");
+    expect(lines).toContain("### Evidence per run for flipped Requirements");
+    expect(lines).toContain("#### req4: Node.js");
+    expect(lines).toContain("| Run | Verdict | Cited Items | Claims only |");
+    expect(lines).toContain("| 1 | met | exp1.b2 | no |");
+    expect(lines).toContain("| 3 | partially_met | skill3 | yes |");
+    expect(lines).toContain("| 4 | met | exp1.b2, skill3 | no |");
+    expect(lines).toContain("| 3 | partially_met |  | — |");
+    expect(lines).not.toContain("| 2 |");
+    expect(lines).toContain("- req4: met runs cite {exp1.b2, skill3}, partial runs cite {skill3} - different evidence");
+    expect(lines).toContain("- req5: met runs cite {skill1, summary}, partial runs cite {} - different evidence");
+    expect(lines).not.toContain("SECRET-REASON");
+  });
+
+  it("says same evidence when the sets match, and notes a missing met or partial side", () => {
+    const lines = evidenceSection(
+      [flip("req1", "A"), flip("req2", "B")],
+      [
+        okRun(covE("req1", "met", ["exp1.b1", "skill1"]), covE("req2", "met", ["exp1.b1"])),
+        okRun(covE("req1", "partially_met", ["skill1", "exp1.b1"]), covE("req2", "unmet", [])),
+      ],
+    ).join("\n");
+    expect(lines).toContain("- req1: same evidence, different verdict (both cite {exp1.b1, skill1})");
+    expect(lines).toContain("- req2: no met versus partial comparison (verdicts seen: met, unmet)");
+  });
+
+  it("says none when nothing flipped", () => {
+    expect(evidenceSection([], []).join("\n")).toContain("None");
+  });
+});
+
+describe("renderReport with dumpEvidence", () => {
+  const cRun = (verdict: string): CoverageRun => ({
+    ok: true,
+    score: 1,
+    coverage: [
+      { requirementId: "req1", verdict, evidenceIds: [verdict === "met" ? "exp1.b2" : "skill3"], reason: "r" },
+      cov("req2", "met"),
+      cov("req3", "unmet"),
+    ] as unknown as Coverage[],
+  });
+  const input = { runs: 1, coverageRuns: 2, endToEnd: [], baseRequirements: reqs, coverageOnly: [cRun("met"), cRun("partially_met")] };
+
+  it("adds the section after the flipped table only when asked", () => {
+    const without = renderReport(input);
+    const withDump = renderReport({ ...input, dumpEvidence: true });
+    expect(without).not.toContain("Evidence per run");
+    expect(withDump.indexOf("### Evidence per run for flipped Requirements")).toBeGreaterThan(withDump.indexOf("### Flipped Requirements"));
+    expect(withDump.indexOf("### Evidence per run for flipped Requirements")).toBeLessThan(withDump.indexOf("## Summary"));
+    expect(withDump).toContain("different evidence");
+  });
+});
+
+describe("CV shape", () => {
+  const item = (id: string) => ({ id, text: "SECRET" });
+  const cv = {
+    contact: { id: "contact", name: "SECRET" },
+    summary: item("summary"),
+    experience: [{ id: "exp1", company: "SECRET", bullets: [item("a"), item("b")] }, { id: "exp2", company: "SECRET", bullets: [item("c")] }],
+    education: [{ id: "edu1", bullets: [] }],
+    skills: [item("s1"), item("s2"), item("s3")],
+    projects: [{ id: "proj1", bullets: [item("p")] }],
+    certifications: [{ id: "cert1" }],
+    additionalSections: [{ id: "add1", title: "SECRET", items: [item("i1"), item("i2")] }],
+  } as unknown as Cv;
+
+  it("counts Items only", () => {
+    const shape = cvShape(cv);
+    expect(shape).toEqual({
+      summary: true, experience: 2, experienceBullets: 3, education: 1, educationBullets: 0, skills: 3,
+      projects: 1, projectBullets: 1, certifications: 1, additionalSections: 1, additionalItems: 2,
+    });
+    expect(formatCvShape(shape)).toBe("sum 1, exp 2/3, edu 1/0, skills 3, proj 1/1, cert 1, add 1/2");
+    expect(formatCvShape(shape)).not.toContain("SECRET");
+  });
+
+  it("adds columns to the A table and a one-line summary", () => {
+    const shapeA = cvShape(cv);
+    const shapeB = { ...shapeA, experienceBullets: 12 };
+    const run = (shape: typeof shapeA, softMismatches: number): EndToEndRun => ({
+      ok: true, score: 50, requirements: reqs, coverage: [cov("req1", "met"), cov("req2", "met"), cov("req3", "unmet")], cvShape: shape, softMismatches,
+    });
+    const same = renderReport({ runs: 2, coverageRuns: 0, endToEnd: [run(shapeA, 0), run(shapeA, 1)], coverageOnly: [] });
+    expect(same).toContain("| CV Items (summary, entries/bullets, counts) | softMismatches |");
+    expect(same).toContain("| sum 1, exp 2/3, edu 1/0, skills 3, proj 1/1, cert 1, add 1/2 | 1 |");
+    expect(same).toContain("CV shape: identical across the 2 successful runs.");
+    const differs = renderReport({ runs: 2, coverageRuns: 0, endToEnd: [run(shapeA, 0), run(shapeB, 0)], coverageOnly: [] });
+    expect(differs).toContain("CV shape: differs between runs (2 distinct shapes in 2 successful runs).");
+  });
+});
+
+describe("renderReport with votes", () => {
+  const input = { runs: 1, coverageRuns: 1, endToEnd: [], baseRequirements: reqs, coverageOnly: [{ ok: true as const, score: 1, coverage: [cov("req1", "met")] }] };
+  it("states the votes above 1 and is unchanged at 1", () => {
+    expect(renderReport({ ...input, votes: 3 })).toContain("Votes per run: 3 Coverage calls, median verdict");
+    expect(renderReport({ ...input, votes: 1 })).toBe(renderReport(input));
+    expect(renderReport(input)).not.toContain("Votes per run");
   });
 });

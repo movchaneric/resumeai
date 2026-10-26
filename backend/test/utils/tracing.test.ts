@@ -11,6 +11,7 @@ import { buildRunGraph } from "@/graph/runGraph.js";
 import { parseCv } from "@/parsing/parseCv.js";
 import { loadConfig } from "@/utils/config.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
+import { FakeJobProfileCache } from "../fakes/jobProfileCache.js";
 import { coverageAnswer, extractedCv, extractedJob } from "../runFixtures.js";
 import { guardExporter, instrumentLangChain } from "@/utils/tracing.js";
 import { withSpan } from "@/utils/spans.js";
@@ -161,8 +162,8 @@ describe("LangGraph tracing without content", () => {
     const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" });
     const pdfText = await parseCv(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf")), config.limits);
     const llm = new FakeLlmClient().enqueue("extract_cv", extractedCv);
-    const judge = new FakeLlmClient().enqueue("extract_job_profile", extractedJob).enqueue("assess_coverage", coverageAnswer);
-    const graph = buildRunGraph({ llm, judgeLlm: judge, checkpointer: createMemoryCheckpointer(), onEnter: async () => {} });
+    const judge = new FakeLlmClient().enqueue("extract_job_profile", extractedJob).enqueueVoted("assess_coverage", coverageAnswer);
+    const graph = buildRunGraph({ llm, judgeLlm: judge, judgeModel: "test-judge", jobProfileCache: new FakeJobProfileCache(), checkpointer: createMemoryCheckpointer(), onEnter: async () => {} });
 
     await graph.invoke(
       { runId: "run-1", cvText: `${pdfText}\n${CV_MARKER}`, jobDescriptionText: `Backend developer ${JD_MARKER}` },

@@ -61,7 +61,7 @@ export function renderCv(cv: Cv): string {
 
 const IMPORTANCE_LABEL = { must_have: "must-have", nice_to_have: "nice-to-have" } as const;
 
-/** One line per Requirement: `[req1] (must-have) <text>`. */
+/** One line per Requirement: `[req1] (skill, must-have) <text>`. The kind shows the model which rules apply (soft skills are binary). */
 export function renderRequirements(requirements: Requirement[]): string {
-  return requirements.map((r) => `[${r.id}] (${IMPORTANCE_LABEL[r.importance]}) ${r.text}`).join("\n");
+  return requirements.map((r) => `[${r.id}] (${r.kind}, ${IMPORTANCE_LABEL[r.importance]}) ${r.text}`).join("\n");
 }

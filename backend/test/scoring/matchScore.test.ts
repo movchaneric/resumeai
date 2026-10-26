@@ -56,4 +56,16 @@ describe("matchScore", () => {
     const coverage = [cov("req1", "met"), cov("req2", "met"), cov("req3", "unmet"), cov("req4", "unmet")];
     expect(matchScore(mixed, coverage)).toBeCloseTo(66.6667, 4);
   });
+
+  it("weighs soft skills half as much as other kinds", () => {
+    const mixed = [
+      req("req1", "must_have"),
+      req("req2", "must_have", "soft_skill"),
+      req("req3", "nice_to_have", "responsibility"),
+      req("req4", "nice_to_have"),
+    ];
+    // weights 3, 1.5, 0.5, 1 (total 6); credit 3 + 0 + 0.25 + 0
+    const coverage = [cov("req1", "met"), cov("req2", "unmet"), cov("req3", "partially_met"), cov("req4", "unmet")];
+    expect(matchScore(mixed, coverage)).toBeCloseTo((100 * 3.25) / 6, 8);
+  });
 });

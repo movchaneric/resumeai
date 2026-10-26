@@ -32,8 +32,9 @@ Spec: #42 "Slice 6a: Review and cleanup"; tickets #43 to #46.
 
 ## `DELETE /runs/:id`
 - Deletes the `runs` row and all the Run's checkpoint rows; 204.
-- **409 `RUN_BUSY`** while the Run is `extracting` or `tailoring`: the runner would otherwise write checkpoints after the delete and bring the data back. Runs reach a Pause or the end within minutes. Rejected: mark-for-deletion, and delete-now-and-let-the-sweep-catch-orphans.
+- **409 `RUN_BUSY`** while the Run is `parsing`, `extracting` or `tailoring`: the runner would otherwise write checkpoints after the delete and bring the data back. Runs reach a Pause or the end within minutes. Rejected: mark-for-deletion, and delete-now-and-let-the-sweep-catch-orphans.
 - Unknown, malformed, expired or already-deleted Run: 404.
+- **Order:** the `runs` row goes first, in one conditional delete (not busy, not expired), then the checkpoint thread. A concurrent `POST /answers` either claims first (`DELETE` gets 409) or finds the row gone (404). If the thread delete fails, the response is still 204 and the sweep removes the orphaned thread.
 
 ## TTL sweep
 - **In the backend process** (one instance assumed, as in 5b), at startup and every `SWEEP_INTERVAL_MS` (default 3 600 000). Rejected: `pg_cron`, an external cron job.
@@ -46,7 +47,7 @@ Spec: #42 "Slice 6a: Review and cleanup"; tickets #43 to #46.
 ## Tickets
 | Ticket | Scope | Depends on |
 |---|---|---|
-| T1 (#43) | Review as an `interrupt()`, P6 fix with S4, `completed` at the end, recovery row | — |
+| T1 (#43) | Review as an `interrupt()`, P6 fix with S4, `completed` at the end, recovery row, shared `ReviewDecisionSchema` and `GraphRunner.review` (no route) | — |
 | T2 (#44) | `POST /runs/:id/review`: validation, stage 1 for revisions, final re-judge and fallback, `completed` view | T1 (#43) |
 | T3 (#45) | `DELETE /runs/:id` and the delete-a-Run helper (row and checkpoints) | — |
 | T4 (#46) | TTL sweep: expired Runs, `job_profiles`, orphaned threads; interval and shutdown | T3 (#45) |

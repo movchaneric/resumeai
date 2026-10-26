@@ -91,11 +91,14 @@ export async function runTailorInMemory(input: {
   onRound?: (summary: RoundSummary) => void;
 }): Promise<RunSnapshot> {
   const runner = new LangGraphRunner(
-    { llm: input.llm, judgeLlm: input.judgeLlm, checkpointer: createMemoryCheckpointer(), onRound: input.onRound },
+    { llm: input.llm, judgeLlm: input.judgeLlm, judgeModel: "report", jobProfileCache: NO_CACHE, checkpointer: createMemoryCheckpointer(), onRound: input.onRound },
     { setStatus: async () => {} },
   );
   return runner.start({ runId: input.runId, cvText: input.cvText, jobDescriptionText: input.jobDescriptionText });
 }
+
+/** The report always extracts afresh, so it gets a cache that never holds anything. */
+const NO_CACHE = { get: async () => null, put: async () => {} };
 
 /** One `pipeline` root span for the whole script run, so Phoenix groups its chains as one trace. The session is the Run id. */
 export function runInPipelineSpan<T>(runId: RunId, fn: () => Promise<T>): Promise<T> {

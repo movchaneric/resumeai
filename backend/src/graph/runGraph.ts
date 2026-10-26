@@ -1,6 +1,5 @@
 import { END, START, StateGraph, type BaseCheckpointSaver } from "@langchain/langgraph";
 import { extractCv } from "@/extraction/extractCv.js";
-import { extractJobProfile } from "@/extraction/extractJobProfile.js";
 import type { LlmClient } from "@/llm/llmClient.js";
 import { tailorCv } from "@/tailoring/tailorCv.js";
 import { validateChanges } from "@/tailoring/validateChanges.js";
@@ -10,6 +9,7 @@ import { mergeCoverage, requirementsListedBy } from "@/tailoring/roundCoverage.j
 import { routeAfterRound, shouldSkipTailoring } from "@/scoring/exitRouter.js";
 import { assessCoverage } from "@/scoring/assessCoverage.js";
 import { matchScore } from "@/scoring/matchScore.js";
+import { resolveJobProfile, type JobProfileCache } from "@/graph/jobProfileCache.js";
 import { RunState } from "@/graph/state.js";
 import type { RecordedRejection } from "@/tailoring/validateChanges.js";
 import type { Change } from "@resume-ai/shared";
@@ -48,6 +48,10 @@ export type RunGraphDeps = {
   llm: LlmClient;
   /** Judge-and-write work (Coverage, the tailor and the claim check). */
   judgeLlm: LlmClient;
+  /** The judge model's name; part of the Job Profile cache key. */
+  judgeModel: string;
+  /** Job Profiles shared across Runs (ADR 0007). A failing cache never fails a Run. */
+  jobProfileCache: JobProfileCache;
   checkpointer: BaseCheckpointSaver;
   /** Called first thing in each node, so the Run's status is written before the node's work starts. */
   onEnter: (runId: string, node: keyof typeof NODE_STATUS) => Promise<void>;
@@ -73,11 +77,11 @@ function logRoundFailure(runId: string, round: number, error: unknown): void {
  * and returns a state update. `begin_round` counts the round as started; the `route` node is the only place that
  * commits the pending round.
  */
-export function buildRunGraph({ llm, judgeLlm, checkpointer, onEnter, onRound }: RunGraphDeps) {
+export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, checkpointer, onEnter, onRound }: RunGraphDeps) {
   return new StateGraph(RunState)
     .addNode("extract", async (state) => {
       await onEnter(state.runId, "extract");
-      const jobProfile = await extractJobProfile(judgeLlm, state.jobDescriptionText);
+      const jobProfile = await resolveJobProfile({ cache: jobProfileCache, judgeLlm, judgeModel }, state.jobDescriptionText);
       const { cv, softMismatches } = await extractCv(llm, state.cvText);
       console.debug(`Run ${state.runId}: extraction done, ${softMismatches} soft mismatches`);
       return { jobProfile, cv };

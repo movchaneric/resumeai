@@ -7,7 +7,7 @@ import { VERDICT_CREDITS, requirementWeight } from "@/scoring/weights.js";
 export const DEFAULTS = { runs: 5, coverageRuns: 10, parallel: 3 };
 
 export type StabilityArgs =
-  | { ok: true; cvArg: string; jdArg: string; runs: number; coverageRuns: number; parallel: number; out?: string }
+  | { ok: true; cvArg: string; jdArg: string; runs: number; coverageRuns: number; parallel: number; out?: string; noCache?: boolean }
   | { ok: false };
 
 const positiveInt = (value: string | undefined): number | undefined => {
@@ -16,10 +16,11 @@ const positiveInt = (value: string | undefined): number | undefined => {
   return n >= 1 ? n : undefined;
 };
 
-/** `<cv> <jd> [--runs N] [--coverage-runs M] [--parallel K] [--out file]`. Exactly two paths. */
+/** `<cv> <jd> [--runs N] [--coverage-runs M] [--parallel K] [--out file] [--no-cache]`. Exactly two paths. */
 export function parseStabilityArgs(args: string[]): StabilityArgs {
   const opts = { runs: DEFAULTS.runs, coverageRuns: DEFAULTS.coverageRuns, parallel: DEFAULTS.parallel };
   let out: string | undefined;
+  let noCache = false;
   const paths: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
@@ -32,13 +33,15 @@ export function parseStabilityArgs(args: string[]): StabilityArgs {
     } else if (arg === "--out") {
       out = args[++i];
       if (!out || out.startsWith("--")) return { ok: false };
+    } else if (arg === "--no-cache") {
+      noCache = true;
     } else if (arg.startsWith("--")) {
       return { ok: false };
     } else paths.push(arg);
   }
   const [cvArg, jdArg, ...rest] = paths;
   if (!cvArg || !jdArg || rest.length > 0) return { ok: false };
-  return { ok: true, cvArg, jdArg, ...opts, ...(out ? { out } : {}) };
+  return { ok: true, cvArg, jdArg, ...opts, ...(out ? { out } : {}), ...(noCache ? { noCache } : {}) };
 }
 
 /** Runs `fn` over 0..count-1 with at most `limit` calls in flight; results keep their index order. */

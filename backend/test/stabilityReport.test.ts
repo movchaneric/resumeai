@@ -31,6 +31,11 @@ describe("parseStabilityArgs", () => {
       ok: true, cvArg: "cv.pdf", jdArg: "jd.txt", runs: 2, coverageRuns: 4, parallel: 1, out: "r.md",
     });
   });
+  it("reads --no-cache", () => {
+    expect(parseStabilityArgs(["cv.pdf", "jd.txt", "--no-cache"])).toEqual({
+      ok: true, cvArg: "cv.pdf", jdArg: "jd.txt", runs: 5, coverageRuns: 10, parallel: 3, noCache: true,
+    });
+  });
   it("rejects missing paths, bad numbers and unknown flags", () => {
     expect(parseStabilityArgs([]).ok).toBe(false);
     expect(parseStabilityArgs(["a"]).ok).toBe(false);

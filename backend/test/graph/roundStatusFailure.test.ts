@@ -7,6 +7,7 @@ import { NODE_STATUS, buildRunGraph } from "@/graph/runGraph.js";
 import { parseCv } from "@/parsing/parseCv.js";
 import { loadConfig } from "@/utils/config.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
+import { FakeJobProfileCache } from "../fakes/jobProfileCache.js";
 import { extractedCv, extractedJob } from "../runFixtures.js";
 
 const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" });
@@ -45,6 +46,8 @@ describe("a failing status write inside a tailoring round", () => {
       const graph = buildRunGraph({
         llm,
         judgeLlm: judge,
+        judgeModel: "test-judge",
+        jobProfileCache: new FakeJobProfileCache(),
         checkpointer: createMemoryCheckpointer(),
         onEnter: async (_runId, node) => {
           if (node === "begin_round") begun++;

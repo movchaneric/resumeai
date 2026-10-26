@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadConfig } from "@/utils/config.js";
+import { describeLlmSettings, loadConfig } from "@/utils/config.js";
 
 describe("loadConfig", () => {
   it("applies the documented defaults", () => {
@@ -67,5 +67,25 @@ describe("loadConfig", () => {
       /0006-trace-content-is-outside-run-deletion/,
     );
     expect(() => loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", NODE_ENV: "production" })).not.toThrow();
+  });
+});
+
+describe("describeLlmSettings", () => {
+  it("shows the model, judge model, timeout and the base URL host only", () => {
+    const config = loadConfig({
+      DATABASE_URL: "x",
+      OPENAI_API_KEY: "sk-secret",
+      OPENAI_BASE_URL: "https://user:pass@generativelanguage.googleapis.com/v1beta/openai/?key=abc",
+      LLM_MODEL: "gemini-3.5-flash-lite",
+      LLM_TIMEOUT_MS: "120000",
+    });
+    const line = describeLlmSettings(config.llm);
+    expect(line).toBe("model=gemini-3.5-flash-lite, judge=gemini-3.5-flash-lite, timeoutMs=120000, llmHost=generativelanguage.googleapis.com");
+    expect(line).not.toMatch(/sk-secret|pass|abc|v1beta/);
+  });
+
+  it("names the OpenAI host when no base URL is set", () => {
+    const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", LLM_JUDGE_MODEL: "judge-1" });
+    expect(describeLlmSettings(config.llm)).toBe("model=gpt-4.1-mini, judge=judge-1, timeoutMs=60000, llmHost=api.openai.com");
   });
 });

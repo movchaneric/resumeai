@@ -69,3 +69,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     },
   };
 }
+
+/** The model settings in effect, for the startup log line. Shows the base URL's host only (no scheme, path, credentials or query) and never the API key. */
+export function describeLlmSettings(llm: Config["llm"]): string {
+  const host = llm.baseUrl ? new URL(llm.baseUrl).host : "api.openai.com";
+  return `model=${llm.model}, judge=${llm.judgeModel}, timeoutMs=${llm.timeoutMs}, llmHost=${host}`;
+}

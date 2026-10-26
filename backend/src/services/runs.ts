@@ -11,6 +11,7 @@ import {
   type ExitReason,
   type JobProfile,
   type Question,
+  type ReviewDecision,
   type RequirementId,
   type RunErrorCode,
   type RunId,
@@ -32,8 +33,11 @@ import type { RunStore, StoredRun } from "@/stores/runs.js";
 
 /** What the service sees of a Run's graph state: plain data typed with shared types. */
 export type RunSnapshot = {
-  /** Where the graph is stopped: waiting for Answers, waiting for review, or not stopped (a node is due to run). */
-  pausedAt: "answers" | "review" | null;
+  /**
+   * Where the graph is (`graph/position.ts`): waiting for Answers, waiting for review, ended, or `null` while a node is
+   * due to run. The only reading of the graph's position; nothing else decides a Pause or the end.
+   */
+  position: "answers" | "review" | "ended" | null;
   jobProfile: JobProfile | null;
   cv: Cv | null;
   coverageBefore: Coverage[] | null;
@@ -73,6 +77,11 @@ export interface GraphRunner {
    * runs until the next pause or the end, like `start`. Rejects with the original error on failure.
    */
   recover(runId: RunId): Promise<RunSnapshot>;
+  /**
+   * Resumes a Run paused for review with the decisions (already validated by the caller) and runs to the end, where the
+   * runner writes `completed`; the post-resume work is a new root span with the same session id. Rejects with the original error on failure.
+   */
+  review(runId: RunId, decisions: ReviewDecision[]): Promise<RunSnapshot>;
   /** The current state, or null when no checkpoint exists yet. */
   read(runId: RunId): Promise<RunSnapshot | null>;
 }
@@ -243,7 +252,7 @@ export class RunsService {
    * process started (`startedAt`) and still in `extracting` or `tailoring` had its background work in the process
    * that stopped (single instance); a Run created since is being worked on by this process and is left alone. Each is
    * handled from its checkpoint, one at a time to stay within the model provider's rate limits:
-   * no checkpoint -> `interrupted`; stopped at a Pause -> that Pause's status; mid-graph -> resumed, once (a Run
+   * no checkpoint -> `interrupted`; stopped at a Pause -> that Pause's status; graph ended -> `completed`; mid-graph -> resumed, once (a Run
    * already recovered once becomes `interrupted`, so a Run that crashes the server is not resumed on every restart).
    * Expired Runs and Runs at a Pause are not listed. Never throws: a Run it cannot handle is logged and skipped.
    */
@@ -267,7 +276,7 @@ export class RunsService {
   private async recoverRun(run: StoredRun): Promise<void> {
     const { store, graphRunner, events } = this.deps;
     const snapshot = await graphRunner.read(run.id);
-    const moveTo = async (status: "awaiting_answers" | "awaiting_review" | "interrupted", outcome: string): Promise<void> => {
+    const moveTo = async (status: "awaiting_answers" | "awaiting_review" | "completed" | "interrupted", outcome: string): Promise<void> => {
       // Conditional on the status recovery saw, so a Run a request moved in the meantime is left as it is.
       if (await store.claimStatus(run.id, run.status, status)) {
         console.log(`Run ${run.id}: recovery ${outcome}`);
@@ -278,8 +287,9 @@ export class RunsService {
     };
 
     if (!snapshot) return moveTo("interrupted", "interrupted (no checkpoint)");
-    if (snapshot.pausedAt !== null) {
-      return moveTo(snapshot.pausedAt === "answers" ? "awaiting_answers" : "awaiting_review", "pause restored");
+    if (snapshot.position === "ended") return moveTo("completed", "completed (the graph had ended)");
+    if (snapshot.position !== null) {
+      return moveTo(snapshot.position === "answers" ? "awaiting_answers" : "awaiting_review", "pause restored");
     }
     if (!(await store.claimRecovery(run.id, run.status))) {
       return moveTo("interrupted", "interrupted (already recovered once)");
@@ -408,13 +418,13 @@ function toRunView(run: StoredRun, state: RunSnapshot | null): RunView {
       error: run.error,
     });
   }
-  if (run.status === "awaiting_review" && cv && jobProfile && state?.coverageBefore && state.coverage && state.scoreBefore !== null && state.scoreAfter !== null && state.exitReason) {
+  if ((run.status === "awaiting_review" || run.status === "completed") && cv && jobProfile && state?.coverageBefore && state.coverage && state.scoreBefore !== null && state.scoreAfter !== null && state.exitReason) {
     const verdict = (coverage: Coverage[], id: string) => coverage.find((c) => c.requirementId === id);
     return RunViewSchema.parse({
       ...common,
-      status: "awaiting_review",
+      status: run.status,
       job,
-      steps: steps({ parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "done", review: "running" }),
+      steps: steps({ parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "done", review: run.status === "completed" ? "done" : "running" }),
       score: { before: Math.round(state.scoreBefore), after: Math.round(state.scoreAfter) },
       requirements: jobProfile.requirements.map((requirement) => {
         const before = verdict(state.coverageBefore!, requirement.id);
@@ -428,12 +438,13 @@ function toRunView(run: StoredRun, state: RunSnapshot | null): RunView {
           confirmedGap: state.confirmedGaps.includes(requirement.id),
         };
       }),
-      // The Tailored CV: the original plus the kept Changes.
+      // The Tailored CV: the original plus the kept Changes (slice 6a ticket 2 narrows this to accepted and revised ones).
       cv: applyChanges(cv, state.changes),
       changes: state.changes,
       userEvidence: state.userEvidence,
       iterations: { used: state.rounds, max: MAX_ROUNDS },
       exitReason: state.exitReason,
+      ...(run.status === "completed" ? { download: { docx: null, pdf: null } } : {}),
     });
   }
   if (run.status === "awaiting_answers" && extracted && state) {

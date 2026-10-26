@@ -5,12 +5,15 @@ import { createPrisma } from "@/utils/db.js";
 import { createPostgresCheckpointer } from "@/graph/checkpointer.js";
 import { LangGraphRunner } from "@/graph/runner.js";
 import { LangChainLlmClient } from "@/llm/langChainLlmClient.js";
+import { CheckpointStore } from "@/stores/checkpoints.js";
 import { JobProfileStore } from "@/stores/jobProfiles.js";
 import { RunsService } from "@/services/runs.js";
+import { SweepService } from "@/services/sweep.js";
 import { RunStore } from "@/stores/runs.js";
 import { OpenStreams } from "@/utils/openStreams.js";
 import { InProcessRunEvents } from "@/utils/runEvents.js";
 import { closeServer } from "@/utils/shutdown.js";
+import { createSweepScheduler } from "@/utils/sweepScheduler.js";
 import { setupTracing } from "@/utils/tracing.js";
 
 const config = loadConfig();
@@ -31,18 +34,26 @@ const startedAt = new Date();
 const runsDeps = { store, config, graphRunner, events };
 const runsService = new RunsService(runsDeps);
 const streams = new OpenStreams();
+const sweep = new SweepService({ store, jobProfiles: jobProfileCache, checkpoints: new CheckpointStore(prisma), purgeRun: (id) => runsService.purgeRun(id) });
+const sweeper = createSweepScheduler(() => sweep.sweep(), config.sweepIntervalMs);
 const app = createApp(runsDeps, runsService, streams);
 
 const server = app.listen(config.port, () => {
   console.log(`backend listening on :${config.port} (${describeLlmSettings(config.llm)})`);
   // In the background, so requests are accepted while cut-off Runs are carried on; it never rejects, but a bug must not crash the server.
-  runsService.recoverRuns(startedAt).catch((error: unknown) => console.error("Run recovery failed", error));
+  // The first sweep waits for recovery, so a Run being recovered is never deleted halfway through.
+  runsService
+    .recoverRuns(startedAt)
+    .catch((error: unknown) => console.error("Run recovery failed", error))
+    .then(() => sweeper.start());
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     void (async () => {
       // Open event streams are ended, Runs are not drained; requests in flight finish, and cut-off Runs are picked up by recovery on the next start.
+      // First, so no sweep starts after this and one in progress finishes before the pool closes.
+      await sweeper.stop();
       await closeServer(server, streams);
       // Flush buffered spans first; a failed flush (Phoenix down) must not block the exit.
       try {

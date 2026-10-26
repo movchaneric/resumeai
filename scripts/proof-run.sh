@@ -5,13 +5,16 @@ set -euo pipefail
 usage() {
   cat >&2 <<'USAGE'
 Usage:
-  scripts/proof-run.sh <cv-file> <job-description-file> [answers.json]
-  scripts/proof-run.sh --resume <run-id> <answers.json>
+  scripts/proof-run.sh [--watch] <cv-file> <job-description-file> [answers.json]
+  scripts/proof-run.sh [--watch] --resume <run-id> <answers.json>
   scripts/proof-run.sh --help
 
 Starts a Run (or resumes one that awaits answers), polls until it stops, and prints a JSON summary:
 status, score, exitReason, iterations, changes, changesCitingAnswers, error.
 At awaiting_answers without an answers file it prints the Questions and the resume command, then exits 0.
+--watch follows the Run through its event stream (GET /runs/:id/events, curl -N) instead of polling: it prints one line
+per event (status, running step, round used/max, score before->after) to stderr, and opens a new stream after it posts
+the answers. The final summary is the same.
 Exits non-zero if the Run ended failed. Needs curl and jq. BASE_URL defaults to http://localhost:3000.
 USAGE
   exit "${1:-2}"
@@ -26,6 +29,8 @@ BASE_URL="${BASE_URL:-http://localhost:3000}"
 POLL_SECONDS=3
 MAX_POLLS=200 # 200 x 3 s = 10 minutes
 IN_PROGRESS="parsing extracting tailoring"
+WATCH=0
+MAX_REOPENS=5 # a stream that ends while the Run is still in progress (a dropped connection) is reopened this many times
 
 command -v curl >/dev/null || die "curl is required"
 command -v jq >/dev/null || die "jq is required"
@@ -64,6 +69,45 @@ wait_for_run() {
   done
 }
 
+# One line for a Run view: status, the step running (or failed), round used/max, score before->after ("-" when absent).
+describe_event() {
+  jq -r '"  \(.status)  step=\(([.steps[] | select(.state == "running" or .state == "failed") | .key] | first) // "-")  round=\(.iterations.used // "-")/\(.iterations.max // "-")  score=\(.score.before // "-")->\(.score.after // "-")"' <<<"$1"
+}
+
+# Follows the event stream until the Run reaches a status that needs the user (the server closes the stream there);
+# prints one line per event on stderr and the last Run view on stdout, like wait_for_run.
+watch_run() {
+  local id="$1" tmp view status reopens=0
+  tmp="$(mktemp)"
+  while :; do
+    : >"$tmp"
+    curl -sSN --max-time 700 "$BASE_URL/runs/$id/events" 2>/dev/null | while IFS= read -r line; do
+      case "$line" in
+        "data: "*)
+          printf '%s\n' "${line#data: }" >"$tmp"
+          describe_event "${line#data: }" >&2
+          ;;
+      esac
+    done || true
+    view="$(cat "$tmp")"
+    jq -e 'type == "object" and has("status")' >/dev/null 2>&1 <<<"$view" || { rm -f "$tmp"; die "no events for Run $id (unknown Run, or the stream failed)"; }
+    status="$(jq -r '.status' <<<"$view")"
+    case " $IN_PROGRESS " in
+      *" $status "*) ;;
+      *) rm -f "$tmp"; echo "$view"; return 0 ;;
+    esac
+    reopens=$((reopens + 1))
+    [ "$reopens" -le "$MAX_REOPENS" ] || { rm -f "$tmp"; die "the stream for Run $id kept ending while it was $status"; }
+    echo "  ... stream ended while $status, reopening" >&2
+    sleep 1
+  done
+}
+
+# Prints the Run's view once it needs the user: by event stream with --watch, otherwise by polling.
+follow_run() {
+  if [ "$WATCH" = 1 ]; then watch_run "$1"; else wait_for_run "$1"; fi
+}
+
 print_questions() {
   jq -r '.questions[] | "  \(.id): \(.text)"' <<<"$1" >&2
 }
@@ -97,7 +141,7 @@ send_answers() {
 # Pauses at awaiting_answers: sends the answers file or prints how to resume. Leaves the final view in $final.
 settle() {
   local id="$1" answers="${2:-}"
-  final="$(wait_for_run "$id")"
+  final="$(follow_run "$id")"
   if [ "$(jq -r '.status' <<<"$final")" = "awaiting_answers" ]; then
     echo "Run $id is waiting for answers. Questions:" >&2
     print_questions "$final"
@@ -106,7 +150,7 @@ settle() {
       exit 0
     fi
     send_answers "$id" "$final" "$answers"
-    final="$(wait_for_run "$id")"
+    final="$(follow_run "$id")"
   fi
 }
 
@@ -123,6 +167,11 @@ summarise() {
 }
 
 [ $# -ge 1 ] || usage
+if [ "$1" = "--watch" ]; then
+  WATCH=1
+  shift
+  [ $# -ge 1 ] || usage
+fi
 final=""
 case "$1" in
   --help | -h) usage 0 ;;
@@ -133,7 +182,7 @@ case "$1" in
     view="$(fetch_run "$run_id")"
     [ "$(jq -r '.status' <<<"$view")" = "awaiting_answers" ] || die "Run $run_id is $(jq -r '.status' <<<"$view"), not awaiting_answers"
     send_answers "$run_id" "$view" "$3"
-    final="$(wait_for_run "$run_id")"
+    final="$(follow_run "$run_id")"
     ;;
   -*) usage ;;
   *)

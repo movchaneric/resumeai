@@ -1,3 +1,4 @@
+import { InProcessRunEvents } from "@/utils/runEvents.js";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,7 +56,7 @@ function setup(now = () => new Date(), judgeLlm?: FakeLlmClient) {
   const runInBackground = (task: () => Promise<void>) => {
     tasks.push(task);
   };
-  const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner, now, runInBackground });
+  const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner, events: new InProcessRunEvents(), now, runInBackground });
   /** Runs every scheduled task and waits for it. A task that rejected fails the test. */
   const settle = async () => {
     await Promise.all(tasks.map((task) => task()));
@@ -376,7 +377,7 @@ describe("RunsService", () => {
       const llm = new FakeLlmClient();
       enqueueHappyPath(llm);
       // No runInBackground: this is the production runner.
-      const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner: skipQuestions(makeGraphRunner(store, llm)) });
+      const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner: skipQuestions(makeGraphRunner(store, llm)), events: new InProcessRunEvents() });
       const unhandled: unknown[] = [];
       const onUnhandled = (reason: unknown) => unhandled.push(reason);
       process.on("unhandledRejection", onUnhandled);
@@ -878,7 +879,7 @@ describe("RunsService awaiting answers", () => {
     llm.enqueue("extract_cv", extractedCv);
     const graphRunner = makeGraphRunner(store, llm, judge);
     const tasks: (() => Promise<void>)[] = [];
-    const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner, runInBackground: (t) => void tasks.push(t) });
+    const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner, events: new InProcessRunEvents(), runInBackground: (t) => void tasks.push(t) });
     const id = await service.createRun({ cv, jobDescription: "Backend developer" });
     await Promise.all(tasks.map((t) => t()));
 
@@ -909,7 +910,7 @@ describe("RunsService.submitAnswers", () => {
   ];
   const snapshot = {
     jobProfile: null, cv: null, coverageBefore: null, coverage: null, changes: [], scoreBefore: null, scoreAfter: null,
-    rejections: [], questions, userEvidence: [], confirmedGaps: [], rounds: 0, exitReason: null,
+    pausedAt: "answers", rejections: [], questions, userEvidence: [], confirmedGaps: [], rounds: 0, exitReason: null,
   } as unknown as RunSnapshot;
 
   /** A store (extended with the atomic claim) holding a Run in `status`, and a runner whose `answer` is a spy. */
@@ -922,9 +923,9 @@ describe("RunsService.submitAnswers", () => {
     };
     store.rows.set(runId, { id: runId, status, createdAt: now(), expiresAt: new Date(now().getTime() + 1000), exportPath: null, error: null });
     const answer = vi.fn<GraphRunner["answer"]>(async () => snapshot);
-    const graphRunner: GraphRunner = { start: async () => snapshot, answer, read: async () => snapshot };
+    const graphRunner: GraphRunner = { start: async () => snapshot, answer, recover: async () => snapshot, read: async () => snapshot };
     const tasks: (() => Promise<void>)[] = [];
-    const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner, now, runInBackground: (t) => void tasks.push(t) });
+    const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner, events: new InProcessRunEvents(), now, runInBackground: (t) => void tasks.push(t) });
     return { store, answer, tasks, service };
   }
   const has = (questionId: string, text: string) => ({ kind: "has_experience", questionId, text });

@@ -12,6 +12,7 @@ import { LangGraphRunner } from "@/graph/runner.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
 import { FakeJobProfileCache } from "../fakes/jobProfileCache.js";
 import { coverageAnswer, extractedCv, extractedJob } from "../runFixtures.js";
+import { InProcessRunEvents } from "@/utils/runEvents.js";
 
 const url = process.env.DATABASE_URL!;
 const config = loadConfig(process.env);
@@ -46,7 +47,7 @@ describe("Postgres checkpointer", () => {
     const statuses: string[] = [];
     const runner = new LangGraphRunner({ llm, judgeLlm: llm, judgeModel: "test-judge", jobProfileCache: new FakeJobProfileCache(), checkpointer }, {
       setStatus: async (_id, status) => void statuses.push(status),
-    });
+    }, new InProcessRunEvents());
     const runId = randomUUID() as RunId;
     await runner.start({ runId, cvText: await parseCv(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf")), config.limits), jobDescriptionText: "Backend developer" });
 
@@ -54,7 +55,7 @@ describe("Postgres checkpointer", () => {
     const readerCheckpointer = createPostgresCheckpointer(url);
     const reader = new LangGraphRunner({ llm, judgeLlm: llm, judgeModel: "test-judge", jobProfileCache: new FakeJobProfileCache(), checkpointer: readerCheckpointer }, {
       setStatus: async () => {},
-    });
+    }, new InProcessRunEvents());
     const state = await reader.read(runId);
     expect(state?.jobProfile?.title).toBe("Backend Developer");
     expect(state?.scoreBefore).toBe(100);
@@ -80,7 +81,7 @@ describe("Postgres checkpointer", () => {
     const llm = new FakeLlmClient().enqueue("extract_job_profile", job).enqueue("extract_cv", extractedCv).enqueueVoted("assess_coverage", coverage).enqueue("tailor", { changes: [] }, { changes: [] });
     const statuses: string[] = [];
     const make = (cp: ReturnType<typeof createPostgresCheckpointer>) =>
-      new LangGraphRunner({ llm, judgeLlm: llm, judgeModel: "test-judge", jobProfileCache: new FakeJobProfileCache(), checkpointer: cp }, { setStatus: async (_id, status) => void statuses.push(status) });
+      new LangGraphRunner({ llm, judgeLlm: llm, judgeModel: "test-judge", jobProfileCache: new FakeJobProfileCache(), checkpointer: cp }, { setStatus: async (_id, status) => void statuses.push(status) }, new InProcessRunEvents());
     const runId = randomUUID() as RunId;
     const paused = await make(checkpointer).start({ runId, cvText: await parseCv(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf")), config.limits), jobDescriptionText: "Backend developer" });
     expect(paused.questions.map((q) => q.requirementId)).toEqual(["req2"]);

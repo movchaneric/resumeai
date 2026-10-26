@@ -1,6 +1,6 @@
 import { Command } from "@langchain/langgraph";
 import type { Answer, RunId, RunStatus } from "@resume-ai/shared";
-import type { GraphRunner, RunSnapshot, StartRunInput } from "@/services/runs.js";
+import type { GraphRunner, RunEvents, RunSnapshot, StartRunInput } from "@/services/runs.js";
 import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import { withSessionSpan } from "@/utils/spans.js";
 import type { LlmClient } from "@/llm/llmClient.js";
@@ -15,8 +15,17 @@ export interface StatusWriter {
 
 const statusOf = (node: string): RunStatus | undefined => (NODE_STATUS as Record<string, RunStatus>)[node];
 
-function toSnapshot(values: Partial<RunStateValues>): RunSnapshot {
+/** Where the graph is stopped, from the nodes it runs next: `collect_answers` waits for Answers, `review` for the user. */
+function pausedAtOf(next: readonly string[]): RunSnapshot["pausedAt"] {
+  if (next.includes("collect_answers")) return "answers";
+  // Nothing left to run also reads as review: the graph only ends after review, which no slice reaches yet.
+  if (next.length === 0 || next.includes("review")) return "review";
+  return null;
+}
+
+function toSnapshot(values: Partial<RunStateValues>, next: readonly string[]): RunSnapshot {
   return {
+    pausedAt: pausedAtOf(next),
     jobProfile: values.jobProfile ?? null,
     cv: values.cv ?? null,
     coverageBefore: values.coverageBefore ?? null,
@@ -53,10 +62,18 @@ export class LangGraphRunner implements GraphRunner {
       onRound?: (summary: RoundSummary) => void;
     },
     private readonly statuses: StatusWriter,
+    private readonly events: Pick<RunEvents, "publish">,
   ) {
     this.graph = buildRunGraph({
       ...deps,
-      onEnter: (runId, node) => this.write(runId as RunId, NODE_STATUS[node]),
+      onEnter: async (runId, node) => {
+        await this.write(runId as RunId, NODE_STATUS[node]);
+        // Deliberate: the push for node N happens when node N+1 is entered (or after the graph returns, see
+        // `runUntilPause`). With `durability: "sync"` node N's checkpoint is already stored by then, so a view built now
+        // shows its results; that is equivalent to pushing after each node ends. A node that shares its predecessor's
+        // status writes nothing but still publishes.
+        this.events.publish(runId as RunId);
+      },
     });
   }
 
@@ -78,15 +95,26 @@ export class LangGraphRunner implements GraphRunner {
     return withSessionSpan("answers", runId, () => this.runUntilPause(runId, new Command({ resume: answers })));
   }
 
+  /**
+   * Carries on a Run the process stopped in: runs the graph from its last checkpoint, with no new input, until the next
+   * pause or the end. The node that was cut off runs again from its start. Rejects with the original error, like `start`.
+   */
+  async recover(runId: RunId): Promise<RunSnapshot> {
+    return this.runUntilPause(runId, null);
+  }
+
   /** Runs the graph from `input` until it ends or pauses, and writes the status of the pause. */
   private async runUntilPause(runId: RunId, input: Parameters<RunGraph["invoke"]>[0]): Promise<RunSnapshot> {
     const config = { configurable: { thread_id: runId } };
     try {
-      await this.graph.invoke(input, config);
+      // "sync": each step's checkpoint is stored before the next step starts, so the push made when a node is
+      // entered (and the one after the last node) always reads that step's results.
+      await this.graph.invoke(input, { ...config, durability: "sync" });
       // The graph stops before `review` and inside `collect_answers`, so those nodes' statuses are written at the pause.
       const state = await this.graph.getState(config);
       if (state.next.length > 0) await this.write(runId, statusOf(state.next[0]!) ?? "awaiting_review");
-      return toSnapshot(state.values);
+      this.events.publish(runId);
+      return toSnapshot(state.values, state.next);
     } finally {
       this.lastWritten.delete(runId);
     }
@@ -94,6 +122,6 @@ export class LangGraphRunner implements GraphRunner {
 
   async read(runId: RunId): Promise<RunSnapshot | null> {
     const state = await this.graph.getState({ configurable: { thread_id: runId } });
-    return state.createdAt === undefined ? null : toSnapshot(state.values);
+    return state.createdAt === undefined ? null : toSnapshot(state.values, state.next);
   }
 }

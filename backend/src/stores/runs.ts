@@ -65,6 +65,24 @@ export class RunStore {
     return count === 1;
   }
 
+  /** The Runs created before `createdBefore` that have not expired at `now` and are in one of `statuses`, oldest first. */
+  async listLive(statuses: RunStatus[], now: Date, createdBefore: Date): Promise<StoredRun[]> {
+    const rows = await this.prisma.run.findMany({
+      where: { status: { in: statuses }, expiresAt: { gt: now }, createdAt: { lt: createdBefore } },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
+    return rows.map(toStoredRun);
+  }
+
+  /**
+   * Counts a recovery for the Run only if it is still in `status` and has never been recovered, in one statement, and
+   * says whether it did. It is what limits a Run to one recovery.
+   */
+  async claimRecovery(id: RunId, status: RunStatus): Promise<boolean> {
+    const { count } = await this.prisma.run.updateMany({ where: { id, status, recoveries: 0 }, data: { recoveries: { increment: 1 } } });
+    return count === 1;
+  }
+
   async markFailed(id: RunId, code: RunErrorCode, message: string): Promise<void> {
     await this.prisma.run.updateMany({ where: { id }, data: { status: "failed", errorCode: code, errorMessage: message } });
   }

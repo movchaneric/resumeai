@@ -49,3 +49,75 @@ describe("RunStore.claimStatus", () => {
     expect(results.filter(Boolean)).toHaveLength(1);
   });
 });
+
+describe("RunStore.listLive", () => {
+  const now = new Date("2026-10-01T00:00:00Z");
+  async function createAt(status: RunStatus, createdAt: Date, expiresAt: Date) {
+    const id = RunIdSchema.parse(randomUUID());
+    await store.create({ id, status, createdAt, expiresAt });
+    return id;
+  }
+  const later = new Date(now.getTime() + 60_000);
+
+  it("lists the Runs in the given statuses, oldest first", async () => {
+    const newer = await createAt("tailoring", new Date(now.getTime() - 1000), later);
+    const older = await createAt("extracting", new Date(now.getTime() - 5000), later);
+    await createAt("awaiting_answers", now, later);
+    await createAt("failed", now, later);
+    const runs = await store.listLive(["extracting", "tailoring"], now, later);
+    expect(runs.map((run) => run.id)).toEqual([older, newer]);
+  });
+
+  it("skips Runs that expired at or before the given time", async () => {
+    await createAt("extracting", now, now);
+    await createAt("extracting", now, new Date(now.getTime() - 1));
+    const live = await createAt("extracting", now, new Date(now.getTime() + 1));
+    expect((await store.listLive(["extracting"], now, later)).map((run) => run.id)).toEqual([live]);
+  });
+
+  it("skips Runs created at or after the given time", async () => {
+    const old = await createAt("extracting", new Date(now.getTime() - 1), later);
+    await createAt("extracting", now, later);
+    await createAt("extracting", new Date(now.getTime() + 1), later);
+    expect((await store.listLive(["extracting"], now, now)).map((run) => run.id)).toEqual([old]);
+  });
+
+  it("returns nothing for no statuses", async () => {
+    await createAt("extracting", now, later);
+    expect(await store.listLive([], now, later)).toEqual([]);
+  });
+});
+
+describe("RunStore.claimRecovery", () => {
+  it("counts the first recovery of a Run in the expected status", async () => {
+    const id = await createRun("extracting");
+    expect(await store.claimRecovery(id, "extracting")).toBe(true);
+  });
+
+  it("refuses a second recovery", async () => {
+    const id = await createRun("tailoring");
+    expect(await store.claimRecovery(id, "tailoring")).toBe(true);
+    expect(await store.claimRecovery(id, "tailoring")).toBe(false);
+  });
+
+  it("refuses, and counts nothing, when the Run is in another status", async () => {
+    const id = await createRun("awaiting_answers");
+    expect(await store.claimRecovery(id, "extracting")).toBe(false);
+    expect(await store.claimRecovery(id, "awaiting_answers")).toBe(true);
+  });
+
+  it("returns false for an unknown Run", async () => {
+    expect(await store.claimRecovery(RunIdSchema.parse(randomUUID()), "extracting")).toBe(false);
+  });
+
+  it("lets exactly one of two simultaneous claims win", async () => {
+    const id = await createRun("extracting");
+    const results = await Promise.all([store.claimRecovery(id, "extracting"), store.claimRecovery(id, "extracting")]);
+    expect(results.filter(Boolean)).toHaveLength(1);
+  });
+
+  it("does not allow a negative count", async () => {
+    const id = await createRun("extracting");
+    await expect(prisma.$executeRaw`UPDATE app.runs SET recoveries = -1 WHERE id = ${id}::uuid`).rejects.toThrow();
+  });
+});

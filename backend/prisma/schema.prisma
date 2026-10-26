@@ -18,6 +18,8 @@ model Run {
   exportPath   String?  @map("export_path")
   errorCode    String?  @map("error_code")
   errorMessage String?  @map("error_message")
+  // How many times startup recovery resumed this Run from its checkpoint (at most one is allowed). Never negative.
+  recoveries   Int      @default(0)
 
   @@map("runs")
   @@schema("app")

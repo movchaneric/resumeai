@@ -26,12 +26,14 @@ import { describeFailure } from "@/llm/llmClient.js";
 import { ExtractionError, NoRequirementsError } from "@/extraction/errors.js";
 import type { Config } from "@/utils/config.js";
 import { ApiError } from "@/utils/errors.js";
-import { withSessionSpan } from "@/utils/spans.js";
+import { withSessionSpan, type Span } from "@/utils/spans.js";
 import { parseCv, stripNul } from "@/parsing/parseCv.js";
 import type { RunStore, StoredRun } from "@/stores/runs.js";
 
 /** What the service sees of a Run's graph state: plain data typed with shared types. */
 export type RunSnapshot = {
+  /** Where the graph is stopped: waiting for Answers, waiting for review, or not stopped (a node is due to run). */
+  pausedAt: "answers" | "review" | null;
   jobProfile: JobProfile | null;
   cv: Cv | null;
   coverageBefore: Coverage[] | null;
@@ -66,14 +68,31 @@ export interface GraphRunner {
    * the post-resume work is a new root span with the same session id. Rejects with the original error on failure.
    */
   answer(runId: RunId, answers: Answer[]): Promise<RunSnapshot>;
+  /**
+   * Carries on a Run from its last checkpoint with no new input, after the process that was running it stopped, and
+   * runs until the next pause or the end, like `start`. Rejects with the original error on failure.
+   */
+  recover(runId: RunId): Promise<RunSnapshot>;
   /** The current state, or null when no checkpoint exists yet. */
   read(runId: RunId): Promise<RunSnapshot | null>;
+}
+
+/**
+ * An in-process bus that tells listeners a Run changed. It carries only the Run id, never Run data: each listener
+ * rebuilds the view itself. Defined here so the service and the graph runner depend on the shape, not on an emitter.
+ */
+export interface RunEvents {
+  /** Tells every listener of the Run that something may have changed. A throwing listener never reaches the caller. */
+  publish(runId: RunId): void;
+  /** Calls `listener` on each `publish` of the Run until the returned function is called. */
+  subscribe(runId: RunId, listener: () => void): () => void;
 }
 
 export type RunsDeps = {
   store: RunStore;
   config: Config;
   graphRunner: GraphRunner;
+  events: RunEvents;
   now?: () => Date;
   /** Starts a task without awaiting it. Tests pass a version that collects the promises. */
   runInBackground?: (task: () => Promise<void>) => void;
@@ -98,6 +117,20 @@ function failureCode(error: unknown): keyof typeof FAILURE_MESSAGES {
   if (error instanceof CoverageError) return "COVERAGE_FAILED";
   return "INTERNAL";
 }
+
+/** The scores, the rounds and the exit reason on the span that ends a stretch of a Run, never content. */
+function setOutcomeAttributes(span: Span, result: RunSnapshot): void {
+  if (result.scoreBefore !== null) span.setAttribute("score.before", result.scoreBefore);
+  if (result.scoreAfter !== null) span.setAttribute("score.after", result.scoreAfter);
+  span.setAttribute("rounds", result.rounds);
+  if (result.exitReason !== null) span.setAttribute("exit_reason", result.exitReason);
+}
+
+/** The statuses after which a Run's stream ends: the Run is at a Pause (waiting for the user), Interrupted, failed or completed. */
+const STREAM_END_STATUSES: ReadonlySet<RunView["status"]> = new Set(["awaiting_answers", "awaiting_review", "failed", "interrupted", "completed"]);
+
+/** What a client connection gives `openRunStream`: `send` writes one view, `close` ends the stream. */
+export type RunStreamSink = { send: (view: RunView) => void; close: () => void };
 
 /** The longest `has_experience` text, after trimming. */
 export const MAX_ANSWER_LENGTH = 1000;
@@ -147,13 +180,7 @@ export class RunsService {
     const id = input.runId;
     try {
       try {
-        await withSessionSpan("pipeline", id, async (span) => {
-          const result = await graphRunner.start(input);
-          if (result.scoreBefore !== null) span.setAttribute("score.before", result.scoreBefore);
-          if (result.scoreAfter !== null) span.setAttribute("score.after", result.scoreAfter);
-          span.setAttribute("rounds", result.rounds);
-          if (result.exitReason !== null) span.setAttribute("exit_reason", result.exitReason);
-        });
+        await withSessionSpan("pipeline", id, async (span) => setOutcomeAttributes(span, await graphRunner.start(input)));
       } catch (error) {
         await this.recordFailure(id, "pipeline", error);
       }
@@ -180,11 +207,12 @@ export class RunsService {
     if (!(await store.claimStatus(run.id, "awaiting_answers", "tailoring"))) {
       throw new ApiError("RUN_NOT_AWAITING_ANSWERS", "This Run is not waiting for answers.");
     }
+    this.deps.events.publish(run.id);
     this.runInBackground(() => this.runResume(run.id, answers));
   }
 
   /** Logs a failed background step and marks the Run failed with the matching code and message. */
-  private async recordFailure(id: RunId, label: "pipeline" | "resume", error: unknown): Promise<void> {
+  private async recordFailure(id: RunId, label: "pipeline" | "resume" | "recovery", error: unknown): Promise<void> {
     const code: RunErrorCode = failureCode(error);
     // Log the code, the error name (with status and code for LLM failures) and the issue count only. Messages and issues can quote CV values or
     // model output, so they are not logged here (known open item: a safe failure log).
@@ -193,6 +221,7 @@ export class RunsService {
     const count = Array.isArray(issues) ? `, ${issues.length} issues` : "";
     console.error(`Run ${id}: ${label} failed (${code}) ${name}${count}`);
     await this.deps.store.markFailed(id, code, FAILURE_MESSAGES[code]);
+    this.deps.events.publish(id);
   }
 
   /** The background resume: the graph runs on from the Answers to the next pause, or the failure is recorded on the Run. Never throws. */
@@ -210,6 +239,60 @@ export class RunsService {
   }
 
   /**
+   * Carries on the Runs a stop cut off, for the server to call once it is listening. A Run created before this
+   * process started (`startedAt`) and still in `extracting` or `tailoring` had its background work in the process
+   * that stopped (single instance); a Run created since is being worked on by this process and is left alone. Each is
+   * handled from its checkpoint, one at a time to stay within the model provider's rate limits:
+   * no checkpoint -> `interrupted`; stopped at a Pause -> that Pause's status; mid-graph -> resumed, once (a Run
+   * already recovered once becomes `interrupted`, so a Run that crashes the server is not resumed on every restart).
+   * Expired Runs and Runs at a Pause are not listed. Never throws: a Run it cannot handle is logged and skipped.
+   */
+  async recoverRuns(startedAt: Date): Promise<void> {
+    let runs: StoredRun[];
+    try {
+      runs = await this.deps.store.listLive(["extracting", "tailoring"], this.now(), startedAt);
+    } catch (error) {
+      console.error("Run recovery: could not list the cut-off Runs", error);
+      return;
+    }
+    for (const run of runs) {
+      try {
+        await this.recoverRun(run);
+      } catch (error) {
+        console.error(`Run ${run.id}: recovery could not be completed`, error);
+      }
+    }
+  }
+
+  private async recoverRun(run: StoredRun): Promise<void> {
+    const { store, graphRunner, events } = this.deps;
+    const snapshot = await graphRunner.read(run.id);
+    const moveTo = async (status: "awaiting_answers" | "awaiting_review" | "interrupted", outcome: string): Promise<void> => {
+      // Conditional on the status recovery saw, so a Run a request moved in the meantime is left as it is.
+      if (await store.claimStatus(run.id, run.status, status)) {
+        console.log(`Run ${run.id}: recovery ${outcome}`);
+        events.publish(run.id);
+      } else {
+        console.log(`Run ${run.id}: recovery skipped, the Run is no longer ${run.status}`);
+      }
+    };
+
+    if (!snapshot) return moveTo("interrupted", "interrupted (no checkpoint)");
+    if (snapshot.pausedAt !== null) {
+      return moveTo(snapshot.pausedAt === "answers" ? "awaiting_answers" : "awaiting_review", "pause restored");
+    }
+    if (!(await store.claimRecovery(run.id, run.status))) {
+      return moveTo("interrupted", "interrupted (already recovered once)");
+    }
+    console.log(`Run ${run.id}: recovery resumed`);
+    try {
+      await withSessionSpan("recovery", run.id, async (span) => setOutcomeAttributes(span, await graphRunner.recover(run.id)));
+    } catch (error) {
+      await this.recordFailure(run.id, "recovery", error);
+    }
+  }
+
+  /**
    * A malformed, unknown or expired ID all look the same, so an ID reveals nothing about whether it ever existed.
    * Expiry is checked on read; the slice 5 sweep is only cleanup.
    */
@@ -219,6 +302,60 @@ export class RunsService {
     if (!run || run.expiresAt <= this.now()) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
     // A Run with no checkpoint yet (the graph has not started) reads as null.
     return toRunView(run, await this.deps.graphRunner.read(run.id));
+  }
+
+  /**
+   * Follows a Run: sends its current view, then a new view after every change, and closes after a view whose status
+   * needs the user (or the Run is gone). A view identical to the last one sent is skipped, and rebuilds are serialised
+   * so views go out in order. It subscribes before reading the first view, so a change in between is not lost.
+   * Throws the same 404 as `getRunView` before anything is sent; returns the function that ends the subscription.
+   */
+  async openRunStream(rawId: string, { send, close }: RunStreamSink): Promise<() => void> {
+    const parsed = RunIdSchema.safeParse(rawId);
+    if (!parsed.success) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
+    const id = parsed.data;
+    let done = false;
+    let lastSent: string | null = null;
+    let unsubscribe = () => {};
+    const stop = () => {
+      done = true;
+      unsubscribe();
+    };
+
+    /** Builds the view and sends it unless it equals the last one. Rejects when the view cannot be built. */
+    const emit = async (): Promise<void> => {
+      if (done) return;
+      const view = await this.getRunView(id);
+      if (done) return;
+      const json = JSON.stringify(view);
+      if (json === lastSent) return;
+      lastSent = json;
+      send(view);
+      if (STREAM_END_STATUSES.has(view.status)) {
+        stop();
+        close();
+      }
+    };
+
+    let chain: Promise<void> = Promise.resolve();
+    unsubscribe = this.deps.events.subscribe(id, () => {
+      chain = chain.then(emit).catch((error: unknown) => {
+        // The Run expired or its view could not be built: there is nothing more to follow.
+        if (!(error instanceof ApiError)) console.error(`Run ${id}: stream rebuild failed`, error);
+        stop();
+        close();
+      });
+    });
+    // The first view goes through the same chain, so a change published while it is being built queues behind it.
+    const first = chain.then(emit);
+    chain = first.catch(() => {});
+    try {
+      await first;
+    } catch (error) {
+      stop();
+      throw error;
+    }
+    return stop;
   }
 }
 
@@ -316,6 +453,18 @@ function toRunView(run: StoredRun, state: RunSnapshot | null): RunView {
       steps: steps({ parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "running" }),
       iterations: { used: state.rounds, max: MAX_ROUNDS },
       score: { before: Math.round(state.scoreBefore ?? 0), after: state.scoreAfter === null || state.changes.length === 0 ? null : Math.round(state.scoreAfter) },
+    });
+  }
+  if (run.status === "interrupted") {
+    // The step that was running when the process stopped: what is missing says which one it was.
+    const cutOff = !extracted ? "extract" : state?.scoreBefore == null ? "coverage" : "tailor";
+    const order = StepKeySchema.options;
+    const reached = order.indexOf(cutOff);
+    return RunViewSchema.parse({
+      ...common,
+      status: "interrupted",
+      job,
+      steps: steps(Object.fromEntries(order.slice(0, reached + 1).map((key, i) => [key, i === reached ? "failed" : "done"]))),
     });
   }
   return RunViewSchema.parse({

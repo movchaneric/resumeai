@@ -7,6 +7,7 @@ import { LangGraphRunner } from "@/graph/runner.js";
 import type { LlmClient } from "@/llm/llmClient.js";
 import type { RunSnapshot } from "@/services/runs.js";
 import { withSessionSpan } from "@/utils/spans.js";
+import { InProcessRunEvents } from "@/utils/runEvents.js";
 
 export type DevArgs =
   | { ok: true; cvArg: string; jdArg: string; check: boolean; tailor: boolean; coverage: boolean }
@@ -92,6 +93,7 @@ export async function runTailorInMemory(input: {
   const runner = new LangGraphRunner(
     { llm: input.llm, judgeLlm: input.judgeLlm, judgeModel: "report", jobProfileCache: NO_CACHE, checkpointer: createMemoryCheckpointer(), onRound: input.onRound },
     { setStatus: async () => {} },
+    new InProcessRunEvents(),
   );
   const snapshot = await runner.start({ runId: input.runId, cvText: input.cvText, jobDescriptionText: input.jobDescriptionText });
   // Nobody is here to answer the Questions, so the report skips them all.

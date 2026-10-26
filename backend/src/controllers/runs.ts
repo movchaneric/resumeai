@@ -1,10 +1,16 @@
 import type { Request, Response } from "express";
 import { ApiError } from "@/utils/errors.js";
+import type { Config } from "@/utils/config.js";
 import type { RunsService } from "@/services/runs.js";
+import type { OpenStreams } from "@/utils/openStreams.js";
 
 /** The HTTP edge of Runs: reads the request, calls the service, shapes the response. */
 export class RunsController {
-  constructor(private readonly service: RunsService) {}
+  constructor(
+    private readonly service: RunsService,
+    private readonly heartbeatMs: Config["sseHeartbeatMs"],
+    private readonly streams: OpenStreams,
+  ) {}
 
   create = async (req: Request, res: Response): Promise<void> => {
     if (!req.file) throw new ApiError("BAD_REQUEST", "Upload your CV in the `cv` field.");
@@ -20,5 +26,51 @@ export class RunsController {
 
   get = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
     res.json(await this.service.getRunView(req.params.id));
+  };
+
+  /**
+   * `GET /runs/:id/events`: a Server-Sent Events stream of the Run's view. The headers go out with the first view, so an
+   * unknown Run still gets the plain 404. A comment line every `heartbeatMs` keeps proxies from closing an idle stream.
+   */
+  events = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+    let started = false;
+    let heartbeat: NodeJS.Timeout | undefined;
+    let unsubscribe: (() => void) | undefined;
+    let gone = false;
+    // Shutdown ends the stream through the registry; the `close` cleanup below then unsubscribes it.
+    const unregister = this.streams.add({ end: () => new Promise<void>((resolve) => res.end(resolve)) });
+    const cleanup = () => {
+      gone = true;
+      clearInterval(heartbeat);
+      unsubscribe?.();
+      unregister();
+    };
+    res.on("close", cleanup);
+    const start = () => {
+      if (started) return;
+      started = true;
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+    };
+
+    unsubscribe = await this.service.openRunStream(req.params.id, {
+      send: (view) => {
+        if (res.writableEnded) return;
+        start();
+        res.write(`event: run\ndata: ${JSON.stringify(view)}\n\n`);
+      },
+      close: () => {
+        clearInterval(heartbeat);
+        res.end();
+      },
+    });
+    if (gone) return unsubscribe();
+    if (!res.writableEnded) {
+      heartbeat = setInterval(() => res.write(": ping\n\n"), this.heartbeatMs);
+    }
   };
 }

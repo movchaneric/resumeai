@@ -36,6 +36,14 @@ _Avoid_: Parsed job, job data
 One end-to-end tailoring session for a single CV and Job Description, from upload to exported Tailored CV. A Run is anonymous, addressed by an unguessable ID, and deleted after its time-to-live or on demand.
 _Avoid_: Session, job, task, thread
 
+**Pause**:
+A point where a Run waits for the user: for Answers to its Questions, or for review of its Changes. A Pause is durable; it ends only when the user acts or the Run's time-to-live runs out.
+_Avoid_: Interrupt, wait, hold
+
+**Interrupted Run**:
+A Run that a server stop cut off and that could not be resumed from where it was. It is final: the user starts a new Run. A Run a stop cut off that could be resumed simply carries on and is not an Interrupted Run.
+_Avoid_: Crashed run, paused run, failed run (failed means the work itself broke)
+
 **Confirmed Gap**:
 A Requirement the user has said they cannot satisfy. It is not asked about again, the tailor does not target it, and it counts toward the point where no further improvement is possible. Its Coverage verdict is unchanged.
 _Avoid_: Skipped question, missing skill

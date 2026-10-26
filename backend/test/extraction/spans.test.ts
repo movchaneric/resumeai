@@ -1,3 +1,4 @@
+import { InProcessRunEvents } from "@/utils/runEvents.js";
 import { context, SpanStatusCode, trace } from "@opentelemetry/api";
 import {
   InMemorySpanExporter,
@@ -244,6 +245,7 @@ describe("pipeline span", () => {
       store: store as unknown as RunStore,
       config: loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" }),
       graphRunner: skipQuestions(makeGraphRunner(store, llm)),
+      events: new InProcessRunEvents(),
     });
     await service.runPipeline({ runId: id as RunId, cvText, jobDescriptionText: "Backend developer" });
 
@@ -281,6 +283,7 @@ describe("pipeline span", () => {
       store: store as unknown as RunStore,
       config: loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" }),
       graphRunner: skipQuestions(makeGraphRunner(store, llm)),
+      events: new InProcessRunEvents(),
     });
     await service.runPipeline({ runId: id as RunId, cvText, jobDescriptionText: "Backend developer" });
 
@@ -319,6 +322,7 @@ describe("pipeline span", () => {
       store: store as unknown as RunStore,
       config: loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" }),
       graphRunner: skipQuestions(makeGraphRunner(store, llm)),
+      events: new InProcessRunEvents(),
     });
     await service.runPipeline({ runId: id as RunId, cvText, jobDescriptionText: "Backend developer" });
 

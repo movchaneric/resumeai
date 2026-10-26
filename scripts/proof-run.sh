@@ -23,8 +23,8 @@ with lsof; the script's own curl is not touched) as soon as an event matches, pr
 on stdout, and exits 0. It is for proving restart recovery. <spec> is a status (parsing, extracting, tailoring, ...) or
 round=<N>, which means iterations.used >= N while tailoring.
 --review <mode> (accept-all, reject-first or revise-first): when the Run reaches awaiting_review, POSTs a decision for every
-Change (accept all; or reject the first Change and accept the rest; or revise the first replace Change with a short edit
-of its own text and accept the rest), waits for completed, and prints the score before/after and each Change's final
+Change (accept all; or reject the first Change and accept the rest; or revise the first replace Change, or the first add Change
+if there is no replace, by appending a short note to its own text, and accept the rest), waits for completed, and prints the score before/after and each Change's final
 status to stderr. Without it a Run that reaches awaiting_review is only summarised.
 Exits non-zero if the Run ended failed. Needs curl and jq. BASE_URL defaults to http://localhost:3000.
 USAGE
@@ -168,10 +168,12 @@ print_questions() {
 
 # Sends the answers file for a Run that awaits answers; `$2` is that Run's current view.
 send_answers() {
-  local id="$1" view="$2" file="$3" ids unknown code reply
+  local id="$1" view="$2" file="$3" ids unknown code reply body
   [ -f "$file" ] || die "answers file not found: $file"
   jq -e . "$file" >/dev/null 2>&1 || die "answers file is not valid JSON: $file"
   ids="$(jq -r 'if type == "array" then . elif type == "object" and (.answers | type) == "array" then .answers else [] end | map(.questionId // empty) | .[]' "$file")"
+  # The server wants { "answers": [...] }; wrap a bare array and pass an object through.
+  body="$(jq -c 'if type == "array" then {answers: .} else . end' "$file")"
   echo "Answers given for questions:" >&2
   echo "${ids:-  (none)}" | sed 's/^/  /' >&2
   unknown="$(jq -r --argjson ids "$(jq -R . <<<"$ids" | jq -s 'map(select(. != ""))')" \
@@ -182,7 +184,7 @@ send_answers() {
     exit 1
   fi
   reply="$(mktemp)"
-  code="$(curl -sS --max-time 30 -o "$reply" -w '%{http_code}' -X POST -H 'content-type: application/json' --data-binary "@$file" "$BASE_URL/runs/$id/answers")" \
+  code="$(curl -sS --max-time 30 -o "$reply" -w '%{http_code}' -X POST -H 'content-type: application/json' --data-binary "$body" "$BASE_URL/runs/$id/answers")" \
     || die "could not reach $BASE_URL"
   if [ "$code" != "202" ]; then
     echo "error: POST /runs/$id/answers returned HTTP $code: $(api_error "$(cat "$reply")")" >&2
@@ -221,10 +223,10 @@ send_review() {
       body="$(jq '{decisions: [.changes | to_entries[] | {changeId: .value.id, decision: (if .key == 0 then "reject" else "accept" end)}]}' <<<"$view")"
       ;;
     revise-first)
-      first="$(jq -r '[.changes[] | select(.op == "replace")][0].id // empty' <<<"$view")"
-      [ -n "$first" ] || die "revise-first needs a replace Change, and this Run has none"
+      first="$(jq -r '([.changes[] | select(.op == "replace")] + [.changes[] | select(.op == "add")])[0].id // empty' <<<"$view")"
+      [ -n "$first" ] || die "revise-first needs a replace or add Change, and this Run has neither"
       # A short edit of the Change's own text: it adds no number, so it passes the stage-1 checks.
-      edit="$(jq -r --arg id "$first" '[.changes[] | select(.id == $id)][0].after | sub("[.]$"; "") + " (edited by the reviewer)."' <<<"$view")"
+      edit="$(jq -r --arg id "$first" '[.changes[] | select(.id == $id)][0].after + " (edited by the reviewer)"' <<<"$view")"
       body="$(jq --arg id "$first" --arg edit "$edit" '{decisions: [.changes[] | if .id == $id then {changeId: .id, decision: "revise", after: $edit} else {changeId: .id, decision: "accept"} end]}' <<<"$view")"
       ;;
   esac
@@ -239,7 +241,7 @@ send_review() {
   fi
   rm -f "$reply"
   final="$(follow_run "$id")"
-  jq -r '"Review ("'"$REVIEW_MODE"'"): status \(.status), score \(.score.before) -> \(.score.after)", (.changes[]? | "  \(.id) \(.op): \(.status)")' <<<"$final" >&2
+  jq -r --arg mode "$REVIEW_MODE" '"Review (\($mode)): status \(.status), score \(.score.before) -> \(.score.after)", (.changes[]? | "  \(.id) \(.op): \(.status)")' <<<"$final" >&2
 }
 
 # After the pauses: reviews a Run that is waiting for review when --review was given.

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  AnswerSchema,
   RunIdSchema,
   RunViewSchema,
   StepKeySchema,
@@ -97,6 +98,9 @@ function failureCode(error: unknown): keyof typeof FAILURE_MESSAGES {
   return "INTERNAL";
 }
 
+/** The longest `has_experience` text, after trimming. */
+export const MAX_ANSWER_LENGTH = 1000;
+
 export type CreateRunInput = { cv: Buffer; jobDescription: unknown };
 
 /** The business rules for a Run. It knows nothing about HTTP. */
@@ -165,6 +169,44 @@ export class RunsService {
   }
 
   /**
+   * Accepts the Answers for a Run paused in `awaiting_answers` and resumes it in the background. Checks, in order:
+   * the Run exists (404), it is waiting for Answers (409), the Answers are valid (400). Only then does it claim the
+   * Run by moving it to `tailoring` (the status the resumed graph writes first anyway) in one conditional update, so
+   * a second submission, even a simultaneous one, finds it no longer waiting and gets 409 without resuming twice.
+   */
+  async submitAnswers(rawId: string, body: unknown): Promise<void> {
+    const { store, graphRunner } = this.deps;
+    const id = RunIdSchema.safeParse(rawId);
+    const run = id.success ? await store.get(id.data) : null;
+    if (!run || run.expiresAt <= this.now()) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
+    if (run.status !== "awaiting_answers") throw new ApiError("RUN_NOT_AWAITING_ANSWERS", "This Run is not waiting for answers.");
+
+    const questions = (await graphRunner.read(run.id))?.questions ?? [];
+    const answers = validateAnswers(body, new Set(questions.map((q) => q.id as string)));
+    if (!(await store.claimStatus(run.id, "awaiting_answers", "tailoring"))) {
+      throw new ApiError("RUN_NOT_AWAITING_ANSWERS", "This Run is not waiting for answers.");
+    }
+    this.runInBackground(() => this.runResume(run.id, answers));
+  }
+
+  /** The background resume: the graph runs on from the Answers to the next pause, or the failure is recorded on the Run. Never throws. */
+  async runResume(id: RunId, answers: Answer[]): Promise<void> {
+    const { store, graphRunner } = this.deps;
+    try {
+      try {
+        await graphRunner.answer(id, answers);
+      } catch (error) {
+        const code: RunErrorCode = failureCode(error);
+        const name = error instanceof Error ? error.name : typeof error;
+        console.error(`Run ${id}: resume failed (${code}) ${name}`);
+        await store.markFailed(id, code, FAILURE_MESSAGES[code]);
+      }
+    } catch (error) {
+      console.error(`Run ${id}: could not store the resume outcome`, error);
+    }
+  }
+
+  /**
    * A malformed, unknown or expired ID all look the same, so an ID reveals nothing about whether it ever existed.
    * Expiry is checked on read; the slice 5 sweep is only cleanup.
    */
@@ -175,6 +217,29 @@ export class RunsService {
     // A Run with no checkpoint yet (the graph has not started) reads as null.
     return toRunView(run, await this.deps.graphRunner.read(run.id));
   }
+}
+
+/**
+ * Checks the body of an answers request and returns the Answers with their text trimmed. Rejects anything but a list
+ * of valid Answers to the given Questions, each at most once. The messages never echo the text.
+ */
+function validateAnswers(body: unknown, questionIds: Set<string>): Answer[] {
+  const invalid = (message: string) => new ApiError("INVALID_ANSWERS", message);
+  const list = (body as { answers?: unknown } | null | undefined)?.answers;
+  if (!Array.isArray(list)) throw invalid("Send `answers` as a list.");
+  const seen = new Set<string>();
+  return list.map((raw, i) => {
+    const parsed = AnswerSchema.safeParse(raw);
+    if (!parsed.success) throw invalid(`Answer ${i + 1} is not valid.`);
+    const answer: Answer = parsed.data.kind === "has_experience" ? { ...parsed.data, text: parsed.data.text.trim() } : parsed.data;
+    if (answer.kind === "has_experience" && (answer.text === "" || answer.text.length > MAX_ANSWER_LENGTH)) {
+      throw invalid(`Answer ${i + 1} must be between 1 and ${MAX_ANSWER_LENGTH} characters.`);
+    }
+    if (!questionIds.has(answer.questionId)) throw invalid(`Answer ${i + 1} is for a question this Run did not ask.`);
+    if (seen.has(answer.questionId)) throw invalid(`Answer ${i + 1} repeats a question already answered.`);
+    seen.add(answer.questionId);
+    return answer;
+  });
 }
 
 /**

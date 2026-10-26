@@ -56,6 +56,15 @@ export class RunStore {
     await this.prisma.run.updateMany({ where: { id }, data: { status } });
   }
 
+  /**
+   * Moves the Run from `from` to `to` only if it is still in `from`, in one statement, and says whether it did.
+   * It is the lock that lets just one of two simultaneous requests act on the same Run.
+   */
+  async claimStatus(id: RunId, from: RunStatus, to: RunStatus): Promise<boolean> {
+    const { count } = await this.prisma.run.updateMany({ where: { id, status: from }, data: { status: to } });
+    return count === 1;
+  }
+
   async markFailed(id: RunId, code: RunErrorCode, message: string): Promise<void> {
     await this.prisma.run.updateMany({ where: { id }, data: { status: "failed", errorCode: code, errorMessage: message } });
   }

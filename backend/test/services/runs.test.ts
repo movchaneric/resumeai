@@ -6,7 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 import { loadConfig } from "@/utils/config.js";
 import { ApiError } from "@/utils/errors.js";
 import type { NewRun, RunStore, StoredRun } from "@/stores/runs.js";
-import { RunsService } from "@/services/runs.js";
+import { RunsService, type GraphRunner, type RunSnapshot } from "@/services/runs.js";
+import { CoverageError } from "@/scoring/errors.js";
 import { ExtractionError, NoRequirementsError } from "@/extraction/errors.js";
 import { LlmSchemaError, LlmUnavailableError } from "@/llm/llmClient.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
@@ -882,5 +883,112 @@ describe("RunsService awaiting answers", () => {
     if (review.status !== "awaiting_review") throw new Error(`unexpected status ${review.status}`);
     expect(review.userEvidence.map((u) => [u.id, u.requirementId, u.text])).toEqual([["ue1", "req2", "Ran clusters at Acme."]]);
     expect(review.requirements.map((r) => r.confirmedGap)).toEqual([false, false, true]);
+  });
+});
+
+describe("RunsService.submitAnswers", () => {
+  const runId = "22222222-2222-4222-8222-222222222222" as RunId;
+  const questions = [
+    { id: "q1", requirementId: "req2", text: "Have you done this?" },
+    { id: "q2", requirementId: "req3", text: "Have you done that?" },
+  ];
+  const snapshot = {
+    jobProfile: null, cv: null, coverageBefore: null, coverage: null, changes: [], scoreBefore: null, scoreAfter: null,
+    rejections: [], questions, userEvidence: [], confirmedGaps: [], rounds: 0, exitReason: null,
+  } as unknown as RunSnapshot;
+
+  /** A store (extended with the atomic claim) holding a Run in `status`, and a runner whose `answer` is a spy. */
+  function answerSetup(status: RunStatus = "awaiting_answers", now = () => new Date("2026-10-01T00:00:00Z")) {
+    const store = new FakeStore() as FakeStore & { claimStatus(id: RunId, from: RunStatus, to: RunStatus): Promise<boolean> };
+    store.claimStatus = async (id, from, to) => {
+      if (store.rows.get(id)?.status !== from) return false;
+      await store.setStatus(id, to);
+      return true;
+    };
+    store.rows.set(runId, { id: runId, status, createdAt: now(), expiresAt: new Date(now().getTime() + 1000), exportPath: null, error: null });
+    const answer = vi.fn<GraphRunner["answer"]>(async () => snapshot);
+    const graphRunner: GraphRunner = { start: async () => snapshot, answer, read: async () => snapshot };
+    const tasks: (() => Promise<void>)[] = [];
+    const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner, now, runInBackground: (t) => void tasks.push(t) });
+    return { store, answer, tasks, service };
+  }
+  const has = (questionId: string, text: string) => ({ kind: "has_experience", questionId, text });
+  const rejection = async (promise: Promise<unknown>) => (await promise.then(() => null, (e) => e)) as ApiError;
+
+  it("resumes the graph in the background with trimmed Answers and moves the Run out of awaiting_answers", async () => {
+    const { service, store, answer, tasks } = answerSetup();
+    await service.submitAnswers(runId, { answers: [has("q2", "  Ran a cluster.  "), { kind: "no_experience", questionId: "q1" }] });
+    expect(store.rows.get(runId)?.status).toBe("tailoring");
+    expect(answer).not.toHaveBeenCalled();
+    await tasks[0]!();
+    expect(answer).toHaveBeenCalledExactlyOnceWith(runId, [has("q2", "Ran a cluster."), { kind: "no_experience", questionId: "q1" }]);
+  });
+
+  it("accepts an empty list and a text of exactly 1,000 characters", async () => {
+    await answerSetup().service.submitAnswers(runId, { answers: [] });
+    await answerSetup().service.submitAnswers(runId, { answers: [has("q1", " " + "x".repeat(1000) + " ")] });
+  });
+
+  it.each([
+    ["no body", undefined],
+    ["a body that is not an object", "q1"],
+    ["answers that is not a list", { answers: "q1" }],
+    ["an Answer of an unknown kind", { answers: [{ kind: "maybe", questionId: "q1" }] }],
+    ["an Answer without a Question ID", { answers: [{ kind: "no_experience" }] }],
+    ["a text that is only whitespace", { answers: [has("q1", "   \n ")] }],
+    ["a text over 1,000 characters", { answers: [has("q1", "x".repeat(1001))] }],
+    ["a Question that does not exist", { answers: [has("q9", "text")] }],
+    ["a Question answered twice", { answers: [has("q1", "a"), { kind: "no_experience", questionId: "q1" }] }],
+  ])("rejects %s as INVALID_ANSWERS without resuming", async (_name, body) => {
+    const { service, answer, tasks, store } = answerSetup();
+    const error = await rejection(service.submitAnswers(runId, body));
+    expect(error.code).toBe("INVALID_ANSWERS");
+    expect(error.status).toBe(400);
+    expect(tasks).toHaveLength(0);
+    expect(answer).not.toHaveBeenCalled();
+    expect(store.rows.get(runId)?.status).toBe("awaiting_answers");
+  });
+
+  it("answers 404 for a malformed, unknown or expired Run", async () => {
+    let now = new Date("2026-10-01T00:00:00Z");
+    const { service } = answerSetup("awaiting_answers", () => now);
+    expect((await rejection(service.submitAnswers("nope", { answers: [] }))).code).toBe("RUN_NOT_FOUND");
+    expect((await rejection(service.submitAnswers("33333333-3333-4333-8333-333333333333", { answers: [] }))).code).toBe("RUN_NOT_FOUND");
+    now = new Date(now.getTime() + 1000);
+    expect((await rejection(service.submitAnswers(runId, { answers: [] }))).code).toBe("RUN_NOT_FOUND");
+  });
+
+  it.each<RunStatus>(["extracting", "tailoring", "awaiting_review", "failed"])("answers 409 when the Run is %s", async (status) => {
+    const { service, tasks } = answerSetup(status);
+    const error = await rejection(service.submitAnswers(runId, { answers: [] }));
+    expect(error.code).toBe("RUN_NOT_AWAITING_ANSWERS");
+    expect(error.status).toBe(409);
+    expect(tasks).toHaveLength(0);
+  });
+
+  it("resumes only once when two valid submissions arrive together", async () => {
+    const { service, tasks } = answerSetup();
+    const results = await Promise.allSettled([service.submitAnswers(runId, { answers: [] }), service.submitAnswers(runId, { answers: [] })]);
+    expect(results.map((r) => r.status).sort()).toEqual(["fulfilled", "rejected"]);
+    expect(tasks).toHaveLength(1);
+  });
+
+  it("records a failed resume as a failed Run with a code and message, and never throws", async () => {
+    const { service, store, answer, tasks } = answerSetup();
+    answer.mockRejectedValueOnce(new CoverageError("bad", []));
+    await service.submitAnswers(runId, { answers: [] });
+    await tasks[0]!();
+    const run = store.rows.get(runId)!;
+    expect(run.status).toBe("failed");
+    expect(run.error?.code).toBe("COVERAGE_FAILED");
+    expect(run.error?.message).toBeTruthy();
+  });
+
+  it("maps an unexpected resume failure to INTERNAL", async () => {
+    const { service, store, answer, tasks } = answerSetup();
+    answer.mockRejectedValueOnce(new Error("boom"));
+    await service.submitAnswers(runId, { answers: [] });
+    await tasks[0]!();
+    expect(store.rows.get(runId)?.error?.code).toBe("INTERNAL");
   });
 });

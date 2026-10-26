@@ -215,3 +215,107 @@ describe("GET /runs/:id", () => {
     expect(await store.get(RunIdSchema.parse(body.id))).not.toBeNull();
   });
 });
+
+describe("POST /runs/:id/answers", () => {
+  const job = {
+    ...extractedJob,
+    requirements: [
+      { text: "Node.js", source: "Node.js", kind: "skill", importance: "must_have" },
+      { text: "PostgreSQL", source: "PostgreSQL", kind: "skill", importance: "must_have" },
+      { text: "Kubernetes", source: "Kubernetes", kind: "skill", importance: "must_have" },
+    ],
+  };
+  const coverage = {
+    verdicts: ["met", "unmet", "unmet"].map((verdict, i) => ({
+      requirementId: `req${i + 1}`,
+      reason: "r",
+      evidenceIds: verdict === "met" ? ["exp1.b1"] : [],
+      verdict,
+    })),
+  };
+  const has = (questionId: string, text: string) => ({ kind: "has_experience", questionId, text });
+
+  /** Uploads a CV and runs the pipeline until it pauses for Answers (Questions q1, q2). */
+  async function awaitingAnswers(): Promise<string> {
+    llm.enqueue("extract_job_profile", job).enqueue("extract_cv", extractedCv).enqueueVoted("assess_coverage", coverage);
+    const { body } = await upload("cv.pdf");
+    await settle();
+    expect((await request(app).get(`/runs/${body.id}`)).body.status).toBe("awaiting_answers");
+    return body.id;
+  }
+  const post = (id: string, body: unknown) => request(app).post(`/runs/${id}/answers`).send(body as object);
+
+  it("answers 202 with the Run ID and resumes the graph with trimmed Answers", async () => {
+    const id = await awaitingAnswers();
+    llm.enqueue("tailor", { changes: [] }, { changes: [] });
+    const res = await post(id, { answers: [has("q2", "  Ran a small cluster.  "), { kind: "no_experience", questionId: "q1" }] });
+    expect(res.status).toBe(202);
+    expect(res.body).toEqual({ id });
+    await settle();
+    const view = RunViewSchema.parse((await request(app).get(`/runs/${id}`)).body);
+    expect(view.status).toBe("awaiting_review");
+    if (view.status !== "awaiting_review") return;
+    expect(view.userEvidence.map((u) => u.text)).toEqual(["Ran a small cluster."]);
+    expect(view.requirements.find((r) => r.id === "req2")?.confirmedGap).toBe(true);
+  });
+
+  it("treats an empty list as skipping every Question", async () => {
+    const id = await awaitingAnswers();
+    const res = await post(id, { answers: [] });
+    expect(res.status).toBe(202);
+    await settle();
+    expect(RunViewSchema.parse((await request(app).get(`/runs/${id}`)).body).status).not.toBe("awaiting_answers");
+  });
+
+  it("answers 409 to a second submission and resumes only once", async () => {
+    const id = await awaitingAnswers();
+    // The background task is held back, so the second request arrives while the resume is in flight.
+    const held: (() => Promise<void>)[] = [];
+    const slow = createApp({ store, config, graphRunner, runInBackground: (t) => void held.push(t) });
+    const send = () => request(slow).post(`/runs/${id}/answers`).send({ answers: [] });
+    const [first, second] = [await send(), await send()];
+    expect([first.status, second.status]).toEqual([202, 409]);
+    expect(second.body.code).toBe("RUN_NOT_AWAITING_ANSWERS");
+    expect(held).toHaveLength(1);
+  });
+
+  it.each([
+    ["answers missing", {}],
+    ["answers not a list", { answers: "q1" }],
+    ["an invalid Answer", { answers: [{ kind: "maybe", questionId: "q1" }] }],
+    ["blank text", { answers: [has("q1", "   ")] }],
+    ["text over 1,000 characters", { answers: [has("q1", "x".repeat(1001))] }],
+    ["an unknown Question", { answers: [has("q9", "text")] }],
+    ["a Question answered twice", { answers: [has("q1", "a"), has("q1", "b")] }],
+  ])("answers 400 INVALID_ANSWERS for %s and leaves the Run waiting", async (_name, body) => {
+    const id = await awaitingAnswers();
+    const res = await post(id, body);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("INVALID_ANSWERS");
+    expect((await request(app).get(`/runs/${id}`)).body.status).toBe("awaiting_answers");
+  });
+
+  it("answers 400 to a body that is not JSON", async () => {
+    const id = await awaitingAnswers();
+    const res = await request(app).post(`/runs/${id}/answers`).set("Content-Type", "application/json").send("{nope");
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("BAD_REQUEST");
+  });
+
+  it("answers 404 for an unknown or malformed Run ID", async () => {
+    for (const id of ["3f0c1d4e-5b2a-4c8e-9a71-0d6e2f8b7a11", "nope"]) {
+      const res = await post(id, { answers: [] });
+      expect(res.status).toBe(404);
+      expect(res.body.code).toBe("RUN_NOT_FOUND");
+    }
+  });
+
+  it("answers 409 when the Run is not waiting for Answers", async () => {
+    llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueueVoted("assess_coverage", coverageAnswer);
+    const { body } = await upload("cv.pdf");
+    await settle();
+    const res = await post(body.id, { answers: [] });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("RUN_NOT_AWAITING_ANSWERS");
+  });
+});

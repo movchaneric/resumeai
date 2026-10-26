@@ -8,6 +8,7 @@ import { LangChainLlmClient } from "@/llm/langChainLlmClient.js";
 import { JobProfileStore } from "@/stores/jobProfiles.js";
 import { RunsService } from "@/services/runs.js";
 import { RunStore } from "@/stores/runs.js";
+import { OpenStreams } from "@/utils/openStreams.js";
 import { InProcessRunEvents } from "@/utils/runEvents.js";
 import { closeServer } from "@/utils/shutdown.js";
 import { setupTracing } from "@/utils/tracing.js";
@@ -29,7 +30,8 @@ const graphRunner = new LangGraphRunner({ llm, judgeLlm, judgeModel: config.llm.
 const startedAt = new Date();
 const runsDeps = { store, config, graphRunner, events };
 const runsService = new RunsService(runsDeps);
-const app = createApp(runsDeps, runsService);
+const streams = new OpenStreams();
+const app = createApp(runsDeps, runsService, streams);
 
 const server = app.listen(config.port, () => {
   console.log(`backend listening on :${config.port}`);
@@ -40,8 +42,8 @@ const server = app.listen(config.port, () => {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     void (async () => {
-      // Open streams are cut, not drained; cut-off Runs are picked up by recovery on the next start.
-      await closeServer(server);
+      // Open event streams are ended, Runs are not drained; requests in flight finish, and cut-off Runs are picked up by recovery on the next start.
+      await closeServer(server, streams);
       // Flush buffered spans first; a failed flush (Phoenix down) must not block the exit.
       try {
         await tracingProvider?.shutdown();

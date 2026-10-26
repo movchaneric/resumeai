@@ -159,6 +159,21 @@ describe("RunsService.recoverRuns", () => {
     expect(comparable(await after.service.getRunView(id))).toEqual(comparable(await uninterrupted(enqueueQuestions, true)));
   });
 
+  it("ends a Run in review with exit reason error, not failed, when tailoring fails inside the loop after recovery", async () => {
+    const before = boot(createMemoryCheckpointer());
+    const id = await tailoringHeldAt(before, "tailor");
+
+    const after = boot(before.checkpointer);
+    after.llm.enqueue("tailor", new Error("model down"));
+    await after.service.recoverRuns(STARTED_AT);
+
+    expect(await statusOf(id)).toBe("awaiting_review");
+    expect((await after.service.getRunView(id)).status).toBe("awaiting_review");
+    // A reader on the same checkpointer shows why the graph left the loop.
+    const reader = makeGraphRunner(store, after.llm, after.llm, undefined, undefined, after.checkpointer);
+    expect((await reader.read(id))?.exitReason).toBe("error");
+  });
+
   it("resumes a Run cut off in the first extraction call", async () => {
     const before = boot(createMemoryCheckpointer());
     const id = await startHeldAt(before, "extract_job_profile");

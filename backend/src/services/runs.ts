@@ -126,8 +126,8 @@ function setOutcomeAttributes(span: Span, result: RunSnapshot): void {
   if (result.exitReason !== null) span.setAttribute("exit_reason", result.exitReason);
 }
 
-/** The statuses where nothing happens without the user: a stream closes after sending one. */
-const RESTING_STATUSES: ReadonlySet<RunView["status"]> = new Set(["awaiting_answers", "awaiting_review", "failed", "interrupted", "completed"]);
+/** The statuses after which a Run's stream ends: the Run is at a Pause (waiting for the user), Interrupted, failed or completed. */
+const STREAM_END_STATUSES: ReadonlySet<RunView["status"]> = new Set(["awaiting_answers", "awaiting_review", "failed", "interrupted", "completed"]);
 
 /** What a client connection gives `openRunStream`: `send` writes one view, `close` ends the stream. */
 export type RunStreamSink = { send: (view: RunView) => void; close: () => void };
@@ -331,7 +331,7 @@ export class RunsService {
       if (json === lastSent) return;
       lastSent = json;
       send(view);
-      if (RESTING_STATUSES.has(view.status)) {
+      if (STREAM_END_STATUSES.has(view.status)) {
         stop();
         close();
       }
@@ -458,7 +458,7 @@ function toRunView(run: StoredRun, state: RunSnapshot | null): RunView {
   if (run.status === "interrupted") {
     // The step that was running when the process stopped: what is missing says which one it was.
     const cutOff = !extracted ? "extract" : state?.scoreBefore == null ? "coverage" : "tailor";
-    const order = ["parse", "extract", "coverage", "questions", "tailor"] as const;
+    const order = StepKeySchema.options;
     const reached = order.indexOf(cutOff);
     return RunViewSchema.parse({
       ...common,

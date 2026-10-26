@@ -1,12 +1,13 @@
 import type { RunId } from "@resume-ai/shared";
+import type { RunEvents } from "@/services/runs.js";
 
 type Listener = () => void;
 
 /**
- * The in-process bus behind `RunEvents` (defined by the service layer; it has the same shape). One backend instance is
+ * The in-process bus behind `RunEvents` (defined by the service layer). One backend instance is
  * assumed, so a stream only sees Runs worked on by this process. Moving to Postgres LISTEN/NOTIFY would change only this class.
  */
-export class InProcessRunEvents {
+export class InProcessRunEvents implements RunEvents {
   private readonly listeners = new Map<RunId, Set<Listener>>();
 
   publish(runId: RunId): void {

@@ -2,12 +2,14 @@ import type { Request, Response } from "express";
 import { ApiError } from "@/utils/errors.js";
 import type { Config } from "@/utils/config.js";
 import type { RunsService } from "@/services/runs.js";
+import type { OpenStreams } from "@/utils/openStreams.js";
 
 /** The HTTP edge of Runs: reads the request, calls the service, shapes the response. */
 export class RunsController {
   constructor(
     private readonly service: RunsService,
     private readonly heartbeatMs: Config["sseHeartbeatMs"],
+    private readonly streams: OpenStreams,
   ) {}
 
   create = async (req: Request, res: Response): Promise<void> => {
@@ -35,10 +37,13 @@ export class RunsController {
     let heartbeat: NodeJS.Timeout | undefined;
     let unsubscribe: (() => void) | undefined;
     let gone = false;
+    // Shutdown ends the stream through the registry; the `close` cleanup below then unsubscribes it.
+    const unregister = this.streams.add({ end: () => new Promise<void>((resolve) => res.end(resolve)) });
     const cleanup = () => {
       gone = true;
       clearInterval(heartbeat);
       unsubscribe?.();
+      unregister();
     };
     res.on("close", cleanup);
     const start = () => {

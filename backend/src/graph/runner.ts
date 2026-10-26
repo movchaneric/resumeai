@@ -68,8 +68,10 @@ export class LangGraphRunner implements GraphRunner {
       ...deps,
       onEnter: async (runId, node) => {
         await this.write(runId as RunId, NODE_STATUS[node]);
-        // The previous node's checkpoint is already stored (the graph runs with `durability: "sync"`), so a view built
-        // now shows its results. A node that shares its predecessor's status writes nothing but still publishes.
+        // Deliberate: the push for node N happens when node N+1 is entered (or after the graph returns, see
+        // `runUntilPause`). With `durability: "sync"` node N's checkpoint is already stored by then, so a view built now
+        // shows its results; that is equivalent to pushing after each node ends. A node that shares its predecessor's
+        // status writes nothing but still publishes.
         this.events.publish(runId as RunId);
       },
     });

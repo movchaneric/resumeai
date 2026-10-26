@@ -13,6 +13,7 @@ import { RunsService, type GraphRunner } from "@/services/runs.js";
 import { RunStore } from "@/stores/runs.js";
 import { loadConfig } from "@/utils/config.js";
 import { createPrisma } from "@/utils/db.js";
+import { OpenStreams } from "@/utils/openStreams.js";
 import { InProcessRunEvents } from "@/utils/runEvents.js";
 import { closeServer } from "@/utils/shutdown.js";
 import { GatedLlm } from "../fakes/gatedLlm.js";
@@ -418,7 +419,8 @@ describe("GET /runs/:id/events", () => {
   it("ends an open stream and releases its subscription when the server shuts down, without waiting for the Run", async () => {
     const release = llm.hold("extract_job_profile");
     enqueueToQuestions();
-    const closing = listen(createApp({ store, config, graphRunner, events, runInBackground }));
+    const streams = new OpenStreams();
+    const closing = listen(createApp({ store, config, graphRunner, events, runInBackground }, undefined, streams));
     const id = await upload(closing);
     const before = events.active;
     const client = await openStream(closing, `/runs/${id}/events`);
@@ -426,11 +428,51 @@ describe("GET /runs/:id/events", () => {
     expect(events.active).toBe(before + 1);
 
     const start = Date.now();
-    await closeServer(closing);
+    await closeServer(closing, streams);
     expect(Date.now() - start).toBeLessThan(1000);
     await until(() => client.ended, "the stream to end");
     await until(() => events.active === before, "the subscription to be released");
     release();
+  });
+
+  it("lets an ordinary request in flight finish when the server shuts down", async () => {
+    enqueueToQuestions();
+    const id = await upload();
+    await settle();
+    // The read behind GET /runs/:id is held until the test lets it go.
+    let reached!: () => void;
+    const hasReached = new Promise<void>((resolve) => (reached = resolve));
+    let releaseRead!: () => void;
+    const gate = new Promise<void>((resolve) => (releaseRead = resolve));
+    const slowRead: GraphRunner = {
+      start: (input) => graphRunner.start(input),
+      answer: (runId, answers) => graphRunner.answer(runId, answers),
+      recover: (runId) => graphRunner.recover(runId),
+      async read(runId) {
+        const snapshot = await graphRunner.read(runId);
+        reached();
+        await gate;
+        return snapshot;
+      },
+    };
+    const streams = new OpenStreams();
+    const closing = listen(createApp({ store, config, graphRunner: slowRead, events, runInBackground }, undefined, streams));
+    const pending = fetch(`http://127.0.0.1:${(closing.address() as AddressInfo).port}/runs/${id}`);
+    await hasReached;
+
+    let closed = false;
+    const closing$ = closeServer(closing, streams).then(() => (closed = true));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(closed).toBe(false);
+
+    releaseRead();
+    const res = await pending;
+    expect(res.status).toBe(200);
+    const view = RunViewSchema.parse(await res.json());
+    expect(view.id).toBe(id);
+    expect(view.status).toBe("awaiting_answers");
+    await closing$;
+    expect(closed).toBe(true);
   });
 
   it("ignores Last-Event-ID and sends no event ids", async () => {

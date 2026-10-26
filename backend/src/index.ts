@@ -9,6 +9,7 @@ import { JobProfileStore } from "@/stores/jobProfiles.js";
 import { RunsService } from "@/services/runs.js";
 import { RunStore } from "@/stores/runs.js";
 import { InProcessRunEvents } from "@/utils/runEvents.js";
+import { closeServer } from "@/utils/shutdown.js";
 import { setupTracing } from "@/utils/tracing.js";
 
 const config = loadConfig();
@@ -38,18 +39,18 @@ const server = app.listen(config.port, () => {
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    server.close(() => {
-      void (async () => {
-        // Flush buffered spans first; a failed flush (Phoenix down) must not block the exit.
-        try {
-          await tracingProvider?.shutdown();
-        } catch (error) {
-          console.error("Could not flush traces on shutdown", error);
-        }
-        await checkpointer.end().catch(() => {});
-        await prisma.$disconnect().catch(() => {});
-        process.exit(0);
-      })();
-    });
+    void (async () => {
+      // Open streams are cut, not drained; cut-off Runs are picked up by recovery on the next start.
+      await closeServer(server);
+      // Flush buffered spans first; a failed flush (Phoenix down) must not block the exit.
+      try {
+        await tracingProvider?.shutdown();
+      } catch (error) {
+        console.error("Could not flush traces on shutdown", error);
+      }
+      await checkpointer.end().catch(() => {});
+      await prisma.$disconnect().catch(() => {});
+      process.exit(0);
+    })();
   });
 }

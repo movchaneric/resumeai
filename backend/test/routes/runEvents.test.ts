@@ -14,6 +14,7 @@ import { RunStore } from "@/stores/runs.js";
 import { loadConfig } from "@/utils/config.js";
 import { createPrisma } from "@/utils/db.js";
 import { InProcessRunEvents } from "@/utils/runEvents.js";
+import { closeServer } from "@/utils/shutdown.js";
 import { GatedLlm } from "../fakes/gatedLlm.js";
 import { FakeJobProfileCache } from "../fakes/jobProfileCache.js";
 import { makeGraphRunner } from "../fakes/runGraph.js";
@@ -412,6 +413,24 @@ describe("GET /runs/:id/events", () => {
     release();
     await until(() => other.ended, "the stream to close");
     await until(() => events.active === before, "the subscription to be released");
+  });
+
+  it("ends an open stream and releases its subscription when the server shuts down, without waiting for the Run", async () => {
+    const release = llm.hold("extract_job_profile");
+    enqueueToQuestions();
+    const closing = listen(createApp({ store, config, graphRunner, events, runInBackground }));
+    const id = await upload(closing);
+    const before = events.active;
+    const client = await openStream(closing, `/runs/${id}/events`);
+    await until(() => client.views.length === 1, "the first view");
+    expect(events.active).toBe(before + 1);
+
+    const start = Date.now();
+    await closeServer(closing);
+    expect(Date.now() - start).toBeLessThan(1000);
+    await until(() => client.ended, "the stream to end");
+    await until(() => events.active === before, "the subscription to be released");
+    release();
   });
 
   it("ignores Last-Event-ID and sends no event ids", async () => {

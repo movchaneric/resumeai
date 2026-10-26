@@ -5,8 +5,9 @@ set -euo pipefail
 usage() {
   cat >&2 <<'USAGE'
 Usage:
-  scripts/proof-run.sh [--watch] <cv-file> <job-description-file> [answers.json]
-  scripts/proof-run.sh [--watch] --resume <run-id> <answers.json>
+  scripts/proof-run.sh [--watch [--kill-at <spec>]] <cv-file> <job-description-file> [answers.json]
+  scripts/proof-run.sh [--watch [--kill-at <spec>]] --resume <run-id> <answers.json>
+  scripts/proof-run.sh --watch-run <run-id> [--kill-at <spec>]
   scripts/proof-run.sh --help
 
 Starts a Run (or resumes one that awaits answers), polls until it stops, and prints a JSON summary:
@@ -15,6 +16,12 @@ At awaiting_answers without an answers file it prints the Questions and the resu
 --watch follows the Run through its event stream (GET /runs/:id/events, curl -N) instead of polling: it prints one line
 per event (status, running step, round used/max, score before->after) to stderr, and opens a new stream after it posts
 the answers. The final summary is the same.
+--watch-run <run-id> follows an existing Run's event stream the same way until the server closes it, then prints the
+summary. It starts nothing and sends no answers.
+--kill-at <spec> (only with --watch or --watch-run) kills the server listening on the port of BASE_URL (SIGKILL, found
+with lsof; the script's own curl is not touched) as soon as an event matches, prints "KILLED at <spec>" and the Run id
+on stdout, and exits 0. It is for proving restart recovery. <spec> is a status (parsing, extracting, tailoring, ...) or
+round=<N>, which means iterations.used >= N while tailoring.
 Exits non-zero if the Run ended failed. Needs curl and jq. BASE_URL defaults to http://localhost:3000.
 USAGE
   exit "${1:-2}"
@@ -30,10 +37,45 @@ POLL_SECONDS=3
 MAX_POLLS=200 # 200 x 3 s = 10 minutes
 IN_PROGRESS="parsing extracting tailoring"
 WATCH=0
+KILL_AT=""
 MAX_REOPENS=5 # a stream that ends while the Run is still in progress (a dropped connection) is reopened this many times
 
 command -v curl >/dev/null || die "curl is required"
 command -v jq >/dev/null || die "jq is required"
+
+# Sent by watch_run (a subshell) after it has killed the server.
+on_killed() {
+  echo "KILLED at $KILL_AT"
+  echo "Run id: $run_id"
+  exit 0
+}
+trap on_killed USR1
+run_id=""
+
+# 0 when the Run view `$2` satisfies the kill spec `$1`: a status, or round=N (iterations.used >= N while tailoring).
+event_matches() {
+  local spec="$1" n
+  case "$spec" in
+    round=*)
+      n="${spec#round=}"
+      jq -e --argjson n "$n" '.status == "tailoring" and ((.iterations.used // 0) >= $n)' >/dev/null 2>&1 <<<"$2"
+      ;;
+    *) jq -e --arg s "$spec" '.status == $s' >/dev/null 2>&1 <<<"$2" ;;
+  esac
+}
+
+# SIGKILLs whatever listens on the port of BASE_URL; only the listener, so the script's own connection is spared.
+kill_server() {
+  local port pids
+  port="$(printf '%s' "$BASE_URL" | sed -nE 's#^[a-z]+://[^/:]+:([0-9]+).*#\1#p')"
+  if [ -z "$port" ]; then
+    case "$BASE_URL" in https://*) port=443 ;; *) port=80 ;; esac
+  fi
+  pids="$(lsof -ti "tcp:$port" -sTCP:LISTEN 2>/dev/null || true)"
+  [ -n "$pids" ] || die "--kill-at: nothing is listening on port $port"
+  # shellcheck disable=SC2086
+  kill -9 $pids
+}
 
 check_server() {
   curl -s -o /dev/null --max-time 5 "$BASE_URL/runs/00000000-0000-0000-0000-000000000000" \
@@ -81,14 +123,22 @@ watch_run() {
   tmp="$(mktemp)"
   while :; do
     : >"$tmp"
-    curl -sSN --max-time 700 "$BASE_URL/runs/$id/events" 2>/dev/null | while IFS= read -r line; do
+    # Process substitution, so the loop runs in this shell and --kill-at can exit from it.
+    while IFS= read -r line; do
       case "$line" in
         "data: "*)
           printf '%s\n' "${line#data: }" >"$tmp"
           describe_event "${line#data: }" >&2
+          if [ -n "$KILL_AT" ] && event_matches "$KILL_AT" "${line#data: }"; then
+            kill_server
+            rm -f "$tmp"
+            # This runs in a command substitution, so tell the main shell (trap below) to report and exit 0.
+            kill -USR1 "$$"
+            exit 0
+          fi
           ;;
       esac
-    done || true
+    done < <(curl -sSN --max-time 700 "$BASE_URL/runs/$id/events" 2>/dev/null || true)
     view="$(cat "$tmp")"
     jq -e 'type == "object" and has("status")' >/dev/null 2>&1 <<<"$view" || { rm -f "$tmp"; die "no events for Run $id (unknown Run, or the stream failed)"; }
     status="$(jq -r '.status' <<<"$view")"
@@ -167,11 +217,39 @@ summarise() {
 }
 
 [ $# -ge 1 ] || usage
-if [ "$1" = "--watch" ]; then
-  WATCH=1
-  shift
-  [ $# -ge 1 ] || usage
+watch_run_id=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --watch) WATCH=1; shift ;;
+    --watch-run)
+      [ $# -ge 2 ] || usage
+      watch_run_id="$2"
+      WATCH=1
+      shift 2
+      ;;
+    --kill-at)
+      [ $# -ge 2 ] || usage
+      KILL_AT="$2"
+      shift 2
+      ;;
+    *) break ;;
+  esac
+done
+if [ -n "$KILL_AT" ]; then
+  [ "$WATCH" = 1 ] || die "--kill-at works only with --watch or --watch-run"
+  [[ "$KILL_AT" =~ ^(round=[0-9]+|[a-z_]+)$ ]] || die "--kill-at expects a status (tailoring) or round=<N>, got '$KILL_AT'"
+  command -v lsof >/dev/null || die "lsof is required for --kill-at"
 fi
+if [ -n "$watch_run_id" ]; then
+  [ $# -eq 0 ] || usage
+  check_server
+  run_id="$watch_run_id"
+  final="$(watch_run "$run_id")"
+  summarise "$final"
+  [ "$(jq -r '.status' <<<"$final")" != "failed" ] || exit 1
+  exit 0
+fi
+[ $# -ge 1 ] || usage
 final=""
 case "$1" in
   --help | -h) usage 0 ;;

@@ -117,6 +117,15 @@ describe("job profile", () => {
     job.requirements[0]!.importance = "required" as never;
     expect(ExtractedJobProfileSchema.safeParse(job).success).toBe(false);
   });
+
+  it("accepts the soft_skill kind", () => {
+    const job = {
+      title: null,
+      company: null,
+      requirements: [{ text: "Ownership", source: "You take ownership", kind: "soft_skill", importance: "must_have" }],
+    };
+    expect(ExtractedJobProfileSchema.safeParse(job).success).toBe(true);
+  });
 });
 
 describe("change", () => {

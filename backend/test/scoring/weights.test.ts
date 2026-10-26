@@ -16,6 +16,12 @@ describe("requirementWeight", () => {
   it("weighs a nice-to-have responsibility 0.5", () => {
     expect(requirementWeight(req("nice_to_have", "responsibility"))).toBe(0.5);
   });
+  it("weighs a must-have soft skill 1.5", () => {
+    expect(requirementWeight(req("must_have", "soft_skill"))).toBe(1.5);
+  });
+  it("weighs a nice-to-have soft skill 0.5", () => {
+    expect(requirementWeight(req("nice_to_have", "soft_skill"))).toBe(0.5);
+  });
   it("weighs a nice-to-have of any other kind 1", () => {
     expect(requirementWeight(req("nice_to_have", "skill"))).toBe(1);
   });

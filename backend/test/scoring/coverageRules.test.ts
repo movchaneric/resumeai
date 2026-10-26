@@ -4,6 +4,7 @@ import type { Cv, Requirement, RequirementKind } from "@resume-ai/shared";
 import { assignCvIds } from "@/extraction/assignIds.js";
 import {
   CLAIM_DOWNGRADE_REASON,
+  SOFT_SKILL_DOWNGRADE_REASON,
   applyClaimRule,
   collectItemIds,
   coverageIssues,
@@ -147,6 +148,35 @@ describe("applyClaimRule", () => {
   it("leaves an unmet verdict with no Evidence unchanged", () => {
     const { coverage } = applyClaimRule([req("req1")], { verdicts: [verdict("req1", "unmet", [], "not shown")] });
     expect(coverage).toEqual([{ requirementId: "req1", verdict: "unmet", evidenceIds: [], reason: "not shown" }]);
+  });
+
+  it("turns partially_met on a soft skill into unmet with no Evidence and the fixed reason", () => {
+    const { coverage, downgrades } = applyClaimRule([req("req1", "soft_skill")], {
+      verdicts: [verdict("req1", "partially_met", ["exp1.b1"])],
+    });
+    expect(coverage).toEqual([
+      { requirementId: "req1", verdict: "unmet", evidenceIds: [], reason: SOFT_SKILL_DOWNGRADE_REASON },
+    ]);
+    expect(downgrades).toBe(1);
+  });
+
+  it("leaves met and unmet soft skills alone", () => {
+    const { coverage, downgrades } = applyClaimRule([req("req1", "soft_skill"), req("req2", "soft_skill")], {
+      verdicts: [verdict("req1", "met", ["exp1.b1"]), verdict("req2", "unmet", [], "not shown")],
+    });
+    expect(coverage).toEqual([
+      { requirementId: "req1", verdict: "met", evidenceIds: ["exp1.b1"], reason: "model reason" },
+      { requirementId: "req2", verdict: "unmet", evidenceIds: [], reason: "not shown" },
+    ]);
+    expect(downgrades).toBe(0);
+  });
+
+  it("leaves partially_met on a responsibility alone", () => {
+    const { coverage, downgrades } = applyClaimRule([req("req1", "responsibility")], {
+      verdicts: [verdict("req1", "partially_met", ["exp1.b1"])],
+    });
+    expect(coverage[0]).toMatchObject({ verdict: "partially_met", evidenceIds: ["exp1.b1"], reason: "model reason" });
+    expect(downgrades).toBe(0);
   });
 
   it("counts downgrades and returns Coverage in Requirement order", () => {

@@ -16,7 +16,7 @@ Rules:
 - "text" is a short normalized form of the requirement, for example "Node.js, 5+ years".
 - "source" quotes ONLY the one line or sentence that the requirement came from, copied verbatim. Never quote the whole list or the whole requirements section.
 - "importance": use "must_have" for required or expected items. Use "nice_to_have" only for preferred or bonus items. Use "must_have" when the item is not labeled either way.
-- "kind" is exactly one of: skill, experience, education, certification, language, responsibility, other.
+- "kind" is exactly one of: skill, experience, education, certification, language, responsibility, soft_skill, other. "soft_skill" is a behaviour or way of working (for example ownership, attention to detail, collaboration, iterating quickly, a problem-solving mindset), never a tool, technology, task or duty. Duties stay "responsibility".
 - Do not invent requirements that the job description does not contain.`;
 
 const RETRY_INSTRUCTION =

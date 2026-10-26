@@ -10,6 +10,9 @@ export type CoverageAnswer = {
 export const CLAIM_DOWNGRADE_REASON =
   "Listed in the skills or summary, but no experience, project or education Item shows it.";
 
+/** Replaces the model's reason when a `partially_met` soft skill becomes `unmet`: a soft skill is met or it is not. */
+export const SOFT_SKILL_DOWNGRADE_REASON = "No Item describes this behaviour, and a soft skill is either met or unmet.";
+
 /**
  * A Claim is the CV saying something about the candidate without showing it in use: the summary or a skill.
  * This relies on slice 2's IDs, where the prefix comes from the section type (never the candidate's heading):
@@ -77,7 +80,8 @@ export function coverageIssues(requirements: Requirement[], cv: Cv, answer: Cove
 /**
  * Normalizes the model's verdicts. The Claim rule: a `met` verdict whose Evidence is all Claims becomes
  * `partially_met` with a fixed reason, unless the Requirement is a language. An `unmet` verdict has its Evidence
- * list cleared (cited Evidence means "supports the Requirement"); its verdict and reason stay. Returns `Coverage[]` in Requirement order.
+ * list cleared (cited Evidence means "supports the Requirement"); its verdict and reason stay.
+ * The soft-skill rule: a `partially_met` verdict on a `soft_skill` Requirement becomes `unmet` with no Evidence and a fixed reason. Returns `Coverage[]` in Requirement order.
  * Call it only after `coverageIssues` returned no issues.
  */
 export function applyClaimRule(
@@ -97,6 +101,15 @@ export function applyClaimRule(
         verdict: "partially_met",
         evidenceIds: v.evidenceIds,
         reason: CLAIM_DOWNGRADE_REASON,
+      });
+    }
+    if (v.verdict === "partially_met" && requirement.kind === "soft_skill") {
+      downgrades += 1;
+      return CoverageSchema.parse({
+        requirementId: v.requirementId,
+        verdict: "unmet",
+        evidenceIds: [],
+        reason: SOFT_SKILL_DOWNGRADE_REASON,
       });
     }
     return CoverageSchema.parse({

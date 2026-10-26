@@ -10,6 +10,7 @@ import { parseCv } from "@/parsing/parseCv.js";
 import { loadConfig } from "@/utils/config.js";
 import { LangGraphRunner } from "@/graph/runner.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
+import { FakeJobProfileCache } from "../fakes/jobProfileCache.js";
 import { coverageAnswer, extractedCv, extractedJob } from "../runFixtures.js";
 
 const url = process.env.DATABASE_URL!;
@@ -43,7 +44,7 @@ describe("Postgres checkpointer", () => {
 
     const llm = new FakeLlmClient().enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueue("assess_coverage", coverageAnswer);
     const statuses: string[] = [];
-    const runner = new LangGraphRunner({ llm, judgeLlm: llm, checkpointer }, {
+    const runner = new LangGraphRunner({ llm, judgeLlm: llm, judgeModel: "test-judge", jobProfileCache: new FakeJobProfileCache(), checkpointer }, {
       setStatus: async (_id, status) => void statuses.push(status),
     });
     const runId = randomUUID() as RunId;
@@ -51,7 +52,7 @@ describe("Postgres checkpointer", () => {
 
     // A fresh runner over the same database sees the saved state: it is in the checkpoint, not in memory.
     const readerCheckpointer = createPostgresCheckpointer(url);
-    const reader = new LangGraphRunner({ llm, judgeLlm: llm, checkpointer: readerCheckpointer }, {
+    const reader = new LangGraphRunner({ llm, judgeLlm: llm, judgeModel: "test-judge", jobProfileCache: new FakeJobProfileCache(), checkpointer: readerCheckpointer }, {
       setStatus: async () => {},
     });
     const state = await reader.read(runId);

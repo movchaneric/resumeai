@@ -1,0 +1,10 @@
+# Regenerate the Prisma client when a branch checkout changed the schema or the migrations.
+# $1 = previous HEAD, $2 = new HEAD, $3 = 1 for a branch checkout (0 for a file checkout).
+# Quiet when nothing changed; a failure here only warns and never fails the git command.
+if [ "${3:-0}" = "1" ] && [ "${1:-}" != "${2:-}" ] \
+  && ! git diff --quiet "$1" "$2" -- backend/prisma/schema.prisma backend/prisma/migrations 2>/dev/null; then
+  echo "post-checkout: Prisma schema or migrations changed; running prisma generate"
+  pnpm --filter backend exec prisma generate >/dev/null 2>&1 \
+    || echo "warning: prisma generate failed; run it by hand: pnpm --filter backend exec prisma generate" >&2
+fi
+exit 0

@@ -28,6 +28,6 @@ Every decision record, handoff, review or note belongs to the slice being worked
 | [`04-tailoring-loop`](./slices/04-tailoring-loop) | LangGraph and checkpointer; tailor → validate → re-judge → exit router; `awaiting_review`; drop the transitional columns | Done |
 | [`18-score-stability`](./slices/18-score-stability) | Fix for #18: cached Job Profile, Soft Skill kind, Coverage votes | Done |
 | [`05-questions`](./slices/05-questions) | 5a: Questions and Answers interrupt, User Evidence, Confirmed Gaps | Done |
-| `05b-live-updates` | 5b: SSE, crash resume (`interrupted`) | Planned |
+| [`05b-live-updates`](./slices/05b-live-updates) | 5b: SSE live updates, crash resume (`interrupted`) | Done |
 | `06-review-export-cleanup` | Per-Change review, DOCX/PDF export, TTL sweep, `DELETE /runs/:id` | Planned |
 | `07-frontend` | Vite SPA, starting with a Claude Design pass (owner's request) | Planned |

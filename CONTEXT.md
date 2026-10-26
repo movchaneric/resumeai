@@ -37,7 +37,7 @@ One end-to-end tailoring session for a single CV and Job Description, from uploa
 _Avoid_: Session, job, task, thread
 
 **Confirmed Gap**:
-A Requirement the user has said they cannot satisfy. It is not asked about again and counts toward the point where no further improvement is possible.
+A Requirement the user has said they cannot satisfy. It is not asked about again, the tailor does not target it, and it counts toward the point where no further improvement is possible. Its Coverage verdict is unchanged.
 _Avoid_: Skipped question, missing skill
 
 **Tailored CV**:
@@ -53,11 +53,11 @@ A piece of the CV, or a fact the user supplied during the session, that supports
 _Avoid_: Proof, source, reference
 
 **User Evidence**:
-Evidence the user supplied by answering a Question. It is trusted without LLM validation.
+Evidence the user supplied by answering a Question. The fact is trusted: we never question whether it is true. A Change built on it is still checked against its text, like any Change against CV Evidence. It reaches the Match Score only through Changes that put it into the CV.
 _Avoid_: User input, user claim
 
 **Question**:
-A prompt asking the user about an unmet must-have Requirement that has no usable Evidence in the CV.
+A prompt asking the user about a must-have Requirement that the CV leaves unmet or only partially met (Soft Skills included). At most five are asked, once, before tailoring.
 _Avoid_: Prompt, query
 
 **Answer**:

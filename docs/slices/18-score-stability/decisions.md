@@ -33,6 +33,13 @@ Issue: [#18 Match Score varies by up to 15 points on identical input](https://gi
 - Rejected: leaving soft skills out of the score (changes what the score means for soft-skill-heavy jobs). Slice 5 can still turn unmet soft skills into Questions.
 - **`responsibility` is unchanged.** "Ways of working" items move to `soft_skill`; real duties keep `partially_met`, where "related" is meaningful.
 
+## After T1 and T2: measurement and T3 (2026-10-26, owner-approved)
+- **Results** (numbers on #18): the Job Profile was identical in every run, soft skills got the same verdict in every run, and the CV shape (Items per section) was identical in every A run, so CV extraction is not a cause. What is left are `met` / `partially_met` flips on concrete Requirements. `stability --dump-evidence` showed these are the same cited Items judged differently, and that they come in batches: one strict call flips several Requirements at once.
+- **T3: Coverage votes.** `assessCoverage` makes 3 calls in parallel and keeps, per Requirement, the **median** verdict (unmet < partially_met < met). With 3 calls that is the majority verdict when there is one, and `partially_met` when all three differ. Each call keeps its own retry and its own Claim and soft-skill rules before the vote. It applies to the first Coverage and to every re-judge in the tailoring loop. Cost: 3× Coverage calls per Run, in parallel, so latency barely changes.
+  - Why: unvoted, the spread depended on whether a batch held a strict call (C stdev 4.2 one rerun, 2.2 the next); voted, it was 1.7 and 2.0 over 20 runs. The re-judges decide the before → after gap, so a single strict call must not erase or invent a gain.
+- **Target restated: stdev ≤ 2 over 20 voted C runs, on both jobs.** The range half is dropped: range grows with the number of runs (20 runs at stdev 1.5 already give about 5.6), so it was never a fair pass mark. Stdev 1.7 to 2.0 is the floor for one LLM judge on genuinely borderline Requirements (for example one split 12 / 8 even after voting); slice 5's Questions are the real fix for those.
+- **`MIN_GAIN` stays 2 points.** Inside a Run only addressed Requirements are re-judged, so in-Run noise is smaller than across Runs. Revisit in slice 5's grilling.
+
 ## In reserve, only if the target is missed
 - A majority vote over several Coverage calls, or one call per Requirement. Both multiply LLM calls, including re-judges in the tailoring loop.
 - Showing a score range.

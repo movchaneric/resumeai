@@ -4,6 +4,8 @@ const ConfigSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_URL: z.string().min(1),
   RUN_TTL_DAYS: z.coerce.number().positive().default(7),
+  /** How often the TTL sweep runs; the first pass follows startup recovery. */
+  SWEEP_INTERVAL_MS: z.coerce.number().int().positive().default(3_600_000),
   MAX_CV_BYTES: z.coerce.number().int().positive().default(5 * 1024 * 1024),
   MAX_CV_PAGES: z.coerce.number().int().positive().default(5),
   MAX_DOCX_CHARS: z.coerce.number().int().positive().default(30_000),
@@ -45,6 +47,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     /** How often an idle Run stream gets a comment line. Not read from the environment; tests override it. */
     sseHeartbeatMs: 15_000,
     runTtlMs: e.RUN_TTL_DAYS * 24 * 60 * 60 * 1000,
+    sweepIntervalMs: e.SWEEP_INTERVAL_MS,
     limits: {
       maxCvBytes: e.MAX_CV_BYTES,
       maxCvPages: e.MAX_CV_PAGES,

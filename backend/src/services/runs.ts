@@ -142,7 +142,7 @@ function setOutcomeAttributes(span: Span, result: RunSnapshot): void {
 const STREAM_END_STATUSES: ReadonlySet<RunView["status"]> = new Set(["awaiting_answers", "awaiting_review", "failed", "interrupted", "completed"]);
 
 /** The statuses in which the graph runner may still write checkpoints for the Run. */
-const BUSY_STATUSES: RunStatus[] = ["parsing", "extracting", "tailoring"];
+export const BUSY_STATUSES: RunStatus[] = ["parsing", "extracting", "tailoring"];
 
 /** What a client connection gives `openRunStream`: `send` writes one view, `close` ends the stream. */
 export type RunStreamSink = { send: (view: RunView) => void; close: () => void };
@@ -328,10 +328,11 @@ export class RunsService {
   /**
    * Deletes the Run's row unless it is busy (or, with `liveAt`, expired at that time), then its checkpoints, and says
    * whether the row was deleted. It is the one "delete this Run" operation; the TTL sweep calls it without `liveAt`.
+   * With `cutOffBefore`, a busy Run created before it is deleted too (the sweep's rule for Runs a stop cut off).
    */
-  async purgeRun(id: RunId, liveAt?: Date): Promise<boolean> {
+  async purgeRun(id: RunId, liveAt?: Date, cutOffBefore?: Date): Promise<boolean> {
     const { store, graphRunner } = this.deps;
-    if (!(await store.deleteUnless(id, BUSY_STATUSES, liveAt))) return false;
+    if (!(await store.deleteUnless(id, BUSY_STATUSES, liveAt, cutOffBefore))) return false;
     try {
       await graphRunner.deleteThread(id);
     } catch (error) {

@@ -205,13 +205,18 @@ describe("GET /runs/:id/events", () => {
     expect((await request(server).get(`/runs/${id}`)).body.status).toBe("awaiting_answers");
 
     llm.enqueue("tailor", { changes: [] }, { changes: [] });
-    const release = llm.hold("tailor");
+    const releaseRound1 = llm.hold("tailor");
     const post = await request(server).post(`/runs/${id}/answers`).send({ answers: [] });
     expect(post.status).toBe(202);
     const client = await openStream(server, `/runs/${id}/events`);
     await until(() => client.views.length >= 1, "the first view");
     expect(client.views[0]!.status).toBe("tailoring");
-    release();
+    await until(() => llm.held.includes("tailor"), "round 1 to reach the model");
+    // Round 1 already waits on the first gate. A new gate holds round 2, so its view is observable rather than coalesced into the final one.
+    const releaseRound2 = llm.hold("tailor");
+    releaseRound1();
+    await until(() => client.views.some((v) => v.status === "tailoring" && v.iterations.used === 2), "round 2 to start");
+    releaseRound2();
     await until(() => client.ended, "the stream to close");
 
     const last = client.views.at(-1)!;
@@ -371,13 +376,18 @@ describe("GET /runs/:id/events", () => {
   it("gives every client on the Run every update", async () => {
     enqueueToQuestions();
     const release = llm.hold("extract_job_profile");
+    const releaseCoverage = llm.hold("assess_coverage");
     const id = await upload();
     const [a, b] = [await openStream(server, `/runs/${id}/events`), await openStream(server, `/runs/${id}/events`)];
     await until(() => a.views.length === 1 && b.views.length === 1, "both first views");
     release();
+    // Each event is a full snapshot and a client may coalesce steps it was too slow to see, so two clients can differ in
+    // the steps between. Holding Coverage makes one such step certain for both; they must then end on the same view.
+    await until(() => [a, b].every((c) => c.views.some((v) => stepState(v, "coverage") === "running")), "both clients to see Coverage start");
+    releaseCoverage();
     await until(() => a.ended && b.ended, "both streams to close");
     expect(a.views.length).toBeGreaterThan(1);
-    expect(b.views).toEqual(a.views);
+    expect(b.views.at(-1)).toEqual(a.views.at(-1));
     expect(a.views.at(-1)!.status).toBe("awaiting_answers");
   });
 

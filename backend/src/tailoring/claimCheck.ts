@@ -8,10 +8,11 @@ export type { ClaimCheckInput };
 
 export const CLAIM_CHECK_SYSTEM_PROMPT = `You check whether new CV text is supported by the CV text it was written from.
 
-For each Change you get the Before text (empty for a new Item), the After text, and the Evidence: the original CV text the After text must rest on. You see nothing else.
+For each Change you get the Before text (empty for a new Item), the After text, and the Evidence: the original CV text the After text must rest on, and sometimes the user's own statements about their experience. Both count as Evidence. You see nothing else.
 
 Rules:
 - "supported" only if every statement in After is stated by the Evidence. After may reword the Evidence and use different wording, but states nothing the Evidence does not state: no new technologies, numbers, scope, roles or achievements.
+- A user's own statement is Evidence like CV text: accept the fact as true, and check only that After states nothing beyond it.
 - "reasonable inference" and "plausible" are not support. If a statement in After would need an inference from the Evidence, the verdict is "not_supported".
 - Added words that carry a fact count: a method, a deliverable, a level of responsibility or a technology that the Evidence does not state makes the Change "not_supported".
 - The reason names the first unsupported statement, or says what in the Evidence supports After. 1 to 2 sentences, written before the verdict.
@@ -68,7 +69,7 @@ export async function claimCheck(
   return withSpan(CALL_NAME, async (span) => {
     if (options.round !== undefined) span.setAttribute("round", options.round);
     // Copy only the allowed fields, so extra properties on the caller's objects can never reach the prompt.
-    const safe = changes.map(({ id, before, after, evidence }) => ({ id, before, after, evidence }));
+    const safe = changes.map(({ id, before, after, evidence, userEvidence }) => ({ id, before, after, evidence, userEvidence }));
     const ids = safe.map((c) => c.id);
     const messages: LlmMessage[] = [
       { role: "system", content: CLAIM_CHECK_SYSTEM_PROMPT },

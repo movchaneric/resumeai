@@ -7,7 +7,7 @@ import { validateChanges } from "@/tailoring/validateChanges.js";
 import { applyChanges } from "@/tailoring/applyChanges.js";
 import { mergeRoundIntoChanges } from "@/tailoring/mergeChanges.js";
 import { mergeCoverage, requirementsListedBy } from "@/tailoring/roundCoverage.js";
-import { routeAfterRound, shouldSkipTailoring } from "@/scoring/exitRouter.js";
+import { onlyGapsLeft, routeAfterRound, shouldSkipTailoring } from "@/scoring/exitRouter.js";
 import { assessCoverage } from "@/scoring/assessCoverage.js";
 import { matchScore } from "@/scoring/matchScore.js";
 import { resolveJobProfile, type JobProfileCache } from "@/graph/jobProfileCache.js";
@@ -132,7 +132,12 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
     // `interrupt()` call must be pure: here it is only a read of `state.questions`.
     .addNode("collect_answers", (state) => {
       const answers = interrupt<Question[], Answer[]>(state.questions);
-      return recordAnswers(state.questions, answers);
+      const recorded = recordAnswers(state.questions, answers);
+      // Nothing left to tailor when the user lacks every must-have that is not met: skip the rounds.
+      if (onlyGapsLeft(state.jobProfile!.requirements, state.coverage!, recorded.confirmedGaps)) {
+        return { ...recorded, exitReason: "ceiling" as const };
+      }
+      return recorded;
     })
     .addNode("begin_round", async (state) => {
       const round = state.rounds + 1;
@@ -158,6 +163,8 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
           requirements: state.jobProfile!.requirements,
           coverage: state.coverage!,
           rejections: state.rejections.map(({ round, change, reason }) => ({ round, change, reason })),
+          userEvidence: state.userEvidence,
+          confirmedGaps: state.confirmedGaps,
           round,
         });
         return { pending: { ...pending, proposed: changes } };
@@ -176,6 +183,7 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
           draft: applyChanges(state.cv!, state.changes),
           changes: pending.proposed,
           round: pending.round,
+          userEvidence: state.userEvidence,
         });
         return { pending: { ...pending, valid }, rejections: [...state.rejections, ...rejections] };
       } catch (error) {
@@ -212,6 +220,7 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
         outcome: pending.failed
           ? { failed: true }
           : { failed: false, validChanges: pending.valid.length, newScore: pending.score ?? previousScore },
+        onlyGapsLeft: onlyGapsLeft(state.jobProfile!.requirements, pending.coverage ?? state.coverage!, state.confirmedGaps),
       });
       // `null` means another round: the edge after `route` loops back while no exit reason is set.
       const exitReason = decision.next === "review" ? decision.exitReason : null;
@@ -242,7 +251,7 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
     .addEdge("extract", "assess_coverage")
     .addConditionalEdges("assess_coverage", (state) => (state.exitReason === null ? "select_questions" : "review"), ["select_questions", "review"])
     .addConditionalEdges("select_questions", (state) => (state.questions.length === 0 ? "begin_round" : "collect_answers"), ["begin_round", "collect_answers"])
-    .addEdge("collect_answers", "begin_round")
+    .addConditionalEdges("collect_answers", (state) => (state.exitReason === null ? "begin_round" : "review"), ["begin_round", "review"])
     .addEdge("begin_round", "tailor")
     .addEdge("tailor", "validate")
     .addEdge("validate", "rejudge")

@@ -1,4 +1,4 @@
-import type { Change, Cv } from "@resume-ai/shared";
+import type { Change, Cv, UserEvidence } from "@resume-ai/shared";
 import { LIST_IDS, SECTION_ID_PATTERN, allIds, childLists, itemTexts, textItems, textParentIds } from "@/tailoring/cvItems.js";
 import { collectItemIds } from "@/scoring/coverageRules.js";
 
@@ -10,7 +10,7 @@ export const STAGE1_REASONS = {
   unknownParent: "The parent does not exist in the CV.",
   parentNotText: "The parent does not accept new text Items.",
   noEvidence: "The Change cites no Evidence.",
-  unknownEvidence: "The Change cites an Evidence ID that does not exist in the original CV.",
+  unknownEvidence: "The Change cites an Evidence ID that exists neither in the original CV nor in the User Evidence.",
   sectionEvidence: "A section ID is not Evidence; cite an Item.",
   addedItemEvidence: "An Item added by a Change is never Evidence; cite an Item from the original CV.",
   notPermutation: "The reorder must list exactly the Items currently under the parent, each once.",
@@ -31,26 +31,27 @@ function numbersIn(text: string): Set<string> {
 /**
  * Stage-1 code checks (pure). `draft` is the original CV with the Changes validated so far
  * (`applyChanges`); targets and parents are looked up in it, Evidence only in `original`.
+ * `userEvidence` is what the user said in the Answers: its IDs (`ue1`) are valid Evidence, and its text counts as cited Evidence for the numbers.
  * Returns the Changes that pass and the rejected ones with a fixed reason; rejected Changes go no further.
  */
-export function stage1Checks(original: Cv, draft: Cv, changes: Change[]): Stage1Result {
+export function stage1Checks(original: Cv, draft: Cv, changes: Change[], userEvidence: UserEvidence[] = []): Stage1Result {
   const passed: Change[] = [];
   const rejected: Stage1Rejection[] = [];
   for (const change of changes) {
-    const reason = firstProblem(original, draft, change);
+    const reason = firstProblem(original, draft, change, userEvidence);
     if (reason === null) passed.push(change);
     else rejected.push({ change, reason });
   }
   return { passed, rejected };
 }
 
-function firstProblem(original: Cv, draft: Cv, change: Change): string | null {
+function firstProblem(original: Cv, draft: Cv, change: Change, userEvidence: UserEvidence[]): string | null {
   const structure = structureProblem(draft, change);
   if (structure !== null) return structure;
-  const evidence = evidenceProblem(original, draft, change);
+  const evidence = evidenceProblem(original, draft, change, userEvidence);
   if (evidence !== null) return evidence;
   if (change.op === "reorder") return null;
-  return numberProblem(original, change.op === "replace" ? change.before : "", change.after, change.evidenceIds);
+  return numberProblem(original, change.op === "replace" ? change.before : "", change.after, change.evidenceIds, userEvidence);
 }
 
 function structureProblem(draft: Cv, change: Change): string | null {
@@ -75,9 +76,9 @@ function structureProblem(draft: Cv, change: Change): string | null {
   return same ? null : STAGE1_REASONS.notPermutation;
 }
 
-function evidenceProblem(original: Cv, draft: Cv, change: Change): string | null {
+function evidenceProblem(original: Cv, draft: Cv, change: Change, userEvidence: UserEvidence[]): string | null {
   if (change.op !== "reorder" && change.evidenceIds.length === 0) return STAGE1_REASONS.noEvidence;
-  const known = collectItemIds(original);
+  const known = new Set<string>([...collectItemIds(original), ...userEvidence.map((u) => u.id)]);
   const inDraft = allIds(draft);
   for (const id of change.evidenceIds) {
     if (known.has(id)) continue;
@@ -89,11 +90,12 @@ function evidenceProblem(original: Cv, draft: Cv, change: Change): string | null
   return null;
 }
 
-function numberProblem(original: Cv, before: string, after: string, evidenceIds: string[]): string | null {
+function numberProblem(original: Cv, before: string, after: string, evidenceIds: string[], userEvidence: UserEvidence[]): string | null {
   const beforeNumbers = numbersIn(before);
   const afterNumbers = numbersIn(after);
   for (const n of beforeNumbers) if (!afterNumbers.has(n)) return STAGE1_REASONS.numberDropped;
   const texts = itemTexts(original);
+  for (const u of userEvidence) texts.set(u.id, u.text);
   const allowed = new Set(beforeNumbers);
   for (const id of evidenceIds) for (const n of numbersIn(texts.get(id) ?? "")) allowed.add(n);
   for (const n of afterNumbers) if (!allowed.has(n)) return STAGE1_REASONS.numberAdded;

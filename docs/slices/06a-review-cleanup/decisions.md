@@ -24,7 +24,8 @@ Spec: #42 "Slice 6a: Review and cleanup"; tickets #43 to #46.
 - **Status during the re-judge is `tailoring`**, so crash recovery covers it unchanged; the view's steps show `review` running. No new status.
 
 ## End of the graph (and P6)
-- 6a's graph: … → `review` (interrupt) → final re-judge → end. The runner writes **`completed`** when the graph ends, with `download: { docx: null, pdf: null }` until 6b adds an `export` node before the end.
+- 6a's graph: … → `review` (interrupt) → final re-judge → end. The re-judge is its own node after `review`: `review` reruns from the top on resume, so it only records the decisions, and a cut-off re-judge resumes from its checkpoint like any `tailoring` Run.
+- **Old dev Runs:** a Run that reached Review before 6a paused with `interruptBefore` and has no interrupt task, so it cannot be reviewed. Not migrated (ADR 0003); start a new Run. The runner writes **`completed`** when the graph ends, with `download: { docx: null, pdf: null }` until 6b adds an `export` node before the end.
 - **The `completed` view:** `cv` is the original CV with only the accepted and revised Changes applied; each Change in `changes` carries its final status.
 - **P6 fixed with S4 folded in:** one function maps the graph's position to `answers`, `review`, `ended` or running, used by the runner, the service and recovery (it was three places). "Nothing left to run" means ended, never `review`.
 - **Recovery table gains a row:** a checkpoint at the end → `completed` (covers a crash between the last checkpoint and the status write). The P6 proof test: a Run in `tailoring` whose graph has ended is recovered to `completed`, not `awaiting_review`.

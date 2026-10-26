@@ -64,7 +64,7 @@ describe("RunStore.listLive", () => {
     const older = await createAt("extracting", new Date(now.getTime() - 5000), later);
     await createAt("awaiting_answers", now, later);
     await createAt("failed", now, later);
-    const runs = await store.listLive(["extracting", "tailoring"], now);
+    const runs = await store.listLive(["extracting", "tailoring"], now, later);
     expect(runs.map((run) => run.id)).toEqual([older, newer]);
   });
 
@@ -72,12 +72,19 @@ describe("RunStore.listLive", () => {
     await createAt("extracting", now, now);
     await createAt("extracting", now, new Date(now.getTime() - 1));
     const live = await createAt("extracting", now, new Date(now.getTime() + 1));
-    expect((await store.listLive(["extracting"], now)).map((run) => run.id)).toEqual([live]);
+    expect((await store.listLive(["extracting"], now, later)).map((run) => run.id)).toEqual([live]);
+  });
+
+  it("skips Runs created at or after the given time", async () => {
+    const old = await createAt("extracting", new Date(now.getTime() - 1), later);
+    await createAt("extracting", now, later);
+    await createAt("extracting", new Date(now.getTime() + 1), later);
+    expect((await store.listLive(["extracting"], now, now)).map((run) => run.id)).toEqual([old]);
   });
 
   it("returns nothing for no statuses", async () => {
     await createAt("extracting", now, later);
-    expect(await store.listLive([], now)).toEqual([]);
+    expect(await store.listLive([], now, later)).toEqual([]);
   });
 });
 

@@ -239,17 +239,18 @@ export class RunsService {
   }
 
   /**
-   * Carries on the Runs a stop cut off, for the server to call once it is listening. A Run still in `extracting` or
-   * `tailoring` at startup had its background work in the process that stopped (single instance), so each is
+   * Carries on the Runs a stop cut off, for the server to call once it is listening. A Run created before this
+   * process started (`startedAt`) and still in `extracting` or `tailoring` had its background work in the process
+   * that stopped (single instance); a Run created since is being worked on by this process and is left alone. Each is
    * handled from its checkpoint, one at a time to stay within the model provider's rate limits:
    * no checkpoint -> `interrupted`; stopped at a Pause -> that Pause's status; mid-graph -> resumed, once (a Run
    * already recovered once becomes `interrupted`, so a Run that crashes the server is not resumed on every restart).
    * Expired Runs and Runs at a Pause are not listed. Never throws: a Run it cannot handle is logged and skipped.
    */
-  async recoverRuns(): Promise<void> {
+  async recoverRuns(startedAt: Date): Promise<void> {
     let runs: StoredRun[];
     try {
-      runs = await this.deps.store.listLive(["extracting", "tailoring"], this.now());
+      runs = await this.deps.store.listLive(["extracting", "tailoring"], this.now(), startedAt);
     } catch (error) {
       console.error("Run recovery: could not list the cut-off Runs", error);
       return;

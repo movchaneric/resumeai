@@ -21,10 +21,12 @@ import { makeGraphRunner } from "../fakes/runGraph.js";
 import { coverageAnswer, extractedCv, extractedJob } from "../runFixtures.js";
 
 // A crash is simulated by holding a model call of one "process" forever: its Run never moves again. A fresh "process"
-// (new runner, service, bus and model) on the same store and checkpointer then calls `recoverRuns()`.
+// (new runner, service, bus and model) on the same store and checkpointer then calls `recoverRuns(STARTED_AT)`.
 
 const cvFile = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf"));
 const JOB_DESCRIPTION = "We are hiring a backend developer with Node.js and PostgreSQL experience.";
+/** When the recovering process started: every Run is older than this unless a test says otherwise. */
+const STARTED_AT = new Date(Date.now() + 60_000);
 const config = loadConfig(process.env);
 const prisma = createPrisma(config.databaseUrl);
 const store = new RunStore(prisma);
@@ -137,7 +139,7 @@ describe("RunsService.recoverRuns", () => {
 
     const after = boot(before.checkpointer);
     after.llm.enqueueVoted("assess_coverage", questionsCoverage);
-    await after.service.recoverRuns();
+    await after.service.recoverRuns(STARTED_AT);
 
     expect(await statusOf(id)).toBe("awaiting_answers");
     expect(comparable(await after.service.getRunView(id))).toEqual(comparable(await uninterrupted(enqueueQuestions, false)));
@@ -151,7 +153,7 @@ describe("RunsService.recoverRuns", () => {
 
     const after = boot(before.checkpointer);
     after.llm.enqueue("tailor", { changes: [] }, { changes: [] });
-    await after.service.recoverRuns();
+    await after.service.recoverRuns(STARTED_AT);
 
     expect(await statusOf(id)).toBe("awaiting_review");
     expect(comparable(await after.service.getRunView(id))).toEqual(comparable(await uninterrupted(enqueueQuestions, true)));
@@ -163,7 +165,7 @@ describe("RunsService.recoverRuns", () => {
 
     const after = boot(before.checkpointer);
     enqueueReview(after.llm);
-    await after.service.recoverRuns();
+    await after.service.recoverRuns(STARTED_AT);
 
     expect(await statusOf(id)).toBe("awaiting_review");
   });
@@ -173,7 +175,7 @@ describe("RunsService.recoverRuns", () => {
     const createdAt = new Date();
     await store.create({ id, status: "extracting", createdAt, expiresAt: new Date(createdAt.getTime() + 60_000) });
     const process = boot(createMemoryCheckpointer());
-    await process.service.recoverRuns();
+    await process.service.recoverRuns(STARTED_AT);
 
     expect(await statusOf(id)).toBe("interrupted");
     expect(logs).toContain(`Run ${id}: recovery interrupted (no checkpoint)`);
@@ -188,7 +190,7 @@ describe("RunsService.recoverRuns", () => {
     expect(await store.claimStatus(id, "awaiting_answers", "tailoring")).toBe(true);
 
     const after = boot(before.checkpointer);
-    await after.service.recoverRuns();
+    await after.service.recoverRuns(STARTED_AT);
 
     expect(await statusOf(id)).toBe("awaiting_answers");
     expect((await after.service.getRunView(id)).status).toBe("awaiting_answers");
@@ -206,7 +208,7 @@ describe("RunsService.recoverRuns", () => {
     await store.setStatus(id, "tailoring");
 
     const after = boot(before.checkpointer);
-    await after.service.recoverRuns();
+    await after.service.recoverRuns(STARTED_AT);
 
     expect(await statusOf(id)).toBe("awaiting_review");
     expect(after.llm.calls).toEqual([]);
@@ -220,7 +222,7 @@ describe("RunsService.recoverRuns", () => {
 
     const after = boot(before.checkpointer);
     after.llm.enqueueVoted("assess_coverage", questionsCoverage);
-    await after.service.recoverRuns();
+    await after.service.recoverRuns(STARTED_AT);
 
     expect(await statusOf(id)).toBe("interrupted");
     expect(after.llm.calls).toEqual([]);
@@ -235,12 +237,12 @@ describe("RunsService.recoverRuns", () => {
     // The second process is cut off too, in the resumed Coverage call.
     const second = boot(first.checkpointer);
     second.llm.hold("assess_coverage");
-    void second.service.recoverRuns();
+    void second.service.recoverRuns(STARTED_AT);
     await until(() => second.llm.held.includes("assess_coverage"), "the resumed Coverage call");
 
     const third = boot(first.checkpointer);
     third.llm.enqueueVoted("assess_coverage", questionsCoverage);
-    await third.service.recoverRuns();
+    await third.service.recoverRuns(STARTED_AT);
     expect(await statusOf(id)).toBe("interrupted");
     expect(third.llm.calls).toEqual([]);
   });
@@ -253,11 +255,32 @@ describe("RunsService.recoverRuns", () => {
     const later = new Date(Date.now() + config.runTtlMs + 1000);
     const after = boot(before.checkpointer, () => later);
     after.llm.enqueueVoted("assess_coverage", questionsCoverage);
-    await after.service.recoverRuns();
+    await after.service.recoverRuns(STARTED_AT);
 
     expect(await statusOf(id)).toBe("extracting");
     expect(after.llm.calls).toEqual([]);
     expect(logs.filter((line) => line.includes(id))).toEqual([]);
+  });
+
+  it("leaves a Run created after the process started alone, with or without a checkpoint", async () => {
+    const before = boot(createMemoryCheckpointer());
+    enqueueExtraction(before.llm, questionsJob);
+    const checkpointed = await startHeldAt(before, "assess_coverage");
+    const bare = RunIdSchema.parse(randomUUID());
+    const createdAt = new Date();
+    await store.create({ id: bare, status: "extracting", createdAt, expiresAt: new Date(createdAt.getTime() + 60_000) });
+
+    const after = boot(before.checkpointer);
+    const published = vi.fn();
+    after.events.subscribe(checkpointed, published);
+    after.events.subscribe(bare, published);
+    await after.service.recoverRuns(new Date(createdAt.getTime() - 60_000));
+
+    expect(await statusOf(checkpointed)).toBe("extracting");
+    expect(await statusOf(bare)).toBe("extracting");
+    expect(published).not.toHaveBeenCalled();
+    expect(logs).toEqual([]);
+    expect(after.llm.calls).toEqual([]);
   });
 
   it("leaves Runs at a Pause alone and publishes nothing for them", async () => {
@@ -276,7 +299,7 @@ describe("RunsService.recoverRuns", () => {
     const published = vi.fn();
     after.events.subscribe(waiting, published);
     after.events.subscribe(reviewing, published);
-    await after.service.recoverRuns();
+    await after.service.recoverRuns(STARTED_AT);
 
     expect(await statusOf(waiting)).toBe("awaiting_answers");
     expect(await statusOf(reviewing)).toBe("awaiting_review");
@@ -297,7 +320,7 @@ describe("RunsService.recoverRuns", () => {
     const after = boot(before.checkpointer);
     after.llm.enqueueVoted("assess_coverage", questionsCoverage, questionsCoverage);
     const release = after.llm.hold("assess_coverage");
-    const done = after.service.recoverRuns();
+    const done = after.service.recoverRuns(STARTED_AT);
     await until(() => after.llm.held.length > 0, "the first resumed Coverage call");
     // Time for a second Run to start if recovery did not wait.
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -315,7 +338,7 @@ describe("RunsService.recoverRuns", () => {
 
     const after = boot(before.checkpointer);
     after.llm.enqueue("extract_job_profile", new ExtractionError("quotes Ada Lovelace", ["company Secret Corp not found"]));
-    await after.service.recoverRuns();
+    await after.service.recoverRuns(STARTED_AT);
 
     const view = await after.service.getRunView(id);
     expect(view.status).toBe("failed");
@@ -333,13 +356,13 @@ describe("RunsService.recoverRuns", () => {
     await store.create({ id, status: "extracting", createdAt, expiresAt: new Date(createdAt.getTime() + 60_000) });
     // A request moves the Run between the listing and recovery's write.
     const racing = Object.create(store) as RunStore;
-    racing.listLive = async (statuses, now) => {
-      const listed = await store.listLive(statuses, now);
+    racing.listLive = async (statuses, now, createdBefore) => {
+      const listed = await store.listLive(statuses, now, createdBefore);
       await store.setStatus(id, "awaiting_review");
       return listed;
     };
     const process = boot(createMemoryCheckpointer(), undefined, racing);
-    await process.service.recoverRuns();
+    await process.service.recoverRuns(STARTED_AT);
 
     expect(await statusOf(id)).toBe("awaiting_review");
   });
@@ -362,7 +385,7 @@ describe("RunsService.recoverRuns", () => {
     };
     const process = boot(before.checkpointer, undefined, flaky);
     process.llm.enqueueVoted("assess_coverage", questionsCoverage);
-    await expect(process.service.recoverRuns()).resolves.toBeUndefined();
+    await expect(process.service.recoverRuns(STARTED_AT)).resolves.toBeUndefined();
 
     expect(await statusOf(first)).toBe("extracting");
     expect(await statusOf(second)).toBe("awaiting_answers");
@@ -371,7 +394,7 @@ describe("RunsService.recoverRuns", () => {
     failingList.listLive = async () => {
       throw new Error("database down");
     };
-    await expect(boot(before.checkpointer, undefined, failingList).service.recoverRuns()).resolves.toBeUndefined();
+    await expect(boot(before.checkpointer, undefined, failingList).service.recoverRuns(STARTED_AT)).resolves.toBeUndefined();
   });
 
   it("runs the resumed work under a `recovery` root span with the session id and the pipeline's end attributes", async () => {
@@ -382,7 +405,7 @@ describe("RunsService.recoverRuns", () => {
 
     const after = boot(before.checkpointer);
     after.llm.enqueueVoted("assess_coverage", coverageAnswer);
-    await after.service.recoverRuns();
+    await after.service.recoverRuns(STARTED_AT);
 
     const root = exporter.getFinishedSpans().find((span) => span.name === "recovery")!;
     expect(root.parentSpanContext).toBeUndefined();
@@ -405,7 +428,7 @@ describe("RunsService.recoverRuns", () => {
     const views: RunView[] = [];
     let closed = false;
     await after.service.openRunStream(id, { send: (view) => void views.push(view), close: () => (closed = true) });
-    await after.service.recoverRuns();
+    await after.service.recoverRuns(STARTED_AT);
     await until(() => closed, "the stream to close");
 
     expect(views[0]!.status).toBe("extracting");
@@ -420,7 +443,7 @@ describe("RunsService.recoverRuns", () => {
     const views: RunView[] = [];
     let closed = false;
     await process.service.openRunStream(id, { send: (view) => void views.push(view), close: () => (closed = true) });
-    await process.service.recoverRuns();
+    await process.service.recoverRuns(STARTED_AT);
     await until(() => closed, "the stream to close");
     expect(views.map((v) => v.status)).toEqual(["extracting", "interrupted"]);
   });
@@ -431,7 +454,7 @@ describe("the interrupted view", () => {
   async function interruptedAfter(before: Process, id: RunId, status: "extracting" | "tailoring"): Promise<RunView> {
     expect(await store.claimRecovery(id, status)).toBe(true);
     const after = boot(before.checkpointer);
-    await after.service.recoverRuns();
+    await after.service.recoverRuns(STARTED_AT);
     return after.service.getRunView(id);
   }
 
@@ -440,7 +463,7 @@ describe("the interrupted view", () => {
     const createdAt = new Date();
     await store.create({ id, status: "extracting", createdAt, expiresAt: new Date(createdAt.getTime() + 60_000) });
     const process = boot(createMemoryCheckpointer());
-    await process.service.recoverRuns();
+    await process.service.recoverRuns(STARTED_AT);
     const view = await process.service.getRunView(id);
     expect(view.status).toBe("interrupted");
     expect(stepStates(view)).toEqual(["parse:done", "extract:failed", "coverage:pending", "questions:pending", "tailor:pending", "review:pending", "export:pending"]);

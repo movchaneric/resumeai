@@ -65,10 +65,10 @@ export class RunStore {
     return count === 1;
   }
 
-  /** The Runs that have not expired at `now` and are in one of `statuses`, oldest first. */
-  async listLive(statuses: RunStatus[], now: Date): Promise<StoredRun[]> {
+  /** The Runs created before `createdBefore` that have not expired at `now` and are in one of `statuses`, oldest first. */
+  async listLive(statuses: RunStatus[], now: Date, createdBefore: Date): Promise<StoredRun[]> {
     const rows = await this.prisma.run.findMany({
-      where: { status: { in: statuses }, expiresAt: { gt: now } },
+      where: { status: { in: statuses }, expiresAt: { gt: now }, createdAt: { lt: createdBefore } },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     });
     return rows.map(toStoredRun);

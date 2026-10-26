@@ -82,7 +82,7 @@ export interface GraphRunner {
   recover(runId: RunId): Promise<RunSnapshot>;
   /**
    * Resumes a Run paused for review with the decisions (already validated by the caller) and runs to the end, where the
-   * runner writes `completed`; the post-resume work is a new root span with the same session id. Rejects with the original error on failure.
+   * runner writes `completed`. The caller opens the root span for it. Rejects with the original error on failure.
    */
   review(runId: RunId, decisions: ReviewDecision[]): Promise<RunSnapshot>;
   /** The current state, or null when no checkpoint exists yet. */

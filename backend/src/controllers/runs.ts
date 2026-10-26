@@ -12,6 +12,12 @@ export class RunsController {
     res.status(201).location(`/runs/${id}`).json({ id });
   };
 
+  /** `202`: the Answers are accepted and the Run resumes in the background; the client keeps polling `GET /runs/:id`. */
+  answer = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+    await this.service.submitAnswers(req.params.id, req.body);
+    res.status(202).json({ id: req.params.id });
+  };
+
   get = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
     res.json(await this.service.getRunView(req.params.id));
   };

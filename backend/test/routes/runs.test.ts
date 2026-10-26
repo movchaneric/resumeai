@@ -96,7 +96,7 @@ describe("POST /runs", () => {
   });
 
   it("strips NUL characters instead of failing on them", async () => {
-    llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueue("assess_coverage", coverageAnswer);
+    llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueueVoted("assess_coverage", coverageAnswer);
     const res = await upload("cv.pdf", "Backend\u0000 developer");
     expect(res.status).toBe(201);
     await settle();
@@ -126,7 +126,7 @@ describe("GET /runs/:id", () => {
   });
 
   it("shows the Run as awaiting_review, with its scores and requirements, once the pipeline has finished", async () => {
-    llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueue("assess_coverage", coverageAnswer);
+    llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueueVoted("assess_coverage", coverageAnswer);
     const { body } = await upload("cv.pdf");
     await settle();
 
@@ -160,7 +160,7 @@ describe("GET /runs/:id", () => {
     llm
       .enqueue("extract_job_profile", extractedJob)
       .enqueue("extract_cv", extractedCv)
-      .enqueue("assess_coverage", new LlmSchemaError("bad", ["a: wrong"]), new LlmSchemaError("bad", ["b: wrong"]));
+      .enqueueVoted("assess_coverage", new LlmSchemaError("bad", ["a: wrong"]), new LlmSchemaError("bad", ["b: wrong"]));
     const { body } = await upload("cv.pdf");
     await settle();
 

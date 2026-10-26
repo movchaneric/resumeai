@@ -42,7 +42,7 @@ describe("Postgres checkpointer", () => {
       expect.arrayContaining(CHECKPOINT_TABLES),
     );
 
-    const llm = new FakeLlmClient().enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueue("assess_coverage", coverageAnswer);
+    const llm = new FakeLlmClient().enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueueVoted("assess_coverage", coverageAnswer);
     const statuses: string[] = [];
     const runner = new LangGraphRunner({ llm, judgeLlm: llm, judgeModel: "test-judge", jobProfileCache: new FakeJobProfileCache(), checkpointer }, {
       setStatus: async (_id, status) => void statuses.push(status),

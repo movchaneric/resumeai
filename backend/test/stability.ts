@@ -5,20 +5,20 @@ import "dotenv/config";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { Coverage, Cv, JobProfile, RunId } from "@resume-ai/shared";
+import type { Cv, JobProfile, RunId } from "@resume-ai/shared";
 import { extractCv } from "@/extraction/extractCv.js";
 import { extractJobProfile } from "@/extraction/extractJobProfile.js";
 import { resolveJobProfile } from "@/graph/jobProfileCache.js";
 import { JobProfileStore } from "@/stores/jobProfiles.js";
 import { createPrisma } from "@/utils/db.js";
-import { assessCoverage } from "@/scoring/assessCoverage.js";
+import { assessCoverage, COVERAGE_VOTES } from "@/scoring/assessCoverage.js";
 import { matchScore } from "@/scoring/matchScore.js";
 import { LangChainLlmClient } from "@/llm/langChainLlmClient.js";
 import { parseCv } from "@/parsing/parseCv.js";
 import { loadConfig } from "@/utils/config.js";
 import { setupTracing } from "@/utils/tracing.js";
 import { runInPipelineSpan } from "./extractReport.js";
-import { cvShape, mapPool, parseStabilityArgs, renderReport, voteCoverage, type CoverageRun, type EndToEndRun } from "./stabilityReport.js";
+import { cvShape, mapPool, parseStabilityArgs, renderReport, type CoverageRun, type EndToEndRun } from "./stabilityReport.js";
 
 const USAGE = `Usage: pnpm --filter backend stability <cv-file> <job-description-file> [--runs N] [--coverage-runs M] [--parallel K] [--votes N] [--out <file>] [--no-cache] [--dump-evidence]
 
@@ -26,9 +26,11 @@ const USAGE = `Usage: pnpm --filter backend stability <cv-file> <job-description
   <job-description-file>  plain text
   --runs N                end-to-end runs for experiments A and B (default 5)
   --coverage-runs M       Coverage-only runs for experiment C, on run 1's Job Profile and CV (default 10)
-  --votes N               odd N: each experiment C run makes N Coverage calls and keeps the majority verdict per Requirement
-                          (no strict majority gives partially_met; evidence IDs come from the first call giving the winning
-                          verdict). The report then uses the voted verdicts (default 1: one call, no vote)
+  --votes N               Coverage calls per judgement, in experiment C (default ${COVERAGE_VOTES}, the product default). The run keeps the
+                          median verdict per Requirement (unmet < partially_met < met): the majority when there is one,
+                          partially_met when three calls all differ, the lower verdict of two. Evidence IDs come from the
+                          first call giving the winning verdict. --votes 1 is one call, no vote. Experiment A always
+                          uses the product default
   --parallel K            at most K model calls in flight (default 3)
   --out <file>            also write the markdown report to this file
   --no-cache              extract a fresh Job Profile in every run of experiment A (the behaviour before the cache).
@@ -112,24 +114,17 @@ async function main(): Promise<number> {
 
       let coverageOnly: CoverageRun[] = [];
       if (baseRequirements && baseCv) {
-        // Every Coverage call (coverageRuns x votes) goes through one pool, so --parallel caps the model calls in flight.
+        // Each run makes `votes` Coverage calls at once, so the pool runs about parallel / votes runs at a time.
         let doneC = 0;
-        const calls = await mapPool<{ ok: true; coverage: Coverage[] } | { ok: false; error: string }>(coverageRuns * votes, parallel, async () => {
+        coverageOnly = await mapPool<CoverageRun>(coverageRuns, Math.max(1, Math.floor(parallel / votes)), async () => {
           try {
-            return { ok: true, coverage: (await assessCoverage(judgeLlm, baseCv, baseRequirements)).coverage };
+            const { coverage } = await assessCoverage(judgeLlm, baseCv, baseRequirements, { votes });
+            return { ok: true, coverage, score: matchScore(baseRequirements, coverage) };
           } catch (error) {
             return { ok: false, error: errorName(error) };
           } finally {
-            progress("C", ++doneC, coverageRuns * votes);
+            progress("C", ++doneC, coverageRuns);
           }
-        });
-        coverageOnly = Array.from({ length: coverageRuns }, (_, r): CoverageRun => {
-          const group = calls.slice(r * votes, (r + 1) * votes);
-          const failed = group.find((c) => !c.ok);
-          if (failed && !failed.ok) return { ok: false, error: failed.error };
-          const answers = group.flatMap((c) => (c.ok ? [c.coverage] : []));
-          const coverage = votes === 1 ? answers[0]! : voteCoverage(answers);
-          return { ok: true, coverage, score: matchScore(baseRequirements, coverage) };
         });
       } else console.error("C skipped: no end-to-end run succeeded");
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Coverage, Cv, Requirement } from "@resume-ai/shared";
+import { COVERAGE_VOTES } from "@/scoring/assessCoverage.js";
 import {
   analyseCoverage,
   listStability,
@@ -11,7 +12,6 @@ import {
   scoreSwing,
   stats,
   summarise,
-  voteCoverage,
   cvShape,
   formatCvShape,
   cvShapeSummary,
@@ -29,28 +29,31 @@ const reqs = [req("req1", "Node.js"), req("req2", "5+ years backend"), req("req3
 
 describe("parseStabilityArgs", () => {
   it("uses the defaults", () => {
-    expect(parseStabilityArgs(["cv.pdf", "jd.txt"])).toEqual({ ok: true, cvArg: "cv.pdf", jdArg: "jd.txt", runs: 5, coverageRuns: 10, parallel: 3, votes: 1 });
+    expect(parseStabilityArgs(["cv.pdf", "jd.txt"])).toEqual({ ok: true, cvArg: "cv.pdf", jdArg: "jd.txt", runs: 5, coverageRuns: 10, parallel: 3, votes: COVERAGE_VOTES });
   });
   it("reads the options in any position", () => {
     expect(parseStabilityArgs(["--runs", "2", "cv.pdf", "--coverage-runs", "4", "jd.txt", "--parallel", "1", "--out", "r.md"])).toEqual({
-      ok: true, cvArg: "cv.pdf", jdArg: "jd.txt", runs: 2, coverageRuns: 4, parallel: 1, votes: 1, out: "r.md",
+      ok: true, cvArg: "cv.pdf", jdArg: "jd.txt", runs: 2, coverageRuns: 4, parallel: 1, votes: COVERAGE_VOTES, out: "r.md",
     });
   });
   it("reads --no-cache", () => {
     expect(parseStabilityArgs(["cv.pdf", "jd.txt", "--no-cache"])).toEqual({
-      ok: true, cvArg: "cv.pdf", jdArg: "jd.txt", runs: 5, coverageRuns: 10, parallel: 3, votes: 1, noCache: true,
+      ok: true, cvArg: "cv.pdf", jdArg: "jd.txt", runs: 5, coverageRuns: 10, parallel: 3, votes: COVERAGE_VOTES, noCache: true,
     });
   });
   it("reads --dump-evidence", () => {
     expect(parseStabilityArgs(["cv.pdf", "jd.txt", "--dump-evidence"])).toEqual({
-      ok: true, cvArg: "cv.pdf", jdArg: "jd.txt", runs: 5, coverageRuns: 10, parallel: 3, votes: 1, dumpEvidence: true,
+      ok: true, cvArg: "cv.pdf", jdArg: "jd.txt", runs: 5, coverageRuns: 10, parallel: 3, votes: COVERAGE_VOTES, dumpEvidence: true,
     });
   });
   it("reads --votes and accepts 20 coverage runs", () => {
     expect(parseStabilityArgs(["cv.pdf", "jd.txt", "--votes", "3", "--coverage-runs", "20"])).toMatchObject({ ok: true, votes: 3, coverageRuns: 20 });
   });
-  it("rejects even or non-positive votes", () => {
-    for (const bad of ["2", "4", "0", "-1", "x"]) expect(parseStabilityArgs(["a", "b", "--votes", bad]).ok).toBe(false);
+  it("accepts any positive votes, including 1 and even numbers", () => {
+    for (const good of ["1", "2", "4"]) expect(parseStabilityArgs(["a", "b", "--votes", good])).toMatchObject({ ok: true, votes: Number(good) });
+  });
+  it("rejects non-positive votes", () => {
+    for (const bad of ["0", "-1", "x"]) expect(parseStabilityArgs(["a", "b", "--votes", bad]).ok).toBe(false);
     expect(parseStabilityArgs(["a", "b", "--votes"]).ok).toBe(false);
   });
   it("rejects missing paths, bad numbers and unknown flags", () => {
@@ -279,35 +282,6 @@ describe("renderReport with dumpEvidence", () => {
   });
 });
 
-describe("voteCoverage", () => {
-  const c = (requirementId: string, verdict: string, evidenceIds: string[] = [], reason = "r") =>
-    ({ requirementId, verdict, evidenceIds, reason }) as unknown as Coverage;
-
-  it("keeps the majority verdict and the first agreeing call's evidence", () => {
-    const voted = voteCoverage([
-      [c("req1", "partially_met", ["skill1"]), c("req2", "met", ["a"])],
-      [c("req1", "met", ["exp1.b1"]), c("req2", "met", ["b"])],
-      [c("req1", "met", ["exp1.b2"]), c("req2", "unmet", [])],
-    ]);
-    expect(voted.map((v) => [v.requirementId, v.verdict, v.evidenceIds])).toEqual([
-      ["req1", "met", ["exp1.b1"]],
-      ["req2", "met", ["a"]],
-    ]);
-  });
-  it("falls back to partially_met with the first such call's evidence when all three differ", () => {
-    const voted = voteCoverage([[c("req1", "met", ["x"])], [c("req1", "partially_met", ["y"])], [c("req1", "unmet", [])]]);
-    expect(voted[0]).toMatchObject({ verdict: "partially_met", evidenceIds: ["y"] });
-  });
-  it("falls back to partially_met with no evidence when no call gave it (N=2 split)", () => {
-    const voted = voteCoverage([[c("req1", "met", ["x"])], [c("req1", "unmet", [])]]);
-    expect(voted[0]).toMatchObject({ requirementId: "req1", verdict: "partially_met", evidenceIds: [] });
-  });
-  it("with one call returns it unchanged", () => {
-    const one = [c("req1", "unmet", [], "why")];
-    expect(voteCoverage([one])).toEqual(one);
-  });
-});
-
 describe("CV shape", () => {
   const item = (id: string) => ({ id, text: "SECRET" });
   const cv = {
@@ -349,7 +323,7 @@ describe("CV shape", () => {
 describe("renderReport with votes", () => {
   const input = { runs: 1, coverageRuns: 1, endToEnd: [], baseRequirements: reqs, coverageOnly: [{ ok: true as const, score: 1, coverage: [cov("req1", "met")] }] };
   it("states the votes above 1 and is unchanged at 1", () => {
-    expect(renderReport({ ...input, votes: 3 })).toContain("Votes per run: 3 Coverage calls");
+    expect(renderReport({ ...input, votes: 3 })).toContain("Votes per run: 3 Coverage calls, median verdict");
     expect(renderReport({ ...input, votes: 1 })).toBe(renderReport(input));
     expect(renderReport(input)).not.toContain("Votes per run");
   });

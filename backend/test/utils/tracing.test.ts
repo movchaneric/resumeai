@@ -162,7 +162,7 @@ describe("LangGraph tracing without content", () => {
     const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" });
     const pdfText = await parseCv(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf")), config.limits);
     const llm = new FakeLlmClient().enqueue("extract_cv", extractedCv);
-    const judge = new FakeLlmClient().enqueue("extract_job_profile", extractedJob).enqueue("assess_coverage", coverageAnswer);
+    const judge = new FakeLlmClient().enqueue("extract_job_profile", extractedJob).enqueueVoted("assess_coverage", coverageAnswer);
     const graph = buildRunGraph({ llm, judgeLlm: judge, judgeModel: "test-judge", jobProfileCache: new FakeJobProfileCache(), checkpointer: createMemoryCheckpointer(), onEnter: async () => {} });
 
     await graph.invoke(

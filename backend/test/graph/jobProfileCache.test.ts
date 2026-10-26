@@ -21,7 +21,7 @@ const KEY = jobProfileCacheKey(JD, "test-judge");
 
 function setup(cache = new FakeJobProfileCache()) {
   const llm = new FakeLlmClient().enqueue("extract_cv", extractedCv);
-  const judge = new FakeLlmClient().enqueue("assess_coverage", coverageAnswer);
+  const judge = new FakeLlmClient().enqueueVoted("assess_coverage", coverageAnswer);
   const runner = makeGraphRunner({ setStatus: async () => {} }, llm, judge, cache);
   const start = () => runner.start({ runId: "00000000-0000-4000-8000-000000000001" as never, cvText: CV_TEXT, jobDescriptionText: JD });
   const extractCalls = () => judge.calls.filter((c) => c.name === "extract_job_profile").length;

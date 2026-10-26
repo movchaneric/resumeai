@@ -2,10 +2,11 @@
 // stats and the markdown report. No model, no database. The report holds Requirement text (from the job description)
 // and Item IDs only. It never takes CV text or Coverage reasons as input, so none can leak into the output.
 import type { Coverage, CoverageVerdict, Cv, Requirement } from "@resume-ai/shared";
+import { COVERAGE_VOTES } from "@/scoring/assessCoverage.js";
 import { isClaimId } from "@/scoring/coverageRules.js";
 import { VERDICT_CREDITS, requirementWeight } from "@/scoring/weights.js";
 
-export const DEFAULTS = { runs: 5, coverageRuns: 10, parallel: 3, votes: 1 };
+export const DEFAULTS = { runs: 5, coverageRuns: 10, parallel: 3, votes: COVERAGE_VOTES };
 
 export type StabilityArgs =
   | { ok: true; cvArg: string; jdArg: string; runs: number; coverageRuns: number; parallel: number; votes: number; out?: string; noCache?: boolean; dumpEvidence?: boolean }
@@ -31,10 +32,8 @@ export function parseStabilityArgs(args: string[]): StabilityArgs {
       if (n === undefined) return { ok: false };
       if (arg === "--runs") opts.runs = n;
       else if (arg === "--coverage-runs") opts.coverageRuns = n;
-      else if (arg === "--votes") {
-        if (n % 2 === 0) return { ok: false };
-        opts.votes = n;
-      } else opts.parallel = n;
+      else if (arg === "--votes") opts.votes = n;
+      else opts.parallel = n;
     } else if (arg === "--out") {
       out = args[++i];
       if (!out || out.startsWith("--")) return { ok: false };
@@ -102,35 +101,6 @@ export function normaliseText(text: string): string {
     .toLowerCase()
     .replace(/\s+/g, " ")
     .replace(/^[\s\p{P}\p{S}]+|[\s\p{P}\p{S}]+$/gu, "");
-}
-
-/* ---------- Majority vote over Coverage calls (--votes) ---------- */
-
-/**
- * Collapses N Coverage answers on the same inputs into one, per Requirement.
- * Verdict: the one given by a strict majority of the calls that judged that Requirement; with no strict majority
- * (e.g. met / partially_met / unmet at N=3) it is `partially_met`.
- * Evidence IDs and reason: those of the first call that gave the winning verdict; a fallback `partially_met` that no call gave has `[]` and "".
- * Requirements keep the order in which they first appear across the calls.
- */
-export function voteCoverage(calls: Coverage[][]): Coverage[] {
-  const order: string[] = [];
-  const byId = new Map<string, Coverage[]>();
-  for (const call of calls) {
-    for (const c of call) {
-      if (!byId.has(c.requirementId)) {
-        order.push(c.requirementId);
-        byId.set(c.requirementId, []);
-      }
-      byId.get(c.requirementId)!.push(c);
-    }
-  }
-  return order.map((id) => {
-    const answers = byId.get(id)!;
-    const winner = VERDICTS.find((v) => answers.filter((a) => a.verdict === v).length * 2 > answers.length) ?? "partially_met";
-    const first = answers.find((a) => a.verdict === winner);
-    return first ? { ...first, evidenceIds: [...first.evidenceIds] } : ({ requirementId: id, verdict: winner, evidenceIds: [], reason: "" } as unknown as Coverage);
-  });
 }
 
 /* ---------- CV shape (experiment A) ---------- */
@@ -402,7 +372,7 @@ export function renderReport(input: ReportInput): string {
     }
   }
 
-  lines.push("## Experiment C: Coverage only", "", ...(input.votes && input.votes > 1 ? [`Votes per run: ${input.votes} Coverage calls, majority verdict per Requirement (no strict majority gives partially_met).`, ""] : []), ...failures("C", input.coverageOnly), "", `Score: ${statsLine(cStats)}`, "");
+  lines.push("## Experiment C: Coverage only", "", ...(input.votes && input.votes > 1 ? [`Votes per run: ${input.votes} Coverage calls, median verdict per Requirement (unmet < partially_met < met): the majority when there is one, partially_met when three calls all differ, the lower verdict of two.`, ""] : []), ...failures("C", input.coverageOnly), "", `Score: ${statsLine(cStats)}`, "");
   let analysis: CoverageAnalysis | undefined;
   if (input.baseRequirements && okC.length > 0) {
     analysis = analyseCoverage(input.baseRequirements, okC.map((r) => r.coverage));

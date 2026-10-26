@@ -34,13 +34,13 @@ describe("a failing status write inside a tailoring round", () => {
     async (failingNode) => {
       const judge = new FakeLlmClient()
         .enqueue("extract_job_profile", job)
-        .enqueue("assess_coverage", verdicts("met", "unmet", "unmet"))
+        .enqueueVoted("assess_coverage", verdicts("met", "unmet", "unmet"))
         .enqueue("tailor", { changes: [addSkill("PostgreSQL", "req2")] })
         .enqueue("claim_check", { verdicts: [{ id: "r1.c1", reason: "r", verdict: "supported" }] })
-        .enqueue("assess_coverage", { verdicts: [verdicts("met", "met").verdicts[1]] })
+        .enqueueVoted("assess_coverage", { verdicts: [verdicts("met", "met").verdicts[1]] })
         .enqueue("tailor", { changes: [addSkill("Docker", "req3")] })
         .enqueue("claim_check", { verdicts: [{ id: "r2.c1", reason: "r", verdict: "supported" }] })
-        .enqueue("assess_coverage", { verdicts: [verdicts("met", "met", "met").verdicts[2]] });
+        .enqueueVoted("assess_coverage", { verdicts: [verdicts("met", "met", "met").verdicts[2]] });
       const llm = new FakeLlmClient().enqueue("extract_cv", extractedCv);
       let begun = 0;
       const graph = buildRunGraph({

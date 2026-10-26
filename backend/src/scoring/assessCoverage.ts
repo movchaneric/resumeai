@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CoverageVerdictSchema } from "@resume-ai/shared";
-import type { Coverage, Cv, Requirement } from "@resume-ai/shared";
+import type { Coverage, CoverageVerdict, Cv, Requirement } from "@resume-ai/shared";
 import { LlmSchemaError, type LlmClient, type LlmMessage } from "@/llm/llmClient.js";
 import { renderCv, renderRequirements } from "@/prompts/renderCv.js";
 import { applyClaimRule, coverageIssues, type CoverageAnswer } from "@/scoring/coverageRules.js";
@@ -31,6 +31,34 @@ const RETRY_INSTRUCTION =
 
 const CALL_NAME = "assess_coverage";
 
+/**
+ * Coverage calls per judgement. One strict call can flip several Requirements at once (slice 18), so the first
+ * Coverage and every re-judge make this many calls in parallel and keep the median verdict per Requirement.
+ * Odd, so that 3 calls give the majority verdict whenever there is one.
+ */
+export const COVERAGE_VOTES = 3;
+
+const VERDICT_RANK: Record<CoverageVerdict, number> = { unmet: 0, partially_met: 1, met: 2 };
+
+/**
+ * Per Requirement, the median verdict of the calls (unmet < partially_met < met), in Requirement order.
+ * With 3 calls that is the majority verdict, or `partially_met` when all differ. With 2 calls it is the lower one,
+ * so a vote never inflates. The entry (Evidence and reason) comes from the first call that gave the winning verdict.
+ * Each call must hold one entry per Requirement, as `applyClaimRule` returns.
+ */
+export function voteCoverage(calls: Coverage[][], requirements: Requirement[]): Coverage[] {
+  return requirements.map((requirement) => {
+    const entries = calls.map((call) => {
+      const entry = call.find((c) => c.requirementId === requirement.id);
+      if (entry === undefined) throw new Error(`No Coverage for ${requirement.id}`);
+      return entry;
+    });
+    const sorted = [...entries].sort((a, b) => VERDICT_RANK[a.verdict] - VERDICT_RANK[b.verdict]);
+    const winning = sorted[Math.floor((sorted.length - 1) / 2)]!.verdict;
+    return entries.find((e) => e.verdict === winning)!;
+  });
+}
+
 /** Matches `CoverageAnswer`, field order included: the reason comes before the verdict. Plain strings keep strict mode simple. */
 const CoverageAnswerSchema = z.object({
   verdicts: z.array(
@@ -45,47 +73,88 @@ const CoverageAnswerSchema = z.object({
 
 const asLines = (issues: string[]) => issues.map((i) => `- ${i}`).join("\n");
 
+
+type CallResult = { coverage: Coverage[]; downgrades: number };
+
+/** One independent Coverage call with its own retry, Claim rule and soft-skill rule. */
+async function judgeOnce(
+  llm: LlmClient,
+  cv: Cv,
+  requirements: Requirement[],
+  onRetry: () => void,
+): Promise<CallResult> {
+  const messages: LlmMessage[] = [
+    { role: "system", content: COVERAGE_SYSTEM_PROMPT },
+    { role: "user", content: `Requirements:\n${renderRequirements(requirements)}\n\nCV:\n${renderCv(cv)}` },
+  ];
+
+  /** One model call. Returns the answer, or the issues that make it unusable. */
+  const attempt = async (input: LlmMessage[]): Promise<{ answer: CoverageAnswer } | { issues: string[] }> => {
+    try {
+      const answer = await llm.structured(CoverageAnswerSchema, input, { name: CALL_NAME });
+      const issues = coverageIssues(requirements, cv, answer);
+      return issues.length === 0 ? { answer } : { issues };
+    } catch (error) {
+      if (error instanceof LlmSchemaError) return { issues: error.issues };
+      throw error;
+    }
+  };
+
+  let result = await attempt(messages);
+  if ("issues" in result) {
+    onRetry();
+    const retryMessages: LlmMessage[] = [
+      ...messages,
+      { role: "user", content: RETRY_INSTRUCTION.replace("{issues}", asLines(result.issues)) },
+    ];
+    result = await attempt(retryMessages);
+    if ("issues" in result) {
+      throw new CoverageError("The model did not return a valid coverage assessment", result.issues);
+    }
+  }
+  return applyClaimRule(requirements, result.answer);
+}
+
+/**
+ * Judges the CV against the Requirements with `options.votes` independent calls in parallel (default
+ * `COVERAGE_VOTES`) and votes per Requirement (`voteCoverage`). If at least 2 calls succeed (1 when `votes` is 1)
+ * the vote runs over the successful ones; otherwise the first call's error is rethrown unchanged.
+ * `downgrades` is the sum over the successful calls: Claim and soft-skill downgrades applied before the vote.
+ * One `assess_coverage` span covers the whole judgement (no span per call, so the span tree and the `round`
+ * attribute stay one per judgement). Its attributes: the voted verdict counts, `coverage.votes` (calls made),
+ * `coverage.failed_calls`, `coverage.disagreements` (Requirements where the successful calls did not all agree),
+ * `coverage.retries` (retries made, over all calls) and `coverage.downgrades` (summed over the successful calls).
+ */
 export async function assessCoverage(
   llm: LlmClient,
   cv: Cv,
   requirements: Requirement[],
-  options: { round?: number } = {},
+  options: { round?: number; votes?: number } = {},
 ): Promise<{ coverage: Coverage[]; downgrades: number }> {
+  const votes = options.votes ?? COVERAGE_VOTES;
   return withSpan(CALL_NAME, async (span) => {
     if (options.round !== undefined) span.setAttribute("round", options.round);
-    const messages: LlmMessage[] = [
-      { role: "system", content: COVERAGE_SYSTEM_PROMPT },
-      { role: "user", content: `Requirements:\n${renderRequirements(requirements)}\n\nCV:\n${renderCv(cv)}` },
-    ];
+    span.setAttribute("coverage.votes", votes);
 
-    /** One model call. Returns the answer, or the issues that make it unusable. */
-    const attempt = async (input: LlmMessage[]): Promise<{ answer: CoverageAnswer } | { issues: string[] }> => {
-      try {
-        const answer = await llm.structured(CoverageAnswerSchema, input, { name: CALL_NAME });
-        const issues = coverageIssues(requirements, cv, answer);
-        return issues.length === 0 ? { answer } : { issues };
-      } catch (error) {
-        if (error instanceof LlmSchemaError) return { issues: error.issues };
-        throw error;
-      }
-    };
-
-    span.setAttribute("coverage.retries", 0);
-    let result = await attempt(messages);
-    if ("issues" in result) {
-      span.setAttribute("coverage.retries", 1);
-      const retryMessages: LlmMessage[] = [
-        ...messages,
-        { role: "user", content: RETRY_INSTRUCTION.replace("{issues}", asLines(result.issues)) },
-      ];
-      result = await attempt(retryMessages);
-      if ("issues" in result) {
-        throw new CoverageError("The model did not return a valid coverage assessment", result.issues);
-      }
+    let retries = 0;
+    span.setAttribute("coverage.retries", retries);
+    const onRetry = () => span.setAttribute("coverage.retries", ++retries);
+    const settled = await Promise.allSettled(Array.from({ length: votes }, () => judgeOnce(llm, cv, requirements, onRetry)));
+    const succeeded = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    const failed = settled.length - succeeded.length;
+    span.setAttribute("coverage.failed_calls", failed);
+    if (succeeded.length < Math.min(2, votes)) {
+      const first = settled.find((r): r is PromiseRejectedResult => r.status === "rejected")!;
+      throw first.reason;
     }
 
-    const { coverage, downgrades } = applyClaimRule(requirements, result.answer);
+    const calls = succeeded.map((r) => r.coverage);
+    const coverage = voteCoverage(calls, requirements);
+    const downgrades = succeeded.reduce((sum, r) => sum + r.downgrades, 0);
+    const disagreements = coverage.filter((c, i) => calls.some((call) => call[i]!.verdict !== c.verdict)).length;
+
     span.setAttribute("coverage.downgrades", downgrades);
+    span.setAttribute("coverage.disagreements", disagreements);
     for (const verdict of CoverageVerdictSchema.options) {
       span.setAttribute(`coverage.${verdict}`, coverage.filter((c) => c.verdict === verdict).length);
     }

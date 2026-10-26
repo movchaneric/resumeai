@@ -321,3 +321,59 @@ describe("POST /runs/:id/answers", () => {
     expect(res.body.code).toBe("RUN_NOT_AWAITING_ANSWERS");
   });
 });
+
+describe("DELETE /runs/:id", () => {
+  const idle = createApp({ store, config, graphRunner, events, runInBackground: () => {} });
+  const del = (id: string) => request(app).delete(`/runs/${id}`);
+
+  /** Uploads a CV and runs the pipeline to the review. */
+  async function awaitingReview(): Promise<string> {
+    llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueueVoted("assess_coverage", coverageAnswer);
+    const { body } = await upload("cv.pdf");
+    await settle();
+    return body.id;
+  }
+
+  it("answers 204 with no body, then 404 on GET and on a second DELETE", async () => {
+    const id = await awaitingReview();
+    const res = await del(id);
+    expect(res.status).toBe(204);
+    expect(res.text).toBe("");
+    expect((await request(app).get(`/runs/${id}`)).status).toBe(404);
+    const again = await del(id);
+    expect(again.status).toBe(404);
+    expect(again.body.code).toBe("RUN_NOT_FOUND");
+    expect(await store.get(id as never)).toBeNull();
+  });
+
+  it("answers 404 for an unknown or malformed ID", async () => {
+    for (const id of ["3f0c1d4e-5b2a-4c8e-9a71-0d6e2f8b7a11", "not-a-uuid"]) {
+      const res = await del(id);
+      expect(res.status).toBe(404);
+      expect(res.body.code).toBe("RUN_NOT_FOUND");
+    }
+  });
+
+  it.each(["parsing", "extracting", "tailoring"] as const)("answers 409 RUN_BUSY while the Run is %s, and deletes nothing", async (status) => {
+    const created = await request(idle).post("/runs").attach("cv", fixture("cv.pdf"), "cv.pdf").field("jobDescription", JOB_DESCRIPTION);
+    const id = RunIdSchema.parse(created.body.id);
+    await store.setStatus(id, status);
+    const res = await del(id);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("RUN_BUSY");
+    const view = await request(app).get(`/runs/${id}`);
+    expect(view.status).toBe(200);
+    // The row is still there with its status (the view of a Run with no checkpoint reads as extracting).
+    expect((await store.get(id))?.status).toBe(status);
+  });
+
+  it("answers 404 for an expired Run, and leaves its row to the sweep", async () => {
+    const id = RunIdSchema.parse("5f0c1d4e-5b2a-4c8e-9a71-0d6e2f8b7a11");
+    const past = new Date(Date.now() - 60_000);
+    await store.create({ id, status: "awaiting_review", createdAt: new Date(past.getTime() - 1000), expiresAt: past });
+    const res = await del(id);
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe("RUN_NOT_FOUND");
+    expect(await store.get(id)).not.toBeNull();
+  });
+});

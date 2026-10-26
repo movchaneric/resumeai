@@ -923,7 +923,7 @@ describe("RunsService.submitAnswers", () => {
     };
     store.rows.set(runId, { id: runId, status, createdAt: now(), expiresAt: new Date(now().getTime() + 1000), exportPath: null, error: null });
     const answer = vi.fn<GraphRunner["answer"]>(async () => snapshot);
-    const graphRunner: GraphRunner = { start: async () => snapshot, answer, recover: async () => snapshot, read: async () => snapshot };
+    const graphRunner: GraphRunner = { start: async () => snapshot, answer, recover: async () => snapshot, read: async () => snapshot, deleteThread: async () => {} };
     const tasks: (() => Promise<void>)[] = [];
     const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner, events: new InProcessRunEvents(), now, runInBackground: (t) => void tasks.push(t) });
     return { store, answer, tasks, service };
@@ -1006,5 +1006,65 @@ describe("RunsService.submitAnswers", () => {
     await service.submitAnswers(runId, { answers: [] });
     await tasks[0]!();
     expect(store.rows.get(runId)?.error?.code).toBe("INTERNAL");
+  });
+});
+
+describe("RunsService.deleteRun", () => {
+  const runId = "33333333-3333-4333-8333-333333333333" as RunId;
+  const now = () => new Date("2026-10-01T00:00:00Z");
+
+  /** A store holding one Run, with the conditional delete the real store does in SQL, and a runner whose `deleteThread` is a spy. */
+  function deleteSetup(deleteThread: GraphRunner["deleteThread"] = async () => {}) {
+    const store = new FakeStore() as FakeStore & { deleteUnless(id: RunId, busy: RunStatus[], liveAt?: Date): Promise<boolean> };
+    store.rows.set(runId, { id: runId, status: "awaiting_review", createdAt: now(), expiresAt: new Date(now().getTime() + 1000), exportPath: null, error: null });
+    store.deleteUnless = async (id, busy, liveAt) => {
+      const row = store.rows.get(id);
+      if (!row || busy.includes(row.status) || (liveAt && row.expiresAt <= liveAt)) return false;
+      store.rows.delete(id);
+      return true;
+    };
+    const spy = vi.fn(deleteThread);
+    const snapshot = null as unknown as RunSnapshot;
+    const graphRunner: GraphRunner = { start: async () => snapshot, answer: async () => snapshot, recover: async () => snapshot, read: async () => null, deleteThread: spy };
+    const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner, events: new InProcessRunEvents(), now });
+    return { store, spy, service };
+  }
+
+  it("deletes the row, then the checkpoints", async () => {
+    const { store, spy, service } = deleteSetup();
+    await service.deleteRun(runId);
+    expect(store.rows.has(runId)).toBe(false);
+    expect(spy).toHaveBeenCalledExactlyOnceWith(runId);
+  });
+
+  it("still resolves, and logs, when deleting the checkpoints fails after the row is gone", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { store, service } = deleteSetup(async () => {
+        throw new Error("connection lost");
+      });
+      await expect(service.deleteRun(runId)).resolves.toBeUndefined();
+      expect(store.rows.has(runId)).toBe(false);
+      expect(error).toHaveBeenCalledOnce();
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("deletes nothing and leaves the checkpoints alone while the Run is busy", async () => {
+    for (const status of ["parsing", "extracting", "tailoring"] as const) {
+      const { store, spy, service } = deleteSetup();
+      store.rows.set(runId, { ...store.rows.get(runId)!, status });
+      await expect(service.deleteRun(runId)).rejects.toMatchObject({ code: "RUN_BUSY", status: 409 });
+      expect(store.rows.has(runId)).toBe(true);
+      expect(spy).not.toHaveBeenCalled();
+    }
+  });
+
+  it("says 404 for an unknown or malformed ID", async () => {
+    const { spy, service } = deleteSetup();
+    await expect(service.deleteRun("44444444-4444-4444-8444-444444444444")).rejects.toMatchObject({ code: "RUN_NOT_FOUND" });
+    await expect(service.deleteRun("nope")).rejects.toMatchObject({ code: "RUN_NOT_FOUND" });
+    expect(spy).not.toHaveBeenCalled();
   });
 });

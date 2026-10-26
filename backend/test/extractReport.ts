@@ -1,6 +1,5 @@
 // Pure printing and argument helpers for the dev script (test/extract.ts), kept apart so tests can import them
 // without running the script.
-import { randomUUID } from "node:crypto";
 import type { Change, Coverage, ExitReason, Requirement, RunId } from "@resume-ai/shared";
 import { createMemoryCheckpointer } from "@/graph/memoryCheckpointer.js";
 import type { RoundSummary } from "@/graph/runGraph.js";

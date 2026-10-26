@@ -14,7 +14,6 @@ import {
   summarise,
   cvShape,
   formatCvShape,
-  cvShapeSummary,
   type CoverageRun,
   type EndToEndRun,
 } from "./stabilityReport.js";

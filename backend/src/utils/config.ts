@@ -42,6 +42,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   return {
     port: e.PORT,
     databaseUrl: e.DATABASE_URL,
+    /** How often an idle Run stream gets a comment line. Not read from the environment; tests override it. */
+    sseHeartbeatMs: 15_000,
     runTtlMs: e.RUN_TTL_DAYS * 24 * 60 * 60 * 1000,
     limits: {
       maxCvBytes: e.MAX_CV_BYTES,

@@ -1,7 +1,8 @@
 import { createMemoryCheckpointer } from "@/graph/memoryCheckpointer.js";
 import { LangGraphRunner, type StatusWriter } from "@/graph/runner.js";
 import type { LlmClient } from "@/llm/llmClient.js";
-import type { GraphRunner } from "@/services/runs.js";
+import type { GraphRunner, RunEvents } from "@/services/runs.js";
+import { InProcessRunEvents } from "@/utils/runEvents.js";
 import { FakeJobProfileCache } from "./jobProfileCache.js";
 
 /** The real Run graph and runner on an in-memory checkpointer and an in-memory Job Profile cache, so no database is needed. */
@@ -10,10 +11,12 @@ export function makeGraphRunner(
   llm: LlmClient,
   judgeLlm: LlmClient = llm,
   jobProfileCache: FakeJobProfileCache = new FakeJobProfileCache(),
+  events: Pick<RunEvents, "publish"> = new InProcessRunEvents(),
 ): LangGraphRunner {
   return new LangGraphRunner(
     { llm, judgeLlm, judgeModel: "test-judge", jobProfileCache, checkpointer: createMemoryCheckpointer() },
     statuses,
+    events,
   );
 }
 

@@ -1,6 +1,6 @@
 import { Command } from "@langchain/langgraph";
 import type { Answer, RunId, RunStatus } from "@resume-ai/shared";
-import type { GraphRunner, RunSnapshot, StartRunInput } from "@/services/runs.js";
+import type { GraphRunner, RunEvents, RunSnapshot, StartRunInput } from "@/services/runs.js";
 import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import { withSessionSpan } from "@/utils/spans.js";
 import type { LlmClient } from "@/llm/llmClient.js";
@@ -53,10 +53,16 @@ export class LangGraphRunner implements GraphRunner {
       onRound?: (summary: RoundSummary) => void;
     },
     private readonly statuses: StatusWriter,
+    private readonly events: Pick<RunEvents, "publish">,
   ) {
     this.graph = buildRunGraph({
       ...deps,
-      onEnter: (runId, node) => this.write(runId as RunId, NODE_STATUS[node]),
+      onEnter: async (runId, node) => {
+        await this.write(runId as RunId, NODE_STATUS[node]);
+        // The previous node's checkpoint is already stored (the graph runs with `durability: "sync"`), so a view built
+        // now shows its results. A node that shares its predecessor's status writes nothing but still publishes.
+        this.events.publish(runId as RunId);
+      },
     });
   }
 
@@ -82,10 +88,13 @@ export class LangGraphRunner implements GraphRunner {
   private async runUntilPause(runId: RunId, input: Parameters<RunGraph["invoke"]>[0]): Promise<RunSnapshot> {
     const config = { configurable: { thread_id: runId } };
     try {
-      await this.graph.invoke(input, config);
+      // "sync": each step's checkpoint is stored before the next step starts, so the push made when a node is
+      // entered (and the one after the last node) always reads that step's results.
+      await this.graph.invoke(input, { ...config, durability: "sync" });
       // The graph stops before `review` and inside `collect_answers`, so those nodes' statuses are written at the pause.
       const state = await this.graph.getState(config);
       if (state.next.length > 0) await this.write(runId, statusOf(state.next[0]!) ?? "awaiting_review");
+      this.events.publish(runId);
       return toSnapshot(state.values);
     } finally {
       this.lastWritten.delete(runId);

@@ -1,3 +1,4 @@
+import { InProcessRunEvents } from "@/utils/runEvents.js";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,8 +33,9 @@ const settle = async () => {
   tasks = [];
 };
 const jobProfileCache = new FakeJobProfileCache();
-const graphRunner = makeGraphRunner(store, llm, llm, jobProfileCache);
-const app = createApp({ store, config, graphRunner, runInBackground });
+const events = new InProcessRunEvents();
+const graphRunner = makeGraphRunner(store, llm, llm, jobProfileCache, events);
+const app = createApp({ store, config, graphRunner, events, runInBackground });
 
 const JOB_DESCRIPTION = "We are hiring a backend developer with Node.js and PostgreSQL experience.";
 
@@ -57,7 +59,7 @@ afterAll(async () => {
 describe("POST /runs", () => {
   it.each(["cv.pdf", "cv.docx"])("accepts %s, stores the Run and returns its ID", async (file) => {
     // An app whose background task never starts, so the Run stays as `POST` left it.
-    const idle = createApp({ store, config, graphRunner, runInBackground: () => {} });
+    const idle = createApp({ store, config, graphRunner, events, runInBackground: () => {} });
     const res = await request(idle).post("/runs").attach("cv", fixture(file), file).field("jobDescription", JOB_DESCRIPTION);
     expect(res.status).toBe(201);
     const id = RunIdSchema.parse(res.body.id);
@@ -114,7 +116,7 @@ describe("POST /runs", () => {
 describe("GET /runs/:id", () => {
   it("returns a valid RunView while extraction is running", async () => {
     // An app whose background task never starts, so the Run stays as `POST` left it.
-    const idle = createApp({ store, config, graphRunner, runInBackground: () => {} });
+    const idle = createApp({ store, config, graphRunner, events, runInBackground: () => {} });
     const created = await request(idle).post("/runs").attach("cv", fixture("cv.pdf"), "cv.pdf").field("jobDescription", JOB_DESCRIPTION);
     const res = await request(idle).get(`/runs/${created.body.id}`);
     expect(res.status).toBe(200);
@@ -208,7 +210,7 @@ describe("GET /runs/:id", () => {
 
   it("returns 404 for an expired Run even while its row still exists", async () => {
     const { body } = await upload("cv.pdf");
-    const later = createApp({ store, config, graphRunner, now: () => new Date(Date.now() + config.runTtlMs + 1000) });
+    const later = createApp({ store, config, graphRunner, events, now: () => new Date(Date.now() + config.runTtlMs + 1000) });
     const res = await request(later).get(`/runs/${body.id}`);
     expect(res.status).toBe(404);
     expect(res.body.code).toBe("RUN_NOT_FOUND");
@@ -271,7 +273,7 @@ describe("POST /runs/:id/answers", () => {
     const id = await awaitingAnswers();
     // The background task is held back, so the second request arrives while the resume is in flight.
     const held: (() => Promise<void>)[] = [];
-    const slow = createApp({ store, config, graphRunner, runInBackground: (t) => void held.push(t) });
+    const slow = createApp({ store, config, graphRunner, events, runInBackground: (t) => void held.push(t) });
     const send = () => request(slow).post(`/runs/${id}/answers`).send({ answers: [] });
     const [first, second] = [await send(), await send()];
     expect([first.status, second.status]).toEqual([202, 409]);

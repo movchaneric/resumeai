@@ -5,7 +5,7 @@ import { RunsService, type RunsDeps } from "@/services/runs.js";
 
 /** Wires store -> service -> controller -> router and mounts each feature's routes. */
 export function createRouter(deps: RunsDeps): Router {
-  const runs = new RunsController(new RunsService(deps));
+  const runs = new RunsController(new RunsService(deps), deps.config.sseHeartbeatMs);
 
   const router = Router();
   router.use("/runs", createRunsRouter(runs, deps.config));

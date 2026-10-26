@@ -70,10 +70,22 @@ export interface GraphRunner {
   read(runId: RunId): Promise<RunSnapshot | null>;
 }
 
+/**
+ * An in-process bus that tells listeners a Run changed. It carries only the Run id, never Run data: each listener
+ * rebuilds the view itself. Defined here so the service and the graph runner depend on the shape, not on an emitter.
+ */
+export interface RunEvents {
+  /** Tells every listener of the Run that something may have changed. A throwing listener never reaches the caller. */
+  publish(runId: RunId): void;
+  /** Calls `listener` on each `publish` of the Run until the returned function is called. */
+  subscribe(runId: RunId, listener: () => void): () => void;
+}
+
 export type RunsDeps = {
   store: RunStore;
   config: Config;
   graphRunner: GraphRunner;
+  events: RunEvents;
   now?: () => Date;
   /** Starts a task without awaiting it. Tests pass a version that collects the promises. */
   runInBackground?: (task: () => Promise<void>) => void;
@@ -98,6 +110,12 @@ function failureCode(error: unknown): keyof typeof FAILURE_MESSAGES {
   if (error instanceof CoverageError) return "COVERAGE_FAILED";
   return "INTERNAL";
 }
+
+/** The statuses where nothing happens without the user: a stream closes after sending one. */
+const RESTING_STATUSES: ReadonlySet<RunView["status"]> = new Set(["awaiting_answers", "awaiting_review", "failed", "interrupted", "completed"]);
+
+/** What a client connection gives `openRunStream`: `send` writes one view, `close` ends the stream. */
+export type RunStreamSink = { send: (view: RunView) => void; close: () => void };
 
 /** The longest `has_experience` text, after trimming. */
 export const MAX_ANSWER_LENGTH = 1000;
@@ -180,6 +198,7 @@ export class RunsService {
     if (!(await store.claimStatus(run.id, "awaiting_answers", "tailoring"))) {
       throw new ApiError("RUN_NOT_AWAITING_ANSWERS", "This Run is not waiting for answers.");
     }
+    this.deps.events.publish(run.id);
     this.runInBackground(() => this.runResume(run.id, answers));
   }
 
@@ -193,6 +212,7 @@ export class RunsService {
     const count = Array.isArray(issues) ? `, ${issues.length} issues` : "";
     console.error(`Run ${id}: ${label} failed (${code}) ${name}${count}`);
     await this.deps.store.markFailed(id, code, FAILURE_MESSAGES[code]);
+    this.deps.events.publish(id);
   }
 
   /** The background resume: the graph runs on from the Answers to the next pause, or the failure is recorded on the Run. Never throws. */
@@ -219,6 +239,57 @@ export class RunsService {
     if (!run || run.expiresAt <= this.now()) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
     // A Run with no checkpoint yet (the graph has not started) reads as null.
     return toRunView(run, await this.deps.graphRunner.read(run.id));
+  }
+
+  /**
+   * Follows a Run: sends its current view, then a new view after every change, and closes after a view whose status
+   * needs the user (or the Run is gone). A view identical to the last one sent is skipped, and rebuilds are serialised
+   * so views go out in order. It subscribes before reading the first view, so a change in between is not lost.
+   * Throws the same 404 as `getRunView` before anything is sent; returns the function that ends the subscription.
+   */
+  async openRunStream(rawId: string, { send, close }: RunStreamSink): Promise<() => void> {
+    const parsed = RunIdSchema.safeParse(rawId);
+    if (!parsed.success) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
+    const id = parsed.data;
+    let done = false;
+    let lastSent: string | null = null;
+    let unsubscribe = () => {};
+    const stop = () => {
+      done = true;
+      unsubscribe();
+    };
+
+    /** Builds the view and sends it unless it equals the last one. Rejects when the view cannot be built. */
+    const emit = async (): Promise<void> => {
+      if (done) return;
+      const view = await this.getRunView(id);
+      if (done) return;
+      const json = JSON.stringify(view);
+      if (json === lastSent) return;
+      lastSent = json;
+      send(view);
+      if (RESTING_STATUSES.has(view.status)) {
+        stop();
+        close();
+      }
+    };
+
+    let chain: Promise<void> = Promise.resolve();
+    unsubscribe = this.deps.events.subscribe(id, () => {
+      chain = chain.then(emit).catch((error: unknown) => {
+        // The Run expired or its view could not be built: there is nothing more to follow.
+        if (!(error instanceof ApiError)) console.error(`Run ${id}: stream rebuild failed`, error);
+        stop();
+        close();
+      });
+    });
+    try {
+      await emit();
+    } catch (error) {
+      stop();
+      throw error;
+    }
+    return stop;
   }
 }
 

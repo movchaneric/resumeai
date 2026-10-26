@@ -7,6 +7,7 @@ import { LangGraphRunner } from "@/graph/runner.js";
 import { LangChainLlmClient } from "@/llm/langChainLlmClient.js";
 import { JobProfileStore } from "@/stores/jobProfiles.js";
 import { RunStore } from "@/stores/runs.js";
+import { InProcessRunEvents } from "@/utils/runEvents.js";
 import { setupTracing } from "@/utils/tracing.js";
 
 const config = loadConfig();
@@ -20,8 +21,9 @@ const jobProfileCache = new JobProfileStore(prisma, { ttlMs: config.runTtlMs });
 const checkpointer = createPostgresCheckpointer(config.databaseUrl);
 // Creates the checkpointer's tables in the `checkpoints` schema; the server must not listen before they exist.
 await checkpointer.setup();
-const graphRunner = new LangGraphRunner({ llm, judgeLlm, judgeModel: config.llm.judgeModel, jobProfileCache, checkpointer }, store);
-const app = createApp({ store, config, graphRunner });
+const events = new InProcessRunEvents();
+const graphRunner = new LangGraphRunner({ llm, judgeLlm, judgeModel: config.llm.judgeModel, jobProfileCache, checkpointer }, store, events);
+const app = createApp({ store, config, graphRunner, events });
 
 const server = app.listen(config.port, () => {
   console.log(`backend listening on :${config.port}`);

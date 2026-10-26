@@ -2,12 +2,13 @@
 // stats and the markdown report. No model, no database. The report holds Requirement text (from the job description)
 // and Item IDs only. It never takes CV text or Coverage reasons as input, so none can leak into the output.
 import type { Coverage, CoverageVerdict, Requirement } from "@resume-ai/shared";
+import { isClaimId } from "@/scoring/coverageRules.js";
 import { VERDICT_CREDITS, requirementWeight } from "@/scoring/weights.js";
 
 export const DEFAULTS = { runs: 5, coverageRuns: 10, parallel: 3 };
 
 export type StabilityArgs =
-  | { ok: true; cvArg: string; jdArg: string; runs: number; coverageRuns: number; parallel: number; out?: string; noCache?: boolean }
+  | { ok: true; cvArg: string; jdArg: string; runs: number; coverageRuns: number; parallel: number; out?: string; noCache?: boolean; dumpEvidence?: boolean }
   | { ok: false };
 
 const positiveInt = (value: string | undefined): number | undefined => {
@@ -16,11 +17,12 @@ const positiveInt = (value: string | undefined): number | undefined => {
   return n >= 1 ? n : undefined;
 };
 
-/** `<cv> <jd> [--runs N] [--coverage-runs M] [--parallel K] [--out file] [--no-cache]`. Exactly two paths. */
+/** `<cv> <jd> [--runs N] [--coverage-runs M] [--parallel K] [--out file] [--no-cache] [--dump-evidence]`. Exactly two paths. */
 export function parseStabilityArgs(args: string[]): StabilityArgs {
   const opts = { runs: DEFAULTS.runs, coverageRuns: DEFAULTS.coverageRuns, parallel: DEFAULTS.parallel };
   let out: string | undefined;
   let noCache = false;
+  let dumpEvidence = false;
   const paths: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
@@ -35,13 +37,15 @@ export function parseStabilityArgs(args: string[]): StabilityArgs {
       if (!out || out.startsWith("--")) return { ok: false };
     } else if (arg === "--no-cache") {
       noCache = true;
+    } else if (arg === "--dump-evidence") {
+      dumpEvidence = true;
     } else if (arg.startsWith("--")) {
       return { ok: false };
     } else paths.push(arg);
   }
   const [cvArg, jdArg, ...rest] = paths;
   if (!cvArg || !jdArg || rest.length > 0) return { ok: false };
-  return { ok: true, cvArg, jdArg, ...opts, ...(out ? { out } : {}), ...(noCache ? { noCache } : {}) };
+  return { ok: true, cvArg, jdArg, ...opts, ...(out ? { out } : {}), ...(noCache ? { noCache } : {}), ...(dumpEvidence ? { dumpEvidence } : {}) };
 }
 
 /** Runs `fn` over 0..count-1 with at most `limit` calls in flight; results keep their index order. */
@@ -207,6 +211,8 @@ export type ReportInput = {
   /** The Requirements Experiment C ran against (run 1's Job Profile), or undefined if no run produced one. */
   baseRequirements?: Requirement[];
   coverageOnly: CoverageRun[];
+  /** Adds the cited Item IDs per C run for each flipped Requirement. Item IDs only, never reasons or CV text. */
+  dumpEvidence?: boolean;
 };
 
 const f1 = (n: number) => n.toFixed(1);
@@ -223,6 +229,39 @@ function failures(label: string, runs: { ok: boolean; error?: string }[]): strin
   for (const r of failed) names.set(r.error ?? "Error", (names.get(r.error ?? "Error") ?? 0) + 1);
   const list = [...names].map(([name, n]) => `${name} x${n}`).join(", ");
   return [`${label}: ${runs.length - failed.length}/${runs.length} runs succeeded, ${failed.length} failed (${list}).`];
+}
+
+/** Per flipped Requirement, what each C run cited (Item IDs only), then whether met and partially_met runs cite the same Items. */
+export function evidenceSection(flipped: RequirementFlip[], coverageOnly: CoverageRun[]): string[] {
+  const lines = ["### Evidence per run for flipped Requirements", ""];
+  if (flipped.length === 0) return [...lines, "None: no flipped Requirements."];
+  const set = (ids: Set<string>) => `{${[...ids].sort().join(", ")}}`;
+  const summaries: string[] = [];
+  for (const f of flipped) {
+    lines.push(`#### ${f.id}: ${cell(f.text)}`, "", "| Run | Verdict | Cited Items | Claims only |", "|---|---|---|---|");
+    const cited: Record<CoverageVerdict, Set<string>> = { met: new Set(), partially_met: new Set(), unmet: new Set() };
+    const seen = new Set<CoverageVerdict>();
+    coverageOnly.forEach((run, i) => {
+      const c = run.ok ? run.coverage.find((x) => x.requirementId === f.id) : undefined;
+      if (!c) return;
+      seen.add(c.verdict);
+      for (const id of c.evidenceIds) cited[c.verdict].add(id);
+      const claimsOnly = c.evidenceIds.length === 0 ? "—" : c.evidenceIds.every(isClaimId) ? "yes" : "no";
+      lines.push(`| ${i + 1} | ${c.verdict} | ${c.evidenceIds.join(", ")} | ${claimsOnly} |`);
+    });
+    lines.push("");
+    if (!seen.has("met") || !seen.has("partially_met")) {
+      summaries.push(`- ${f.id}: no met versus partial comparison (verdicts seen: ${VERDICTS.filter((v) => seen.has(v)).join(", ")})`);
+    } else {
+      const [m, p] = [set(cited.met), set(cited.partially_met)];
+      summaries.push(
+        m === p
+          ? `- ${f.id}: same evidence, different verdict (both cite ${m})`
+          : `- ${f.id}: met runs cite ${m}, partial runs cite ${p} - different evidence`,
+      );
+    }
+  }
+  return [...lines, ...summaries];
 }
 
 export function renderReport(input: ReportInput): string {
@@ -285,6 +324,7 @@ export function renderReport(input: ReportInput): string {
       const share = range > 0 ? `${((analysis.swingSum / range) * 100).toFixed(0)}% of the observed range (${f1(range)} points)` : "the observed range is 0";
       lines.push("", `Swings add up to ${f1(analysis.swingSum)} points, ${share}. The sum can exceed 100% because flips rarely all land on the same run.`);
     }
+    if (input.dumpEvidence) lines.push("", ...evidenceSection(analysis.flipped, input.coverageOnly));
     lines.push("");
   } else lines.push("No Coverage analysis: no Job Profile or no successful run.", "");
 

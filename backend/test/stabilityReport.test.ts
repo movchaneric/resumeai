@@ -4,6 +4,7 @@ import {
   analyseCoverage,
   listStability,
   mapPool,
+  evidenceSection,
   normaliseText,
   parseStabilityArgs,
   renderReport,
@@ -34,6 +35,11 @@ describe("parseStabilityArgs", () => {
   it("reads --no-cache", () => {
     expect(parseStabilityArgs(["cv.pdf", "jd.txt", "--no-cache"])).toEqual({
       ok: true, cvArg: "cv.pdf", jdArg: "jd.txt", runs: 5, coverageRuns: 10, parallel: 3, noCache: true,
+    });
+  });
+  it("reads --dump-evidence", () => {
+    expect(parseStabilityArgs(["cv.pdf", "jd.txt", "--dump-evidence"])).toEqual({
+      ok: true, cvArg: "cv.pdf", jdArg: "jd.txt", runs: 5, coverageRuns: 10, parallel: 3, dumpEvidence: true,
     });
   });
   it("rejects missing paths, bad numbers and unknown flags", () => {
@@ -191,5 +197,73 @@ describe("renderReport", () => {
     expect(report).toContain("Node.js");
     expect(report).not.toContain(MARKER);
     expect(report).not.toContain("exp1.b1");
+  });
+});
+
+describe("evidenceSection", () => {
+  const covE = (requirementId: string, verdict: string, evidenceIds: string[]) =>
+    ({ requirementId, verdict, evidenceIds, reason: "SECRET-REASON" }) as unknown as Coverage;
+  const okRun = (...coverage: Coverage[]): CoverageRun => ({ ok: true, score: 0, coverage });
+  const flip = (id: string, text: string) => ({ id, importance: "must_have", kind: "skill", text, counts: { met: 1, partially_met: 1, unmet: 0 }, swing: 1 });
+
+  it("lists one row per run with cited IDs and a Claims-only column, then a summary line", () => {
+    const lines = evidenceSection(
+      [flip("req4", "Node.js"), flip("req5", "Docker")],
+      [
+        okRun(covE("req4", "met", ["exp1.b2"]), covE("req5", "met", ["skill1", "summary"])),
+        { ok: false, error: "LlmUnavailableError" },
+        okRun(covE("req4", "partially_met", ["skill3"]), covE("req5", "partially_met", [])),
+        okRun(covE("req4", "met", ["exp1.b2", "skill3"]), covE("req5", "met", ["skill1", "summary"])),
+      ],
+    ).join("\n");
+    expect(lines).toContain("### Evidence per run for flipped Requirements");
+    expect(lines).toContain("#### req4: Node.js");
+    expect(lines).toContain("| Run | Verdict | Cited Items | Claims only |");
+    expect(lines).toContain("| 1 | met | exp1.b2 | no |");
+    expect(lines).toContain("| 3 | partially_met | skill3 | yes |");
+    expect(lines).toContain("| 4 | met | exp1.b2, skill3 | no |");
+    expect(lines).toContain("| 3 | partially_met |  | — |");
+    expect(lines).not.toContain("| 2 |");
+    expect(lines).toContain("- req4: met runs cite {exp1.b2, skill3}, partial runs cite {skill3} - different evidence");
+    expect(lines).toContain("- req5: met runs cite {skill1, summary}, partial runs cite {} - different evidence");
+    expect(lines).not.toContain("SECRET-REASON");
+  });
+
+  it("says same evidence when the sets match, and notes a missing met or partial side", () => {
+    const lines = evidenceSection(
+      [flip("req1", "A"), flip("req2", "B")],
+      [
+        okRun(covE("req1", "met", ["exp1.b1", "skill1"]), covE("req2", "met", ["exp1.b1"])),
+        okRun(covE("req1", "partially_met", ["skill1", "exp1.b1"]), covE("req2", "unmet", [])),
+      ],
+    ).join("\n");
+    expect(lines).toContain("- req1: same evidence, different verdict (both cite {exp1.b1, skill1})");
+    expect(lines).toContain("- req2: no met versus partial comparison (verdicts seen: met, unmet)");
+  });
+
+  it("says none when nothing flipped", () => {
+    expect(evidenceSection([], []).join("\n")).toContain("None");
+  });
+});
+
+describe("renderReport with dumpEvidence", () => {
+  const cRun = (verdict: string): CoverageRun => ({
+    ok: true,
+    score: 1,
+    coverage: [
+      { requirementId: "req1", verdict, evidenceIds: [verdict === "met" ? "exp1.b2" : "skill3"], reason: "r" },
+      cov("req2", "met"),
+      cov("req3", "unmet"),
+    ] as unknown as Coverage[],
+  });
+  const input = { runs: 1, coverageRuns: 2, endToEnd: [], baseRequirements: reqs, coverageOnly: [cRun("met"), cRun("partially_met")] };
+
+  it("adds the section after the flipped table only when asked", () => {
+    const without = renderReport(input);
+    const withDump = renderReport({ ...input, dumpEvidence: true });
+    expect(without).not.toContain("Evidence per run");
+    expect(withDump.indexOf("### Evidence per run for flipped Requirements")).toBeGreaterThan(withDump.indexOf("### Flipped Requirements"));
+    expect(withDump.indexOf("### Evidence per run for flipped Requirements")).toBeLessThan(withDump.indexOf("## Summary"));
+    expect(withDump).toContain("different evidence");
   });
 });

@@ -1,5 +1,5 @@
 // Dev script: measures why the Match Score varies on identical input (issue #18). Calls a real model.
-// Run with `pnpm --filter backend stability <cv-file> <job-description-file> [--runs N] [--coverage-runs M] [--parallel K] [--out <file>] [--no-cache]`.
+// Run with `pnpm --filter backend stability <cv-file> <job-description-file> [--runs N] [--coverage-runs M] [--parallel K] [--out <file>] [--no-cache] [--dump-evidence]`.
 // The markdown report goes to stdout (and to --out); progress goes to stderr. The report never contains CV text.
 import "dotenv/config";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -20,7 +20,7 @@ import { setupTracing } from "@/utils/tracing.js";
 import { runInPipelineSpan } from "./extractReport.js";
 import { mapPool, parseStabilityArgs, renderReport, type CoverageRun, type EndToEndRun } from "./stabilityReport.js";
 
-const USAGE = `Usage: pnpm --filter backend stability <cv-file> <job-description-file> [--runs N] [--coverage-runs M] [--parallel K] [--out <file>] [--no-cache]
+const USAGE = `Usage: pnpm --filter backend stability <cv-file> <job-description-file> [--runs N] [--coverage-runs M] [--parallel K] [--out <file>] [--no-cache] [--dump-evidence]
 
   <cv-file>               PDF or DOCX
   <job-description-file>  plain text
@@ -32,6 +32,8 @@ const USAGE = `Usage: pnpm --filter backend stability <cv-file> <job-description
                           Without it, experiment A reads the Job Profile through the real cache (needs the database):
                           the first run misses and extracts, the later runs hit. A profile cached by an earlier
                           run of this script, less than 7 days ago, is hit by run 1 too.
+  --dump-evidence         add a section listing, for each flipped Requirement, the Item IDs each Coverage run cited
+                          and whether met and partially_met runs cite the same Items (IDs only, no reasons or CV text)
 
 Paths are relative to the directory you ran pnpm from (pnpm sets INIT_CWD), or absolute.
 Reads backend/.env. DATABASE_URL is needed unless --no-cache is given (a placeholder is used then).
@@ -48,7 +50,7 @@ async function main(): Promise<number> {
     console.error(USAGE);
     return 1;
   }
-  const { cvArg, jdArg, runs, coverageRuns, parallel, out, noCache } = parsed;
+  const { cvArg, jdArg, runs, coverageRuns, parallel, out, noCache, dumpEvidence } = parsed;
 
   let cvBuffer: Buffer;
   let jdText: string;
@@ -120,7 +122,7 @@ async function main(): Promise<number> {
         });
       } else console.error("C skipped: no end-to-end run succeeded");
 
-      const report = renderReport({ runs, coverageRuns, endToEnd, baseRequirements, coverageOnly });
+      const report = renderReport({ runs, coverageRuns, endToEnd, baseRequirements, coverageOnly, dumpEvidence });
       console.log(report);
       if (out) {
         writeFileSync(resolve(base, out), report + "\n");

@@ -79,4 +79,21 @@ describe("measureFit", () => {
     if (fit.fits) return;
     expect(fit.overBy).toBeGreaterThan(0);
   });
+
+  it("reports the overflow as the height past the first page, not the total content height", async () => {
+    const sizes = sizesForStep(FLOOR_STEP);
+    const render = (jobs: number) => renderPdf(layoutCv(longCv(jobs, 6)), sizes);
+    let fitting = 0;
+    while ((await render(fitting + 1)).pages === 1) fitting++;
+    const one = await render(fitting + 1);
+    const two = await render(fitting + 2);
+    expect(one.pages).toBe(2);
+    expect(two.pages).toBe(2);
+    const jobHeight = two.overflow - one.overflow;
+    // The CV with one job more than fits runs over by less than that job; the total content height would be a whole page more.
+    expect(one.overflow).toBeGreaterThan(0);
+    expect(one.overflow).toBeLessThanOrEqual(jobHeight * 1.05);
+    // Taking away about the reported overflow's worth of jobs makes it fit.
+    expect((await render(fitting + 1 - Math.ceil(one.overflow / jobHeight))).pages).toBe(1);
+  });
 });

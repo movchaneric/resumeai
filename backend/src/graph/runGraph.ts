@@ -7,8 +7,7 @@ import { validateChanges } from "@/tailoring/validateChanges.js";
 import { applyChanges } from "@/tailoring/applyChanges.js";
 import { applyDecisions, keptChanges } from "@/tailoring/review.js";
 import { setActiveSpanAttribute } from "@/utils/spans.js";
-import { fitOf } from "@/export/fit.js";
-import { condenseDrop, condenseReword, type CondenseInput, type CondenseStepResult } from "@/tailoring/condense.js";
+import { condenseDrop, condenseReword, measureCondense, type CondenseInput, type CondenseStepResult } from "@/tailoring/condense.js";
 import { removableBullets } from "@/tailoring/removable.js";
 import { mergeRoundIntoChanges } from "@/tailoring/mergeChanges.js";
 import { mergeCoverage, requirementsListedBy } from "@/tailoring/roundCoverage.js";
@@ -301,7 +300,7 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
     // model call and no status write.
     .addNode("condense_measure", async (state) => {
       try {
-        const fit = await fitOf(applyChanges(state.cv!, state.changes));
+        const fit = await measureCondense(state.cv!, state.changes);
         if (fit.fits) return { condensed: true };
         return { condense: { overByLines: fit.overByLines, dropPasses: 0, touched: [], failed: false } };
       } catch (error) {

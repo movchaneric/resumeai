@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ChangeSchema } from "@resume-ai/shared";
 import type { Change, Coverage, Cv, Requirement, UserEvidence } from "@resume-ai/shared";
-import { fitOf } from "@/export/fit.js";
+import { fitOf, type FitResult } from "@/export/fit.js";
 import type { LlmClient, LlmMessage } from "@/llm/llmClient.js";
 import { renderDropInput, renderRewordInput, type CondenseItem } from "@/prompts/renderCondense.js";
 import { applyChanges } from "@/tailoring/applyChanges.js";
@@ -67,6 +67,11 @@ export type CondenseStepResult = {
   overByLines: number;
   rejections: RecordedRejection[];
 };
+
+/** Does the CV with every Change counted as accepted fit one page, and if not, by how many lines is it over? */
+export function measureCondense(originalCv: Cv, changes: Change[]): Promise<FitResult> {
+  return fitOf(applyChanges(originalCv, changes));
+}
 
 const stepId = (pass: number, n: number) => `cd${pass}.c${n}`;
 

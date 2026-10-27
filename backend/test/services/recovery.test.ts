@@ -481,7 +481,7 @@ describe("the interrupted view", () => {
     await process.service.recoverRuns(STARTED_AT);
     const view = await process.service.getRunView(id);
     expect(view.status).toBe("interrupted");
-    expect(stepStates(view)).toEqual(["parse:done", "extract:failed", "coverage:pending", "questions:pending", "tailor:pending", "review:pending", "export:pending"]);
+    expect(stepStates(view)).toEqual(["parse:done", "extract:failed", "coverage:pending", "questions:pending", "tailor:pending", "fit:pending", "review:pending", "export:pending"]);
   });
 
   it("shows extract as the failed step when extraction had not finished", async () => {
@@ -500,7 +500,7 @@ describe("the interrupted view", () => {
     const view = await interruptedAfter(before, id, "extracting");
     expect(view.status).toBe("interrupted");
     expect(view.job).toEqual({ title: "Backend Developer", company: "Initech" });
-    expect(stepStates(view)).toEqual(["parse:done", "extract:done", "coverage:failed", "questions:pending", "tailor:pending", "review:pending", "export:pending"]);
+    expect(stepStates(view)).toEqual(["parse:done", "extract:done", "coverage:failed", "questions:pending", "tailor:pending", "fit:pending", "review:pending", "export:pending"]);
   });
 
   it("shows tailor as the failed step once Coverage and the Questions are done", async () => {
@@ -508,6 +508,6 @@ describe("the interrupted view", () => {
     const id = await tailoringHeldAt(before, "tailor");
     const view = await interruptedAfter(before, id, "tailoring");
     expect(view.status).toBe("interrupted");
-    expect(stepStates(view)).toEqual(["parse:done", "extract:done", "coverage:done", "questions:done", "tailor:failed", "review:pending", "export:pending"]);
+    expect(stepStates(view)).toEqual(["parse:done", "extract:done", "coverage:done", "questions:done", "tailor:failed", "fit:pending", "review:pending", "export:pending"]);
   });
 });

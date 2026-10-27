@@ -6,7 +6,7 @@ import { CvSchema } from "./cv.js";
 import { QuestionSchema, UserEvidenceSchema } from "./evidence.js";
 import { ImportanceSchema } from "./job-profile.js";
 
-export const StepKeySchema = z.enum(["parse", "extract", "coverage", "questions", "tailor", "review", "export"]);
+export const StepKeySchema = z.enum(["parse", "extract", "coverage", "questions", "tailor", "fit", "review", "export"]);
 export const StepStateSchema = z.enum(["pending", "running", "done", "failed"]);
 export type StepState = z.infer<typeof StepStateSchema>;
 

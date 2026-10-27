@@ -7,6 +7,9 @@ import { validateChanges } from "@/tailoring/validateChanges.js";
 import { applyChanges } from "@/tailoring/applyChanges.js";
 import { applyDecisions, keptChanges } from "@/tailoring/review.js";
 import { setActiveSpanAttribute } from "@/utils/spans.js";
+import { fitOf } from "@/export/fit.js";
+import { condenseDrop, condenseReword, type CondenseInput, type CondenseStepResult } from "@/tailoring/condense.js";
+import { removableBullets } from "@/tailoring/removable.js";
 import { mergeRoundIntoChanges } from "@/tailoring/mergeChanges.js";
 import { mergeCoverage, requirementsListedBy } from "@/tailoring/roundCoverage.js";
 import { onlyGapsLeft, routeAfterRound, shouldSkipTailoring } from "@/scoring/exitRouter.js";
@@ -14,7 +17,7 @@ import { assessCoverage } from "@/scoring/assessCoverage.js";
 import { matchScore } from "@/scoring/matchScore.js";
 import { resolveJobProfile, type JobProfileCache } from "@/graph/jobProfileCache.js";
 import { STATUS_AT_POSITION } from "@/services/runs.js";
-import { RunState } from "@/graph/state.js";
+import { RunState, type CondenseProgress, type RunStateValues } from "@/graph/state.js";
 import type { RecordedRejection } from "@/tailoring/validateChanges.js";
 import { UserEvidenceIdSchema, type Answer, type Change, type Question, type RequirementId, type ReviewDecision, type UserEvidence } from "@resume-ai/shared";
 
@@ -27,6 +30,9 @@ export const NODE_STATUS = {
   tailor: "tailoring",
   validate: "tailoring",
   rejudge: "tailoring",
+  condense_reword: "tailoring",
+  condense_drop: "tailoring",
+  condense_rejudge: "tailoring",
   review: STATUS_AT_POSITION.review,
   final_rejudge: "tailoring",
 } as const;
@@ -99,13 +105,53 @@ function logRoundFailure(runId: string, round: number, error: unknown): void {
   console.error(`Run ${runId}: round ${round} failed: ${name}${count}`);
 }
 
+/** At most this many drop steps follow the reword step. */
+const DROP_PASSES = 2;
+
+/** The drop steps still worth running: the CV is over, no step failed, the limit is not reached and there is a bullet to offer. */
+function moreDrops(state: RunStateValues): boolean {
+  const progress = state.condense;
+  if (progress === null || progress.failed || progress.overByLines === 0 || progress.dropPasses >= DROP_PASSES) return false;
+  return removableBullets(state.cv!, state.coverage!, state.changes).size > 0;
+}
+
+function condenseInput(state: RunStateValues, pass: number): CondenseInput {
+  return {
+    originalCv: state.cv!,
+    changes: state.changes,
+    requirements: state.jobProfile!.requirements,
+    coverage: state.coverage!,
+    userEvidence: state.userEvidence,
+    overByLines: state.condense!.overByLines,
+    pass,
+    round: state.rounds,
+  };
+}
+
+/** What a finished condense step adds to the progress. */
+function advance(progress: CondenseProgress, step: CondenseStepResult): CondenseProgress {
+  return { ...progress, overByLines: step.overByLines, touched: [...new Set([...progress.touched, ...step.touched])] };
+}
+
+/**
+ * Condensing never fails the Run (like `final_rejudge`): a failure is logged by error name only, flagged on the span, and
+ * stops the remaining steps. The Changes of the steps before it are kept.
+ */
+function stopCondensing(state: RunStateValues, step: string, error: unknown): { condense: CondenseProgress } {
+  console.error(`Run ${state.runId}: condensing stopped, ${step} failed: ${describeFailure(error)}`);
+  setActiveSpanAttribute("condense.failed", true);
+  return { condense: { ...state.condense!, failed: true } };
+}
+
 /**
  * The Run workflow (ADR 0001): extract, first Coverage, then either `review` (nothing to tailor)
  * or `select_questions` (which pauses in `collect_answers` for the user's Answers when there is anything to ask) and then
  * tailoring rounds: begin_round, tailor, validate, rejudge, route, and back to begin_round while the exit router
  * says so (at most MAX_ROUNDS). Nodes are thin: each calls functions from `extraction/`, `tailoring/` or `scoring/`
  * and returns a state update. `begin_round` counts the round as started; the `route` node is the only place that
- * commits the pending round. `review` waits in an `interrupt()` for the decisions, `final_rejudge` judges again what they undid, then the graph ends.
+ * commits the pending round. Every path into `review` goes through Condensing first (`condense_measure`, then, only when the CV
+ * with every Change accepted is too long, `condense_reword`, up to two `condense_drop`s and `condense_rejudge`); it never goes back to a round.
+ * `review` waits in an `interrupt()` for the decisions, `final_rejudge` judges again what they undid, then the graph ends.
  */
 export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, checkpointer, onEnter, onRound }: RunGraphDeps) {
   return new StateGraph(RunState)
@@ -250,6 +296,60 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
         scoreAfter: pending.score!,
       };
     })
+    // Condensing (decisions record, "Condensing"): the CV with every Change accepted must fit one page before the user sees it.
+    // One node per step, so a server stop resumes from the last finished step. A CV that fits passes straight through, with no
+    // model call and no status write.
+    .addNode("condense_measure", async (state) => {
+      try {
+        const fit = await fitOf(applyChanges(state.cv!, state.changes));
+        if (fit.fits) return { condensed: true };
+        return { condense: { overByLines: fit.overByLines, dropPasses: 0, touched: [], failed: false } };
+      } catch (error) {
+        console.error(`Run ${state.runId}: condensing skipped, measuring failed: ${describeFailure(error)}`);
+        setActiveSpanAttribute("condense.failed", true);
+        return { condensed: true };
+      }
+    })
+    .addNode("condense_reword", async (state) => {
+      await onEnter(state.runId, "condense_reword");
+      try {
+        const step = await condenseReword(judgeLlm, condenseInput(state, 1));
+        return { changes: step.changes, condense: advance(state.condense!, step) };
+      } catch (error) {
+        return stopCondensing(state, "reword", error);
+      }
+    })
+    .addNode("condense_drop", async (state) => {
+      await onEnter(state.runId, "condense_drop");
+      const progress = state.condense!;
+      try {
+        // Passes 2 and 3 name the Change IDs (`cd2.c1`, `cd3.c1`); pass 1 is the reword.
+        const step = await condenseDrop(judgeLlm, condenseInput(state, progress.dropPasses + 2));
+        return { changes: step.changes, condense: { ...advance(progress, step), dropPasses: progress.dropPasses + 1 } };
+      } catch (error) {
+        return stopCondensing(state, "drop", error);
+      }
+    })
+    // Judges again the Requirements whose Evidence cites an Item condensing reworded or removed, against the condensed CV. The
+    // condense Changes stay whatever the new score is. A failure here leaves the verdicts as they were: the claim check already
+    // vouched for each rewording, so keeping the earlier verdict is closer to the truth than dropping to the pre-tailoring one.
+    .addNode("condense_rejudge", async (state) => {
+      await onEnter(state.runId, "condense_rejudge");
+      const { requirements } = state.jobProfile!;
+      const touched = new Set(state.condense!.touched);
+      const affected = requirements.filter((r) => state.coverage!.some((c) => c.requirementId === r.id && c.evidenceIds.some((id) => touched.has(id))));
+      if (affected.length === 0) return { condensed: true };
+      try {
+        const condensed = applyChanges(state.cv!, state.changes);
+        const { coverage } = await assessCoverage(judgeLlm, condensed, affected, { round: state.rounds });
+        const merged = mergeCoverage(state.coverage!, coverage);
+        return { condensed: true, coverage: merged, scoreAfter: matchScore(requirements, merged) };
+      } catch (error) {
+        console.error(`Run ${state.runId}: condense re-judge failed, ${affected.length} verdicts kept: ${describeFailure(error)}`);
+        setActiveSpanAttribute("condense.failed", true);
+        return { condensed: true };
+      }
+    })
     // The candidate's turn: the graph waits inside `interrupt()` for the decisions. Like `collect_answers`, the node runs
     // again from the top on resume, so everything before the `interrupt()` must be pure. It only records the final
     // statuses; the model work is in `final_rejudge`, so a crash during it resumes from this node's checkpoint.
@@ -281,14 +381,18 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
     })
     .addEdge(START, "extract")
     .addEdge("extract", "assess_coverage")
-    .addConditionalEdges("assess_coverage", (state) => (state.exitReason === null ? "select_questions" : "review"), ["select_questions", "review"])
+    .addConditionalEdges("assess_coverage", (state) => (state.exitReason === null ? "select_questions" : "condense_measure"), ["select_questions", "condense_measure"])
     .addConditionalEdges("select_questions", (state) => (state.questions.length === 0 ? "begin_round" : "collect_answers"), ["begin_round", "collect_answers"])
-    .addConditionalEdges("collect_answers", (state) => (state.exitReason === null ? "begin_round" : "review"), ["begin_round", "review"])
+    .addConditionalEdges("collect_answers", (state) => (state.exitReason === null ? "begin_round" : "condense_measure"), ["begin_round", "condense_measure"])
     .addEdge("begin_round", "tailor")
     .addEdge("tailor", "validate")
     .addEdge("validate", "rejudge")
     .addEdge("rejudge", "route")
-    .addConditionalEdges("route", (state) => (state.exitReason === null ? "begin_round" : "review"), ["begin_round", "review"])
+    .addConditionalEdges("route", (state) => (state.exitReason === null ? "begin_round" : "condense_measure"), ["begin_round", "condense_measure"])
+    .addConditionalEdges("condense_measure", (state) => (state.condensed ? "review" : "condense_reword"), ["review", "condense_reword"])
+    .addConditionalEdges("condense_reword", (state) => (moreDrops(state) ? "condense_drop" : "condense_rejudge"), ["condense_drop", "condense_rejudge"])
+    .addConditionalEdges("condense_drop", (state) => (moreDrops(state) ? "condense_drop" : "condense_rejudge"), ["condense_drop", "condense_rejudge"])
+    .addEdge("condense_rejudge", "review")
     .addEdge("review", "final_rejudge")
     .addEdge("final_rejudge", END)
     .compile({ checkpointer });

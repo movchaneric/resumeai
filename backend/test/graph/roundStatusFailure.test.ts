@@ -79,6 +79,9 @@ describe("a failing status write inside a tailoring round", () => {
       tailor: "tailoring",
       validate: "tailoring",
       rejudge: "tailoring",
+      condense_reword: "tailoring",
+      condense_drop: "tailoring",
+      condense_rejudge: "tailoring",
       review: "awaiting_review",
       final_rejudge: "tailoring",
     });

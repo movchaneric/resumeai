@@ -60,6 +60,8 @@ export type RunSnapshot = {
   /** Tailoring rounds started. */
   rounds: number;
   exitReason: ExitReason | null;
+  /** Condensing: `pending` before the CV is found too long (or measured), `running` while it is shortened, `done` once over or not needed. */
+  fit: "pending" | "running" | "done";
 };
 
 /**
@@ -590,7 +592,7 @@ function toRunView(run: StoredRun, state: RunSnapshot | null): RunView {
       ...common,
       status: run.status,
       job,
-      steps: steps({ parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "done", review: run.status === "completed" ? "done" : "running" }),
+      steps: steps({ parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "done", fit: "done", review: run.status === "completed" ? "done" : "running" }),
       score: { before: Math.round(state.scoreBefore), after: Math.round(state.scoreAfter) },
       requirements: jobProfile.requirements.map((requirement) => {
         const before = verdict(state.coverageBefore!, requirement.id);
@@ -627,11 +629,14 @@ function toRunView(run: StoredRun, state: RunSnapshot | null): RunView {
       ...common,
       status: "tailoring",
       job,
-      // Once the Review is applied the Changes carry their final statuses: this is the final re-judge, so `review` is running.
+      // The CV is being condensed: `fit` is running. Once the Review is applied the Changes
+      // carry their final statuses: this is the final re-judge, so `review` is running.
       steps: steps(
-        state.changes.every((c) => c.status === "proposed")
-          ? { parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "running" }
-          : { parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "done", review: "running" },
+        !state.changes.every((c) => c.status === "proposed")
+          ? { parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "done", fit: "done", review: "running" }
+          : state.fit === "running"
+            ? { parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "done", fit: "running" }
+            : { parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "running" },
       ),
       iterations: { used: state.rounds, max: MAX_ROUNDS },
       score: { before: Math.round(state.scoreBefore ?? 0), after: state.scoreAfter === null || state.changes.length === 0 ? null : Math.round(state.scoreAfter) },
@@ -639,7 +644,7 @@ function toRunView(run: StoredRun, state: RunSnapshot | null): RunView {
   }
   if (run.status === "interrupted") {
     // The step that was running when the process stopped: what is missing says which one it was.
-    const cutOff = !extracted ? "extract" : state?.scoreBefore == null ? "coverage" : "tailor";
+    const cutOff = !extracted ? "extract" : state?.scoreBefore == null ? "coverage" : state.fit === "running" ? "fit" : "tailor";
     const order = StepKeySchema.options;
     const reached = order.indexOf(cutOff);
     return RunViewSchema.parse({

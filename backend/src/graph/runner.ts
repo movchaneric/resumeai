@@ -32,6 +32,7 @@ function toSnapshot(state: GraphStateShape & { values: Partial<RunStateValues> }
     confirmedGaps: values.confirmedGaps ?? [],
     rounds: values.rounds ?? 0,
     exitReason: values.exitReason ?? null,
+    fit: values.condensed ? "done" : values.condense ? "running" : "pending",
   };
 }
 

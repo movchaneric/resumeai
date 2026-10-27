@@ -30,6 +30,13 @@ describe("renderCv", () => {
     }
   });
 
+  it("puts the headline in the contact line", () => {
+    const withHeadline = fullCv();
+    withHeadline.contact.headline = "Software engineer";
+    const contactLine = renderCv(assignCvIds(withHeadline)).split("\n").find((l) => l.startsWith("[contact]"));
+    expect(contactLine).toContain("Software engineer");
+  });
+
   it("puts sections in a fixed order", () => {
     const text = renderCv(cv());
     const order = ["## Contact", "## Summary", "## Experience", "## Education", "## Skills", "## Projects", "## Certifications"];

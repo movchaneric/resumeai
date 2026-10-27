@@ -13,6 +13,7 @@ import { DateRangeBaseSchema, DateRangeSchema, ItemIdSchema, PartialDateSchema }
 
 const contactFields = {
   name: z.string(),
+  headline: z.string().nullable().describe("The line under the name that says what the candidate is, e.g. 'Software engineer'; null when the CV has none"),
   email: z.string().nullable(),
   phone: z.string().nullable(),
   location: z.string().nullable(),
@@ -69,7 +70,8 @@ export const TextItemSchema = z.object({ id: ItemIdSchema, text: z.string() });
 export type TextItem = z.infer<typeof TextItemSchema>;
 
 export const CvSchema = z.object({
-  contact: z.object({ id: ItemIdSchema, ...contactFields }),
+  // An older checkpoint has no `headline`: it reads as null (ADR 0003, no migration).
+  contact: z.object({ id: ItemIdSchema, ...contactFields, headline: contactFields.headline.default(null) }),
   summary: TextItemSchema.nullable(),
   experience: z.array(
     z.object({ id: ItemIdSchema, ...experienceFields, dates: DateRangeSchema, bullets: z.array(TextItemSchema) }),

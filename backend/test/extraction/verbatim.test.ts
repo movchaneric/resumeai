@@ -30,6 +30,22 @@ describe("checkVerbatim", () => {
     expect(checkVerbatim(cv(), source)).toEqual({ issues: [], softMismatches: 0 });
   });
 
+  it("passes a headline found in the CV text, and a null one", () => {
+    const c = cv();
+    expect(checkVerbatim(c, source).issues).toEqual([]);
+    c.contact.headline = "ENGINEER";
+    expect(checkVerbatim(c, source).issues).toEqual([]);
+  });
+
+  it("fails a headline that is not in the CV text", () => {
+    const c = cv();
+    c.contact.headline = "Principal architect";
+    expect(checkVerbatim(c, source)).toEqual({
+      issues: ['contact.headline "Principal architect" not found in the CV text'],
+      softMismatches: 0,
+    });
+  });
+
   it("passes case, whitespace and punctuation variants", () => {
     const c = cv();
     c.experience[0]!.company = "ACME INC";

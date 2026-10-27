@@ -35,6 +35,21 @@ describe("stage1Checks structure", () => {
     }
   });
 
+  it("rejects every Change that targets the contact Item, headline included", () => {
+    const cv = testCv();
+    cv.contact.headline = "Backend engineer";
+    const changes = [
+      change({ op: "replace", targetItemId: "contact", before: "Backend engineer", after: "Principal architect", evidenceIds: ["exp1.b1"] }),
+      change({ op: "add", parentId: "contact", after: "Principal architect", evidenceIds: ["exp1.b1"] }),
+      change({ op: "reorder", parentId: "contact", orderedItemIds: ["contact"] }),
+    ];
+    for (const c of changes) {
+      const result = stage1Checks(cv, cv, [c]);
+      expect(result.passed).toEqual([]);
+      expect(result.rejected).toHaveLength(1);
+    }
+  });
+
   it("rejects a protected target: a job, education or certification entry", () => {
     for (const id of ["exp1", "edu1", "cert1", "proj1"]) {
       expect(reasonFor(change({ op: "replace", targetItemId: id, before: "", after: "x", evidenceIds: ["exp1.b1"] }))).toBe(STAGE1_REASONS.protectedField);

@@ -88,33 +88,32 @@ export class RunStore {
   }
 
   /**
-   * Deletes the Run only if its status is not in `busy` and, when `liveAt` is given, it has not expired at that time, in
-   * one statement, and says whether it did. Like `claimStatus`, the condition and the delete cannot be split by a
-   * simultaneous request. With `cutOffBefore`, a busy Run created before it also goes (a stop cut it off and nothing is
-   * running it, as in recovery); the condition is still the same statement.
+   * Deletes the Run only if its status is not in `busy` and it has not expired at `liveAt`, in one statement, and says
+   * whether it did. Like `claimStatus`, the condition and the delete cannot be split by a simultaneous request. It is
+   * what `DELETE /runs/:id` uses.
    */
-  async deleteUnless(id: RunId, busy: RunStatus[], liveAt?: Date, cutOffBefore?: Date): Promise<boolean> {
-    const { count } = await this.prisma.run.deleteMany({
-      where: {
-        id,
-        OR: [{ status: { notIn: busy } }, ...(cutOffBefore ? [{ createdAt: { lt: cutOffBefore } }] : [])],
-        ...(liveAt && { expiresAt: { gt: liveAt } }),
-      },
-    });
+  async deleteIdleLive(id: RunId, busy: RunStatus[], liveAt: Date): Promise<boolean> {
+    const { count } = await this.prisma.run.deleteMany({ where: { id, status: { notIn: busy }, expiresAt: { gt: liveAt } } });
     return count === 1;
   }
 
   /**
-   * The ids of the Runs that have expired at `now`, oldest first, except the busy ones created at or after `startedAt`
-   * (this process may be running those). A busy Run created before it was cut off by a stop.
+   * Deletes the Run only if it is still in `status` (the one the sweep listed) and has expired at `now`, in one
+   * statement, and says whether it did. A Run that moved on since the listing is left alone.
    */
-  async listExpiredIds(now: Date, busy: RunStatus[], startedAt: Date): Promise<RunId[]> {
+  async deleteExpiredIn(id: RunId, status: RunStatus, now: Date): Promise<boolean> {
+    const { count } = await this.prisma.run.deleteMany({ where: { id, status, expiresAt: { lte: now } } });
+    return count === 1;
+  }
+
+  /** The id and status of each Run that has expired at `now`, oldest first. */
+  async listExpired(now: Date): Promise<{ id: RunId; status: RunStatus }[]> {
     const rows = await this.prisma.run.findMany({
-      where: { expiresAt: { lte: now }, OR: [{ status: { notIn: busy } }, { createdAt: { lt: startedAt } }] },
-      select: { id: true },
+      where: { expiresAt: { lte: now } },
+      select: { id: true, status: true },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     });
-    return rows.map((row) => row.id as RunId);
+    return rows.map((row) => ({ id: row.id as RunId, status: RunStatusSchema.parse(row.status) }));
   }
 
   async delete(id: RunId): Promise<void> {

@@ -32,6 +32,7 @@ import type { Config } from "@/utils/config.js";
 import { ApiError } from "@/utils/errors.js";
 import { withSessionSpan, type Span } from "@/utils/spans.js";
 import { parseCv, stripNul } from "@/parsing/parseCv.js";
+import { STATUS_AT_POSITION } from "@/graph/position.js";
 import type { RunStore, StoredRun } from "@/stores/runs.js";
 
 /** What the service sees of a Run's graph state: plain data typed with shared types. */
@@ -158,6 +159,11 @@ export type CreateRunInput = { cv: Buffer; jobDescription: unknown };
 export class RunsService {
   private readonly now: () => Date;
   private readonly runInBackground: (task: () => Promise<void>) => void;
+  /**
+   * The ids of the Runs this process is working on: added when it starts a Run's background work or claims a paused Run,
+   * removed when that work ends. The TTL sweep never deletes one of these.
+   */
+  private readonly running = new Set<RunId>();
 
   constructor(private readonly deps: RunsDeps) {
     this.now = deps.now ?? (() => new Date());
@@ -182,8 +188,33 @@ export class RunsService {
       createdAt,
       expiresAt: new Date(createdAt.getTime() + config.runTtlMs),
     });
-    this.runInBackground(() => this.runPipeline({ runId: run.id, cvText, jobDescriptionText }));
+    this.background(run.id, () => this.runPipeline({ runId: run.id, cvText, jobDescriptionText }));
     return run.id;
+  }
+
+  /** Starts `work` for the Run in the background and keeps the Run in the running set until it ends, however it ends. */
+  private background(id: RunId, work: () => Promise<void>): void {
+    this.running.add(id);
+    this.runInBackground(async () => {
+      try {
+        await work();
+      } finally {
+        this.running.delete(id);
+      }
+    });
+  }
+
+  /** Runs `work` for a Run, recording a failure on the Run. Never throws: it runs detached from the request. */
+  private async runAndRecord(id: RunId, label: "pipeline" | "resume" | "review", work: () => Promise<void>): Promise<void> {
+    try {
+      try {
+        await work();
+      } catch (error) {
+        await this.recordFailure(id, label, error);
+      }
+    } catch (error) {
+      console.error(`Run ${id}: could not store the ${label} outcome`, error);
+    }
   }
 
   /**
@@ -195,72 +226,71 @@ export class RunsService {
   async runPipeline(input: StartRunInput): Promise<void> {
     const { graphRunner } = this.deps;
     const id = input.runId;
-    try {
-      try {
-        await withSessionSpan("pipeline", id, async (span) => setOutcomeAttributes(span, await graphRunner.start(input)));
-      } catch (error) {
-        await this.recordFailure(id, "pipeline", error);
-      }
-    } catch (error) {
-      console.error(`Run ${id}: could not store the pipeline outcome`, error);
-    }
+    await this.runAndRecord(id, "pipeline", () => withSessionSpan("pipeline", id, async (span) => setOutcomeAttributes(span, await graphRunner.start(input))));
   }
 
   /**
-   * Accepts the Answers for a Run paused in `awaiting_answers` and resumes it in the background. Checks, in order:
-   * the Run exists (404), it is waiting for Answers (409), the Answers are valid (400). Only then does it claim the
-   * Run by moving it to `tailoring` (the status the resumed graph writes first anyway) in one conditional update, so
-   * a second submission, even a simultaneous one, finds it no longer waiting and gets 409 without resuming twice.
+   * Accepts the Answers for a Run paused in `awaiting_answers` and resumes it in the background (`resumeFromPause`):
+   * 404, 409, then 400 for Answers that do not fit the Run's Questions, then the claim.
    */
   async submitAnswers(rawId: string, body: unknown): Promise<void> {
-    const { store, graphRunner } = this.deps;
-    const id = RunIdSchema.safeParse(rawId);
-    const run = id.success ? await store.get(id.data) : null;
-    if (!run || run.expiresAt <= this.now()) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
-    if (run.status !== "awaiting_answers") throw new ApiError("RUN_NOT_AWAITING_ANSWERS", "This Run is not waiting for answers.");
-
-    const questions = (await graphRunner.read(run.id))?.questions ?? [];
-    const answers = validateAnswers(body, new Set(questions.map((q) => q.id as string)));
-    if (!(await store.claimStatus(run.id, "awaiting_answers", "tailoring"))) {
-      throw new ApiError("RUN_NOT_AWAITING_ANSWERS", "This Run is not waiting for answers.");
-    }
-    this.deps.events.publish(run.id);
-    this.runInBackground(() => this.runResume(run.id, answers));
+    const { graphRunner } = this.deps;
+    await this.resumeFromPause(
+      rawId,
+      { status: "awaiting_answers", code: "RUN_NOT_AWAITING_ANSWERS", message: "This Run is not waiting for answers." },
+      async (id) => validateAnswers(body, new Set(((await graphRunner.read(id))?.questions ?? []).map((q) => q.id as string))),
+      (id, answers) => this.runResume(id, answers),
+    );
   }
 
   /**
-   * Accepts the Review for a Run paused in `awaiting_review` and resumes it in the background, like `submitAnswers`: 404,
-   * 409, then 400 for decisions that do not fit the Run's Changes (`validateReview`, nothing is resumed), then the claim
-   * (`awaiting_review` to `tailoring`), where losing a race is a 409.
+   * Accepts the Review for a Run paused in `awaiting_review` and resumes it in the background (`resumeFromPause`):
+   * 404, 409, then 400 for decisions that do not fit the Run's Changes (`validateReview`, nothing is resumed), then the claim.
    */
   async submitReview(rawId: string, body: unknown): Promise<void> {
-    const { store, graphRunner } = this.deps;
-    const id = RunIdSchema.safeParse(rawId);
-    const run = id.success ? await store.get(id.data) : null;
-    if (!run || run.expiresAt <= this.now()) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
-    if (run.status !== "awaiting_review") throw new ApiError("RUN_NOT_AWAITING_REVIEW", "This Run is not waiting for review.");
+    const { graphRunner } = this.deps;
+    await this.resumeFromPause(
+      rawId,
+      { status: "awaiting_review", code: "RUN_NOT_AWAITING_REVIEW", message: "This Run is not waiting for review." },
+      async (id) => validateReview(body, await graphRunner.read(id)),
+      (id, decisions) => this.runReview(id, decisions),
+    );
+  }
 
-    const snapshot = await graphRunner.read(run.id);
-    const decisions = validateReview(body, snapshot);
-    if (!(await store.claimStatus(run.id, "awaiting_review", "tailoring"))) {
-      throw new ApiError("RUN_NOT_AWAITING_REVIEW", "This Run is not waiting for review.");
+  /**
+   * Claims a Run paused in `pause.status` and resumes it in the background. Checks, in order: the Run exists (404), it is
+   * in `pause.status` (409 `pause.code`), `prepare` accepts the input (it throws the 400). Only then does it claim the
+   * Run by moving it to `tailoring` (the status the resumed graph writes first anyway) in one conditional update, so a
+   * second submission, even a simultaneous one, finds it no longer paused and gets 409 without resuming twice. A lost
+   * claim re-reads the Run: gone (deleted or expired meanwhile) is 404, otherwise 409.
+   */
+  private async resumeFromPause<T>(
+    rawId: string,
+    pause: { status: "awaiting_answers" | "awaiting_review"; code: "RUN_NOT_AWAITING_ANSWERS" | "RUN_NOT_AWAITING_REVIEW"; message: string },
+    prepare: (id: RunId) => Promise<T>,
+    resume: (id: RunId, input: T) => Promise<void>,
+  ): Promise<void> {
+    const { store, events } = this.deps;
+    const notFound = () => new ApiError("RUN_NOT_FOUND", "Run not found.");
+    const parsed = RunIdSchema.safeParse(rawId);
+    const run = parsed.success ? await store.get(parsed.data) : null;
+    if (!run || run.expiresAt <= this.now()) throw notFound();
+    if (run.status !== pause.status) throw new ApiError(pause.code, pause.message);
+
+    const input = await prepare(run.id);
+    if (!(await store.claimStatus(run.id, pause.status, "tailoring"))) {
+      const current = await store.get(run.id);
+      if (!current || current.expiresAt <= this.now()) throw notFound();
+      throw new ApiError(pause.code, pause.message);
     }
-    this.deps.events.publish(run.id);
-    this.runInBackground(() => this.runReview(run.id, decisions));
+    events.publish(run.id);
+    this.background(run.id, () => resume(run.id, input));
   }
 
   /** The background Review: the graph runs on from the decisions to the end, or the failure is recorded on the Run. Never throws. */
   async runReview(id: RunId, decisions: ReviewDecision[]): Promise<void> {
     const { graphRunner } = this.deps;
-    try {
-      try {
-        await withSessionSpan("review", id, async (span) => setOutcomeAttributes(span, await graphRunner.review(id, decisions)));
-      } catch (error) {
-        await this.recordFailure(id, "review", error);
-      }
-    } catch (error) {
-      console.error(`Run ${id}: could not store the review outcome`, error);
-    }
+    await this.runAndRecord(id, "review", () => withSessionSpan("review", id, async (span) => setOutcomeAttributes(span, await graphRunner.review(id, decisions))));
   }
 
   /** Logs a failed background step and marks the Run failed with the matching code and message. */
@@ -279,15 +309,7 @@ export class RunsService {
   /** The background resume: the graph runs on from the Answers to the next pause, or the failure is recorded on the Run. Never throws. */
   async runResume(id: RunId, answers: Answer[]): Promise<void> {
     const { graphRunner } = this.deps;
-    try {
-      try {
-        await graphRunner.answer(id, answers);
-      } catch (error) {
-        await this.recordFailure(id, "resume", error);
-      }
-    } catch (error) {
-      console.error(`Run ${id}: could not store the resume outcome`, error);
-    }
+    await this.runAndRecord(id, "resume", async () => void (await graphRunner.answer(id, answers)));
   }
 
   /**
@@ -319,7 +341,7 @@ export class RunsService {
   private async recoverRun(run: StoredRun): Promise<void> {
     const { store, graphRunner, events } = this.deps;
     const snapshot = await graphRunner.read(run.id);
-    const moveTo = async (status: "awaiting_answers" | "awaiting_review" | "completed" | "interrupted", outcome: string): Promise<void> => {
+    const moveTo = async (status: RunStatus, outcome: string): Promise<void> => {
       // Conditional on the status recovery saw, so a Run a request moved in the meantime is left as it is.
       if (await store.claimStatus(run.id, run.status, status)) {
         console.log(`Run ${run.id}: recovery ${outcome}`);
@@ -330,18 +352,20 @@ export class RunsService {
     };
 
     if (!snapshot) return moveTo("interrupted", "interrupted (no checkpoint)");
-    if (snapshot.position === "ended") return moveTo("completed", "completed (the graph had ended)");
     if (snapshot.position !== null) {
-      return moveTo(snapshot.position === "answers" ? "awaiting_answers" : "awaiting_review", "pause restored");
+      return moveTo(STATUS_AT_POSITION[snapshot.position], snapshot.position === "ended" ? "completed (the graph had ended)" : "pause restored");
     }
     if (!(await store.claimRecovery(run.id, run.status))) {
       return moveTo("interrupted", "interrupted (already recovered once)");
     }
     console.log(`Run ${run.id}: recovery resumed`);
+    this.running.add(run.id);
     try {
       await withSessionSpan("recovery", run.id, async (span) => setOutcomeAttributes(span, await graphRunner.recover(run.id)));
     } catch (error) {
       await this.recordFailure(run.id, "recovery", error);
+    } finally {
+      this.running.delete(run.id);
     }
   }
 
@@ -355,7 +379,7 @@ export class RunsService {
     const { store } = this.deps;
     const id = RunIdSchema.safeParse(rawId);
     if (!id.success) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
-    if (await this.purgeRun(id.data, this.now())) return;
+    if (await this.purgeRun(id.data, () => store.deleteIdleLive(id.data, BUSY_STATUSES, this.now()))) return;
     // Nothing was deleted: re-read to say why.
     const run = await store.get(id.data);
     if (run && run.expiresAt > this.now()) throw new ApiError("RUN_BUSY", "This Run is still working. Try again when it pauses or ends.");
@@ -363,13 +387,22 @@ export class RunsService {
   }
 
   /**
-   * Deletes the Run's row unless it is busy (or, with `liveAt`, expired at that time), then its checkpoints, and says
-   * whether the row was deleted. It is the one "delete this Run" operation; the TTL sweep calls it without `liveAt`.
-   * With `cutOffBefore`, a busy Run created before it is deleted too (the sweep's rule for Runs a stop cut off).
+   * The sweep's delete of an expired Run: nothing if this process is running it, otherwise the row goes only if the Run
+   * is still in `listedStatus` and expired, in one statement (a Run that moved on since the listing is left alone). A
+   * stale busy Run, one no process is running, is deleted too. Says whether the row was deleted.
    */
-  async purgeRun(id: RunId, liveAt?: Date, cutOffBefore?: Date): Promise<boolean> {
-    const { store, graphRunner } = this.deps;
-    if (!(await store.deleteUnless(id, BUSY_STATUSES, liveAt, cutOffBefore))) return false;
+  async purgeExpiredRun(id: RunId, listedStatus: RunStatus): Promise<boolean> {
+    if (this.running.has(id)) return false;
+    return this.purgeRun(id, () => this.deps.store.deleteExpiredIn(id, listedStatus, this.now()));
+  }
+
+  /**
+   * The one "delete this Run" operation: `deleteRow` deletes the row (a conditional statement, saying whether it did),
+   * then the checkpoints go and the stream is told. Says whether the row was deleted.
+   */
+  private async purgeRun(id: RunId, deleteRow: () => Promise<boolean>): Promise<boolean> {
+    const { graphRunner } = this.deps;
+    if (!(await deleteRow())) return false;
     try {
       await graphRunner.deleteThread(id);
     } catch (error) {

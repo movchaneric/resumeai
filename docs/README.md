@@ -30,5 +30,6 @@ Every decision record, handoff, review or note belongs to the slice being worked
 | [`05-questions`](./slices/05-questions) | 5a: Questions and Answers interrupt, User Evidence, Confirmed Gaps | Done |
 | [`05b-live-updates`](./slices/05b-live-updates) | 5b: SSE live updates, crash resume (`interrupted`) | Done |
 | [`06a-review-cleanup`](./slices/06a-review-cleanup) | 6a: Review (one final decision per Change), P6 fix, `DELETE /runs/:id`, TTL sweep | Done |
-| `06b-export` | 6b: DOCX/PDF export of the Tailored CV | Planned |
+| [`06b-export`](./slices/06b-export) | 6b: DOCX/PDF export of the Tailored CV, rendered on demand, the owner's template, shrink to one page, Headline | In progress |
+| `06c-one-page` | 6c: every Tailored CV fits one page: page-aware tailoring, condense round, bullet `remove` Change, fit check at Review | Planned |
 | `07-frontend` | Vite SPA, starting with a Claude Design pass (owner's request) | Planned |

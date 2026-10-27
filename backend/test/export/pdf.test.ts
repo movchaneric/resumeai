@@ -10,7 +10,7 @@ import { assignCvIds } from "@/extraction/assignIds.js";
 async function readPdf(buffer: Buffer): Promise<{ pages: number; text: string }> {
   const pdf = await getDocumentProxy(new Uint8Array(buffer));
   const { totalPages, text } = await extractText(pdf, { mergePages: true });
-  return { pages: totalPages, text: text.replaceAll("⁠", "") };
+  return { pages: totalPages, text };
 }
 
 describe("size table", () => {

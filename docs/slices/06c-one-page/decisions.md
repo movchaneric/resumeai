@@ -83,6 +83,26 @@ Settled in a grilling session (2026-10-27), building on the outline agreed in 6b
   - **The minimal CV keeps `reorder`s,** which don't change length.
 - **The `fit` step in the view (#57):** `pending` until condensing starts, `running` while it runs (the status is `tailoring`), and `done` once condensing has finished or wasn't needed. An Interrupted Run cut off during condensing shows it `failed`.
 
+## Proof
+One real Run (2026-10-27, `gemini-3.5-flash-lite` as model and judge), on the synthetic long CV (`backend/test/fixtures/longCv.ts`, rendered to a DOCX outside the repo, 26 lines over one page at the floor) and a made-up job description. It went through `scripts/proof-run.sh` to `awaiting_review`, then the Review by hand with `curl`.
+- **Tailoring:** five Questions were answered (four with experience, one Confirmed Gap). One round reached the target (71 → 93), and the round added 4 Changes citing the Answers.
+- **Condensing** ran its full limit: one reword step and two drop steps, 16 shortened bullets and 16 removed. The `fit` step showed `done` at `awaiting_review`. The re-judge brought the score to 88.
+  - No removed bullet was cited by a met or partially met Requirement, and every job, project and education entry kept at least one bullet.
+  - Some `remove`s carry `cd1.*` IDs: a drop of a bullet the reword step had shortened takes that Change's place (the merge rule).
+- **Still over:** the view showed `fit: { fits: false, overByLines: 9, fittable: true }`.
+  - The preview with everything accepted said the same. With one condense `remove` rejected it was 10 lines over.
+  - A submit with everything accepted got 400 `CV_TOO_LONG` (`overByLines: 9`, "Drop or reject more, then submit again."), and the Run stayed `awaiting_review`.
+- **Drop rules,** each a 400 `INVALID_REVIEW` naming the Item:
+  - a tailor-added bullet: "reject its Change instead";
+  - a bullet whose rewording is accepted: "reject its Change cd1.c2 to drop it";
+  - a job's last bullet: "exp6 would be left with no bullet".
+- **A Review that fits:**
+  - Six user drops (`ud.c1` to `ud.c6`, one of them cited by a met Requirement), with the four `add`s and two rewordings rejected, previewed as fitting at step 6.
+  - The submit was accepted and the Run reached `completed`.
+  - `final_rejudge` re-judged the two Requirements citing dropped bullets: one became unmet, the other stayed met on other Evidence. The score was 66; the drop is expected, since the Review threw away the Answer-based `add`s.
+- **Downloads:** `cv.pdf` and `cv.docx` both answered 200, with `Content-Disposition: attachment` and `Cache-Control: no-store`. The PDF read back with `unpdf` is **one page**: the dropped bullets are absent and the shortened ones present.
+- **Found on the way, not a 6c bug:** the long-running `pnpm dev` had `RUN_TTL_DAYS=0.0007` and `SWEEP_INTERVAL_MS=20000` exported, left over from a TTL test. The first proof Run expired and was swept within a minute, so the proof used a second server on port 3001 with clean settings.
+
 ## Tickets
 | Ticket | Scope | Depends on |
 |---|---|---|

@@ -29,7 +29,7 @@ Decisions below are the owner's.
 ## Spec
 | ID | Finding | Decision |
 |---|---|---|
-| P1 | No record of the proof Run. | Next step before the PR. |
+| P1 | No record of the proof Run. | Done: see decisions.md, "Proof". |
 | P2 | The view's `step` counts from 0 and the tailor's fit line from 1. | Fix: state it in the `ReviewFitSchema` comment. |
 | P3 | The page check on `add`s can reject them all and the draft is still over (the round's `replace`s lengthened it). | Accepted: Condensing catches it after tailoring, and the tailor sees the rejections. Recorded in decisions.md. |
 | P4 | The reword step leaves out tailor-added bullets. | Accepted (no Evidence to claim-check them against). Recorded. |

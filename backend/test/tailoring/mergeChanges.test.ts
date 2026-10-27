@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mergeRoundIntoChanges } from "@/tailoring/mergeChanges.js";
-import { applyChanges } from "@/tailoring/applyChanges.js";
+import { applyChanges } from "@resume-ai/shared";
 import { change, testCv } from "./testCv.js";
 
 const replace = (id: string, target: string, before: string, after: string, requirementIds = ["req1"]) =>

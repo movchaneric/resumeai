@@ -1,6 +1,5 @@
 import type { Change, Coverage, Cv } from "@resume-ai/shared";
-import { applyChanges } from "@/tailoring/applyChanges.js";
-import { bulletParents, originalBulletIds } from "@/tailoring/cvItems.js";
+import { applyChanges, bulletParents, originalBulletIds } from "@resume-ai/shared";
 
 /** The IDs cited as Evidence by a Coverage whose verdict is `met` or `partially_met`: removing one would weaken a covered Requirement. */
 export function citedByCoverage(coverage: Coverage[]): Set<string> {

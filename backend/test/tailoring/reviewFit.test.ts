@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Change } from "@resume-ai/shared";
 import { assignCvIds } from "@/extraction/assignIds.js";
 import { fitOf } from "@/export/fit.js";
-import { applyChanges } from "@/tailoring/applyChanges.js";
+import { applyChanges } from "@resume-ai/shared";
 import { minimalCv, reviewFit } from "@/tailoring/reviewFit.js";
 import { longCv, longExtracted } from "../fixtures/longCv.js";
 import { change, testCv } from "./testCv.js";

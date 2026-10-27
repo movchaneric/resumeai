@@ -1,5 +1,5 @@
 import type { Change, Coverage, Cv, UserEvidence } from "@resume-ai/shared";
-import { LIST_IDS, SECTION_ID_PATTERN, allIds, bulletParents, childLists, itemTexts, originalBulletIds, textItems, textParentIds } from "@/tailoring/cvItems.js";
+import { LIST_IDS, SECTION_ID_PATTERN, allIds, bulletParents, childLists, itemTexts, originalBulletIds, textItems, textParentIds } from "@resume-ai/shared";
 import { citedByCoverage } from "@/tailoring/removable.js";
 import { collectItemIds } from "@/scoring/coverageRules.js";
 

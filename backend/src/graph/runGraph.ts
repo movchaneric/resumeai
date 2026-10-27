@@ -4,8 +4,6 @@ import { describeFailure, type LlmClient } from "@/llm/llmClient.js";
 import { selectQuestions } from "@/tailoring/questions.js";
 import { tailorCv } from "@/tailoring/tailorCv.js";
 import { validateChanges } from "@/tailoring/validateChanges.js";
-import { applyChanges } from "@/tailoring/applyChanges.js";
-import { applyDecisions, keptChanges, userDrops } from "@/tailoring/review.js";
 import { setActiveSpanAttribute } from "@/utils/spans.js";
 import { condenseDrop, condenseReword, measureCondense, type CondenseInput, type CondenseStepResult } from "@/tailoring/condense.js";
 import { removableBullets } from "@/tailoring/removable.js";
@@ -18,7 +16,7 @@ import { resolveJobProfile, type JobProfileCache } from "@/graph/jobProfileCache
 import { STATUS_AT_POSITION } from "@/services/runs.js";
 import { RunState, type CondenseProgress, type RunStateValues } from "@/graph/state.js";
 import type { RecordedRejection } from "@/tailoring/validateChanges.js";
-import { UserEvidenceIdSchema, type Answer, type Change, type Question, type RequirementId, type ReviewSubmission, type UserEvidence } from "@resume-ai/shared";
+import { UserEvidenceIdSchema, type Answer, type Change, type Question, type RequirementId, type ReviewSubmission, type UserEvidence, applyChanges, applyDecisions, keptChanges, userDrops } from "@resume-ai/shared";
 
 /** The Run status a node writes when the graph enters it (decisions record, "Storage and status"). */
 export const NODE_STATUS = {

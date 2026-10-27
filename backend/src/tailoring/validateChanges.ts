@@ -2,8 +2,7 @@ import type { Change, Coverage, Cv, UserEvidence } from "@resume-ai/shared";
 import { fitOf, type FitResult } from "@/export/index.js";
 import type { LlmClient } from "@/llm/llmClient.js";
 import { claimCheck, type ClaimCheckInput } from "@/tailoring/claimCheck.js";
-import { itemTexts } from "@/tailoring/cvItems.js";
-import { applyChanges } from "@/tailoring/applyChanges.js";
+import { applyChanges, itemTexts } from "@resume-ai/shared";
 import { STAGE1_REASONS, stage1Checks } from "@/tailoring/stage1Checks.js";
 import { withSpan } from "@/utils/spans.js";
 

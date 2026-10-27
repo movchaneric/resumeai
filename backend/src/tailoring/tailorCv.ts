@@ -1,10 +1,9 @@
 import { z } from "zod";
-import { ChangeSchema } from "@resume-ai/shared";
+import { ChangeSchema, LIST_IDS } from "@resume-ai/shared";
 import type { Change, Coverage, Cv, Requirement, RequirementId, UserEvidence } from "@resume-ai/shared";
 import { FLOOR_STEP, fitOf } from "@/export/index.js";
 import { LlmSchemaError, type LlmClient, type LlmMessage } from "@/llm/llmClient.js";
 import { renderTailorInput, type TailorFit, type TailorRejection } from "@/prompts/renderTailor.js";
-import { LIST_IDS } from "@/tailoring/cvItems.js";
 import { TailorError } from "@/tailoring/tailorErrors.js";
 import { withSpan } from "@/utils/spans.js";
 

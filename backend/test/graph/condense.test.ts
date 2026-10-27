@@ -9,7 +9,7 @@ import { fitOf } from "@/export/fit.js";
 import { createMemoryCheckpointer } from "@/graph/memoryCheckpointer.js";
 import { buildRunGraph } from "@/graph/runGraph.js";
 import { parseCv } from "@/parsing/parseCv.js";
-import { applyChanges } from "@/tailoring/applyChanges.js";
+import { applyChanges } from "@resume-ai/shared";
 import { loadConfig } from "@/utils/config.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
 import { FakeJobProfileCache } from "../fakes/jobProfileCache.js";

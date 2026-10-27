@@ -6,6 +6,8 @@ import {
   RunIdSchema,
   RunViewSchema,
   StepKeySchema,
+  applyChanges,
+  keptChanges,
   type Answer,
   type Change,
   type Coverage,
@@ -27,8 +29,7 @@ import {
 } from "@resume-ai/shared";
 import { docxSizes, measureFit, renderDocx } from "@/export/index.js";
 import type { ExportFormat } from "@/export/index.js";
-import { applyChanges } from "@/tailoring/applyChanges.js";
-import { keptChanges, reviewProblem } from "@/tailoring/review.js";
+import { reviewProblem } from "@/tailoring/review.js";
 import { fitOfChanges, reviewFit } from "@/tailoring/reviewFit.js";
 import type { RecordedRejection } from "@/tailoring/validateChanges.js";
 import { MAX_ROUNDS } from "@/scoring/exitRouter.js";

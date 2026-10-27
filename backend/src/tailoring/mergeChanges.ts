@@ -1,6 +1,5 @@
 import type { Change, Cv } from "@resume-ai/shared";
-import { applyChanges } from "@/tailoring/applyChanges.js";
-import { allIds } from "@/tailoring/cvItems.js";
+import { allIds, applyChanges } from "@resume-ai/shared";
 
 const union = <T>(a: T[], b: T[]): T[] => [...new Set([...a, ...b])];
 

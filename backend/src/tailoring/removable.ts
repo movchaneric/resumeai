@@ -17,7 +17,7 @@ function bulletParents(cv: Cv): { id: string; bullets: { id: string }[] }[] {
  * - it is a bullet of a job, project or education entry, and it is in the original CV (never an Item a tailor `add` created);
  * - it is not already removed by `changes`;
  * - no Coverage with the verdict `met` or `partially_met` cites it as Evidence;
- * - it is not the last bullet of its parent. A parent with N bullets left (added ones count) lists at most N - 1: one with a
+ * - it is not the last bullet of its parent. A parent with N bullets left (original ones not removed; an added bullet never counts as staying) lists at most N - 1: one with a
  *   single bullet left lists none, and when every one of N bullets qualifies the first is left out so that it stays.
  * The list is a menu for one batch; stage 1 re-checks the removes one by one, so a batch can never empty a parent.
  */
@@ -27,9 +27,10 @@ export function removableBullets(cv: Cv, coverage: Coverage[], changes: Change[]
   const originalIds = new Set(bulletParents(cv).flatMap((p) => p.bullets.map((b) => b.id)));
   const result = new Set<string>();
   for (const parent of bulletParents(draft)) {
-    const left = parent.bullets.map((b) => b.id);
+    // Only original bullets count as staying: the user can reject an `add` at Review.
+    const left = parent.bullets.map((b) => b.id).filter((id) => originalIds.has(id));
     if (left.length <= 1) continue;
-    const eligible = left.filter((id) => originalIds.has(id) && !cited.has(id));
+    const eligible = left.filter((id) => !cited.has(id));
     if (eligible.length === left.length) eligible.shift();
     for (const id of eligible) result.add(id);
   }

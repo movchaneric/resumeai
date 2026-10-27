@@ -18,7 +18,7 @@ export type ValidateInput = {
   round: number;
   /** What the user said in the Answers; Changes may cite it as Evidence. */
   userEvidence?: UserEvidence[];
-  /** The Coverage a `remove` is checked against: bullets it cites as Evidence cannot be removed. */
+  /** The Coverage a `remove` is checked against: bullets it cites as Evidence cannot be removed. Without it every `remove` is rejected. */
   coverage?: Coverage[];
 };
 
@@ -29,7 +29,7 @@ export type ValidateInput = {
  */
 export async function validateChanges(
   judgeLlm: LlmClient,
-  { original, draft, changes, round, userEvidence = [], coverage = [] }: ValidateInput,
+  { original, draft, changes, round, userEvidence = [], coverage }: ValidateInput,
 ): Promise<{ valid: Change[]; rejections: RecordedRejection[] }> {
   return withSpan("validate", async (span) => {
     span.setAttribute("round", round);

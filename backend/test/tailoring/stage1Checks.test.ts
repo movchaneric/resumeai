@@ -229,8 +229,23 @@ describe("stage1Checks remove", () => {
     const cv = testCv();
     const add = change({ op: "add", parentId: "exp1", after: "New", evidenceIds: ["exp1.b1"] });
     const draft = applyChanges(cv, [add]);
-    const result = stage1Checks(cv, draft, [remove("exp1.b3")]);
+    const result = stage1Checks(cv, draft, [remove("exp1.b3")], [], { coverage: [] });
     expect(result.rejected[0]!.reason).toBe(STAGE1_REASONS.notRemovable);
+  });
+
+  it("does not count an added bullet as one that stays: the only original bullet of a parent is its last", () => {
+    const cv = testCv();
+    const add = change({ op: "add", parentId: "exp2", after: "New", evidenceIds: ["exp1.b1"] });
+    const draft = applyChanges(cv, [add]);
+    const result = stage1Checks(cv, draft, [remove("exp2.b1")], [], { coverage: [] });
+    expect(result.rejected[0]!.reason).toBe(STAGE1_REASONS.lastBullet);
+  });
+
+  it("rejects every remove when no coverage is passed", () => {
+    const cv = testCv();
+    const result = stage1Checks(cv, cv, [remove("exp1.b2")]);
+    expect(result.passed).toEqual([]);
+    expect(result.rejected[0]!.reason).toBe(STAGE1_REASONS.noCoverage);
   });
 
   it("rejects the last bullet of a parent", () => {
@@ -248,7 +263,7 @@ describe("stage1Checks remove", () => {
   it("rejects the same bullet removed twice in one batch", () => {
     const cv = testCv();
     cv.experience[0]!.bullets.push({ id: "exp1.b3" as never, text: "Third" });
-    const result = stage1Checks(cv, cv, [remove("exp1.b2"), remove("exp1.b2")]);
+    const result = stage1Checks(cv, cv, [remove("exp1.b2"), remove("exp1.b2")], [], { coverage: [] });
     expect(result.passed).toHaveLength(1);
     expect(result.rejected[0]!.reason).toBe(STAGE1_REASONS.notRemovable);
   });

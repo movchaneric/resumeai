@@ -18,12 +18,13 @@ export const STAGE1_REASONS = {
   numberDropped: "A number or date in the original text is missing from the new text; numbers and dates must stay as written.",
   itemTag: "The new text contains an Item ID tag like \"[summary]\"; write only the CV text, without IDs.",
   notRemovable: "Only a bullet of the original CV that no met or partially met Requirement cites as Evidence can be removed.",
+  noCoverage: "A remove cannot be checked without the Coverage verdicts.",
   lastBullet: "A job, project or education entry keeps at least one bullet; this is its last.",
   numberAdded: "The new text contains a number or date that is in neither the original text nor the cited Evidence.",
 } as const;
 
 export type Stage1Rejection = { change: Change; reason: string };
-/** `coverage` is the verdicts a `remove` is checked against (bullets they cite as Evidence stay); without it nothing is cited. */
+/** `coverage` is the verdicts a `remove` is checked against (bullets they cite as Evidence stay). Without it every `remove` is rejected, so a caller that forgets it cannot drop cited bullets. */
 export type Stage1Options = { coverage?: Coverage[] };
 export type Stage1Result = { passed: Change[]; rejected: Stage1Rejection[] };
 
@@ -51,10 +52,11 @@ export function stage1Checks(original: Cv, draft: Cv, changes: Change[], userEvi
   const passed: Change[] = [];
   const rejected: Stage1Rejection[] = [];
   const cited = citedByCoverage(options.coverage ?? []);
+  const hasCoverage = options.coverage !== undefined;
   // The removes that passed in this batch: they are checked one by one, so a batch cannot empty a parent.
   const removed = new Set<string>();
   for (const change of changes) {
-    const reason = change.op === "remove" ? removeProblem(original, draft, change.targetItemId, cited, removed) : firstProblem(original, draft, change, userEvidence);
+    const reason = change.op === "remove" ? (hasCoverage ? removeProblem(original, draft, change.targetItemId, cited, removed) : STAGE1_REASONS.noCoverage) : firstProblem(original, draft, change, userEvidence);
     if (reason === null) {
       passed.push(change);
       if (change.op === "remove") removed.add(change.targetItemId);
@@ -79,7 +81,9 @@ function removeProblem(original: Cv, draft: Cv, targetId: string, cited: Set<str
   if (parent === undefined || removed.has(targetId)) return allIds(draft).has(targetId) ? STAGE1_REASONS.notRemovable : STAGE1_REASONS.unknownTarget;
   const inOriginal = [...original.experience, ...original.projects, ...original.education].some((p) => p.bullets.some((b) => b.id === targetId));
   if (!inOriginal || cited.has(targetId)) return STAGE1_REASONS.notRemovable;
-  const left = parent.bullets.filter((b) => !removed.has(b.id)).length;
+  // Only original bullets count as staying: the user can reject an `add` at Review.
+  const originalBullets = new Set([...original.experience, ...original.projects, ...original.education].flatMap((p) => p.bullets.map((b) => b.id)));
+  const left = parent.bullets.filter((b) => originalBullets.has(b.id) && !removed.has(b.id)).length;
   return left <= 1 ? STAGE1_REASONS.lastBullet : null;
 }
 

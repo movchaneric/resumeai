@@ -34,10 +34,10 @@ describe("removableBullets", () => {
     expect([...removableBullets(testCv(), [], [remove("exp1.b2")])]).toEqual([]);
   });
 
-  it("never lists a bullet a tailor `add` created, and an added bullet counts as a bullet that stays", () => {
+  it("never lists a bullet a tailor `add` created, and an added bullet does not count as a bullet that stays", () => {
     const cv = testCv();
     const add = change({ op: "add", parentId: "exp2", after: "New", evidenceIds: ["exp1.b1"] });
-    // exp2 now has b1 (original) and b2 (added): the added one is not listed, the original one may go.
-    expect([...removableBullets(cv, [], [add])].sort()).toEqual(["exp1.b2", "exp2.b1"]);
+    // exp2 now has b1 (original) and b2 (added): the added one never counts as staying, so the original one must stay.
+    expect([...removableBullets(cv, [], [add])]).toEqual(["exp1.b2"]);
   });
 });

@@ -98,9 +98,12 @@ describe("validateChanges remove", () => {
   it("passes a valid remove without a claim check, and rejects one that cites Coverage", async () => {
     const remove = change({ id: "r1.c1", op: "remove", targetItemId: "exp1.b2", before: "x", evidenceIds: [], requirementIds: [] });
     const llm = new FakeLlmClient();
-    const free = await validateChanges(llm, { original, draft: original, changes: [remove], round: 1 });
+    const free = await validateChanges(llm, { original, draft: original, changes: [remove], round: 1, coverage: [] });
     expect(llm.calls).toHaveLength(0);
     expect(free.valid).toEqual([remove]);
+
+    const unchecked = await validateChanges(new FakeLlmClient(), { original, draft: original, changes: [remove], round: 1 });
+    expect(unchecked.valid).toEqual([]);
 
     const coverage = [CoverageSchema.parse({ requirementId: "req1", verdict: "partially_met", evidenceIds: ["exp1.b2"], reason: "r" })];
     const held = await validateChanges(new FakeLlmClient(), { original, draft: original, changes: [remove], round: 1, coverage });

@@ -15,7 +15,7 @@ Decisions below are the owner's.
 ## Standards
 | ID | Finding | Decision |
 |---|---|---|
-| S1 | Parameters every real caller passes are optional (CODING_STANDARDS.md, "required when every caller passes it"): `drops` (`runReview`, `GraphRunner.review`, `reviewProblem`), `ValidateInput.coverage`, `TailorInput.fit`, `CondenseInput.userEvidence`, `toRunView`'s `fit`. | Fix: make them required. |
+| S1 | Parameters every real caller passes are optional (CODING_STANDARDS.md, "required when every caller passes it"): `drops` (`runReview`, `GraphRunner.review`, `reviewProblem`), `ValidateInput.coverage`, `TailorInput.fit`, `CondenseInput.userEvidence`, `toRunView`'s `fit`. | Fixed. `Stage1Options.coverage` stays optional: Review's stage-1 call sees only revised Changes, never a `remove`, and the `noCoverage` rejection stays as the safety net. |
 | S2 | Duplicated code: the jobs, projects and education walk appears in five files, and the original-bullet-ID set is built three times. | Fix: `bulletParents` and `originalBulletIds` in `cvItems.ts`. |
 | S3 | Duplicated code: the Items a Change touched, and the Requirements citing them (`condense.ts`, `runGraph.ts` `condense_rejudge`, `roundCoverage.ts`). | Fix: `touchedItemIds` and `requirementsCiting` in `roundCoverage.ts`. |
 | S4 | A stale doc reference (`reviewFitOrThrow`), and the unclear third parameter of `fitOfChanges`. | Fix. |

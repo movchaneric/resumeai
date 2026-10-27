@@ -1,6 +1,6 @@
 # Slice 6a review
 
-Two-axis review (`mattpocock-skills:code-review`) of `feat/slice-6a-review-cleanup` against `master`, after #43 to #46, the proof and the `proof-run.sh` fixes. Spec: #42. **Owner's decision: pending.** The recommendation column is Opus's.
+Two-axis review (`mattpocock-skills:code-review`) of `feat/slice-6a-review-cleanup` against `master`, after #43 to #46, the proof and the `proof-run.sh` fixes. Spec: #42. The recommendation column is Opus's. **Owner's decision (2026-10-27): yes to all recommendations.** Fix P1, P2 with S6, S4, S7 and S8 (one Sonnet agent; S1 to S3 go away with P1); accept P3, S5 and S9; P4 is a docs fix by Opus.
 
 ## Standards
 No hard violations; imports, layers and wiring follow `CLAUDE.md`.

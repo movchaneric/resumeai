@@ -14,7 +14,6 @@ export type StoredRun = {
   status: RunStatus;
   createdAt: Date;
   expiresAt: Date;
-  exportPath: string | null;
   error: { code: RunErrorCode; message: string } | null;
 };
 
@@ -30,7 +29,6 @@ function toStoredRun(row: Run): StoredRun {
     status: RunStatusSchema.parse(row.status),
     createdAt: row.createdAt,
     expiresAt: row.expiresAt,
-    exportPath: row.exportPath,
     error:
       row.errorCode === null
         ? null

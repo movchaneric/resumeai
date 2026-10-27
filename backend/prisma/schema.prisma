@@ -15,7 +15,6 @@ model Run {
   status       String
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   expiresAt    DateTime @map("expires_at") @db.Timestamptz(3)
-  exportPath   String?  @map("export_path")
   errorCode    String?  @map("error_code")
   errorMessage String?  @map("error_message")
   // How many times startup recovery resumed this Run from its checkpoint (at most one is allowed). Never negative.

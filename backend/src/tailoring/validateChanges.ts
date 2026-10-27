@@ -20,8 +20,8 @@ export type ValidateInput = {
   round: number;
   /** What the user said in the Answers; Changes may cite it as Evidence. */
   userEvidence?: UserEvidence[];
-  /** The Coverage a `remove` is checked against: bullets it cites as Evidence cannot be removed. Without it every `remove` is rejected. */
-  coverage?: Coverage[];
+  /** The Coverage a `remove` is checked against: bullets it cites as Evidence cannot be removed. */
+  coverage: Coverage[];
   /** Condensing: a `replace` must be shorter than the Item's current text (stage 1). */
   shorter?: boolean;
   /** Measures a CV against one page. Defaults to `fitOf`; tests pass a spy. */

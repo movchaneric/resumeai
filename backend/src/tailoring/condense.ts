@@ -49,7 +49,7 @@ export type CondenseInput = {
   changes: Change[];
   requirements: Requirement[];
   coverage: Coverage[];
-  userEvidence?: UserEvidence[];
+  userEvidence: UserEvidence[];
   /** How far over one page the draft is, in lines. */
   overByLines: number;
   /** 1-based number of the step: 1 is the reword, 2 and 3 are the drops. Used for Change IDs. */

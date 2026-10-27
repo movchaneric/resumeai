@@ -17,7 +17,7 @@ const badTarget = change({ id: "r1.c3", op: "replace", targetItemId: "nope", bef
 const reorder = change({ id: "r1.c4", op: "reorder", parentId: "skills", orderedItemIds: ["skill2", "skill1", "skill3"], evidenceIds: ["skill1"] });
 const verdict = (id: string, v: "supported" | "not_supported", reason = "r") => ({ id, reason, verdict: v });
 const run = (llm: FakeLlmClient, changes = [ok, add, badTarget, reorder]) =>
-  validateChanges(llm, { original, draft: original, changes, round: 1 });
+  validateChanges(llm, { original, draft: original, changes, round: 1, coverage: [] });
 
 describe("validateChanges", () => {
   it("claim-checks only what passed stage 1, with Evidence resolved to the original text and no reorder", async () => {
@@ -83,7 +83,7 @@ describe("validateChanges with User Evidence", () => {
 
   it("hands the claim check the Answer text as the user's own statement and applies a supported Change", async () => {
     const llm = new FakeLlmClient().enqueue("claim_check", { verdicts: [verdict("r1.c1", "supported")] });
-    const result = await validateChanges(llm, { original, draft: original, changes: [fromAnswer], round: 1, userEvidence });
+    const result = await validateChanges(llm, { original, draft: original, changes: [fromAnswer], round: 1, coverage: [], userEvidence });
     const prompt = llm.calls[0]!.messages.map((m) => m.content).join("\n");
     expect(prompt).toContain("The user's own statements");
     expect(prompt).toContain("- Ran 12 clusters at Acme.");
@@ -92,7 +92,7 @@ describe("validateChanges with User Evidence", () => {
 
   it("rejects a Change citing User Evidence when the claim check does not support it", async () => {
     const llm = new FakeLlmClient().enqueue("claim_check", { verdicts: [verdict("r1.c1", "not_supported", "scale is new")] });
-    const result = await validateChanges(llm, { original, draft: original, changes: [fromAnswer], round: 1, userEvidence });
+    const result = await validateChanges(llm, { original, draft: original, changes: [fromAnswer], round: 1, coverage: [], userEvidence });
     expect(result.rejections).toMatchObject([{ stage: "claim_check", reason: "scale is new" }]);
   });
 });
@@ -104,9 +104,6 @@ describe("validateChanges remove", () => {
     const free = await validateChanges(llm, { original, draft: original, changes: [remove], round: 1, coverage: [] });
     expect(llm.calls).toHaveLength(0);
     expect(free.valid).toEqual([remove]);
-
-    const unchecked = await validateChanges(new FakeLlmClient(), { original, draft: original, changes: [remove], round: 1 });
-    expect(unchecked.valid).toEqual([]);
 
     const coverage = [CoverageSchema.parse({ requirementId: "req1", verdict: "partially_met", evidenceIds: ["exp1.b2"], reason: "r" })];
     const held = await validateChanges(new FakeLlmClient(), { original, draft: original, changes: [remove], round: 1, coverage });
@@ -136,7 +133,7 @@ describe("validateChanges page check on adds", () => {
     return longCv(1, n - spare);
   }
   const validate = (cv: Cv, llm: FakeLlmClient, changes: ReturnType<typeof change>[]) =>
-    validateChanges(llm, { original: cv, draft: cv, changes, round: 1 });
+    validateChanges(llm, { original: cv, draft: cv, changes, round: 1, coverage: [] });
 
   it("rejects an add that tips a CV that fits over one page, with the reason recorded as a stage 1 rejection", async () => {
     const cv = await nearEdge(0);
@@ -177,7 +174,7 @@ describe("validateChanges page check on adds", () => {
   it("does not measure the fit when the round has no add", async () => {
     const fit = vi.fn(fitOf);
     const llm = new FakeLlmClient().enqueue("claim_check", supported("r1.c1"));
-    const result = await validateChanges(llm, { original, draft: original, changes: [ok, reorder], round: 1, fit });
+    const result = await validateChanges(llm, { original, draft: original, changes: [ok, reorder], round: 1, coverage: [], fit });
     expect(fit).not.toHaveBeenCalled();
     expect(result.valid.map((c) => c.id)).toEqual(["r1.c1", "r1.c4"]);
   });
@@ -193,18 +190,18 @@ describe("validateChanges page check on adds", () => {
   it("measures twice for a round that fits (before, then with the Changes) and does not measure for an add that stage 1 rejected", async () => {
     const fit = vi.fn(fitOf);
     const good = change({ id: "r1.c1", op: "add", parentId: "skills", after: "Postgres", evidenceIds: ["exp2.b1"] });
-    await validateChanges(new FakeLlmClient().enqueue("claim_check", supported("r1.c1")), { original, draft: original, changes: [good], round: 1, fit });
+    await validateChanges(new FakeLlmClient().enqueue("claim_check", supported("r1.c1")), { original, draft: original, changes: [good], round: 1, coverage: [], fit });
     expect(fit).toHaveBeenCalledTimes(2);
 
     fit.mockClear();
     const bad = change({ id: "r1.c2", op: "add", parentId: "nope", after: "x", evidenceIds: ["exp2.b1"] });
-    await validateChanges(new FakeLlmClient(), { original, draft: original, changes: [bad], round: 1, fit });
+    await validateChanges(new FakeLlmClient(), { original, draft: original, changes: [bad], round: 1, coverage: [], fit });
     expect(fit).not.toHaveBeenCalled();
   });
 
   it("lets an error from the fit check fail the round", async () => {
     const good = change({ id: "r1.c1", op: "add", parentId: "skills", after: "Postgres", evidenceIds: ["exp2.b1"] });
     const llm = new FakeLlmClient().enqueue("claim_check", supported("r1.c1"));
-    await expect(validateChanges(llm, { original, draft: original, changes: [good], round: 1, fit: async () => Promise.reject(new Error("render failed")) })).rejects.toThrow("render failed");
+    await expect(validateChanges(llm, { original, draft: original, changes: [good], round: 1, coverage: [], fit: async () => Promise.reject(new Error("render failed")) })).rejects.toThrow("render failed");
   });
 });

@@ -306,7 +306,7 @@ describe("GET /runs/:id/events", () => {
     const slowRead: GraphRunner = {
       start: (input) => graphRunner.start(input),
       answer: (runId, answers) => graphRunner.answer(runId, answers),
-      review: (runId, decisions) => graphRunner.review(runId, decisions),
+      review: (runId, decisions, drops) => graphRunner.review(runId, decisions, drops),
       recover: (runId) => graphRunner.recover(runId),
       deleteThread: (runId) => graphRunner.deleteThread(runId),
       async read(runId) {
@@ -459,7 +459,7 @@ describe("GET /runs/:id/events", () => {
     const slowRead: GraphRunner = {
       start: (input) => graphRunner.start(input),
       answer: (runId, answers) => graphRunner.answer(runId, answers),
-      review: (runId, decisions) => graphRunner.review(runId, decisions),
+      review: (runId, decisions, drops) => graphRunner.review(runId, decisions, drops),
       recover: (runId) => graphRunner.recover(runId),
       deleteThread: (runId) => graphRunner.deleteThread(runId),
       async read(runId) {

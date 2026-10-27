@@ -17,8 +17,8 @@ export type TailorInput = {
   userEvidence?: UserEvidence[];
   /** Requirements the user said they lack: left out of the prompt entirely. */
   confirmedGaps?: RequirementId[];
-  /** The draft's fit, measured by the caller (`prompts/` never measures). Left out of the prompt when absent. */
-  fit?: TailorFit;
+  /** The draft's fit, measured by the caller (`prompts/` never measures). */
+  fit: TailorFit;
 };
 
 const IMPORTANCE_LABEL = { must_have: "must-have", nice_to_have: "nice-to-have" } as const;
@@ -64,12 +64,10 @@ export function renderTailorInput({ cv, requirements: allRequirements, coverage,
     `Requirements not met (target these: those with User Evidence first, then must-haves):\n${notMet.map(line).join("\n") || "(none)"}`,
     `Already met (context only, do not break these):\n${met.map(line).join("\n") || "(none)"}`,
   ];
-  if (fit !== undefined) {
-    const status = fit.fits
-      ? `The draft fits one page at size step ${fit.step} of ${fit.steps}.`
-      : `The draft is already over one page by ${fit.overByLines} ${fit.overByLines === 1 ? "line" : "lines"} at the smallest size.`;
-    parts.push(`Page: the Tailored CV must fit one page, so prefer "replace" over "add" (rewording costs no space). ${status}`);
-  }
+  const status = fit.fits
+    ? `The draft fits one page at size step ${fit.step} of ${fit.steps}.`
+    : `The draft is already over one page by ${fit.overByLines} ${fit.overByLines === 1 ? "line" : "lines"} at the smallest size.`;
+  parts.push(`Page: the Tailored CV must fit one page, so prefer "replace" over "add" (rewording costs no space). ${status}`);
   if (userEvidence.length > 0) {
     const lines = userEvidence.map((u) => `[${u.id}] (for ${u.requirementId}) ${u.text}`);
     parts.push(

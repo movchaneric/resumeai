@@ -59,7 +59,7 @@ export const keptChanges = (changes: Change[]): Change[] => changes.filter((c) =
  * checks (a revised Change is trusted, so it is not claim-checked). `after` is expected trimmed by the caller. Then the
  * drops (`dropProblem`).
  */
-export function reviewProblem(original: Cv, changes: Change[], decisions: ReviewDecision[], userEvidence: UserEvidence[], drops: ItemId[] = []): string | null {
+export function reviewProblem(original: Cv, changes: Change[], decisions: ReviewDecision[], userEvidence: UserEvidence[], drops: ItemId[]): string | null {
   const known = new Set<string>(changes.map((c) => c.id));
   const seen = new Set<string>();
   for (const decision of decisions) {

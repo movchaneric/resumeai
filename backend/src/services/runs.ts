@@ -103,7 +103,7 @@ export interface GraphRunner {
    * Resumes a Run paused for review with the decisions and the dropped bullets (already validated by the caller) and
    * runs to the end, where the runner writes `completed`. The caller opens the root span for it. Rejects with the original error on failure.
    */
-  review(runId: RunId, decisions: ReviewDecision[], drops?: ItemId[]): Promise<RunSnapshot>;
+  review(runId: RunId, decisions: ReviewDecision[], drops: ItemId[]): Promise<RunSnapshot>;
   /** The current state, or null when no checkpoint exists yet. */
   read(runId: RunId): Promise<RunSnapshot | null>;
   /** Removes every checkpoint stored for the Run. Only safe once nothing is running it. */
@@ -332,7 +332,7 @@ export class RunsService {
   }
 
   /** The background Review: the graph runs on from the decisions to the end, or the failure is recorded on the Run. Never throws. */
-  async runReview(id: RunId, decisions: ReviewDecision[], drops: ItemId[] = []): Promise<void> {
+  async runReview(id: RunId, decisions: ReviewDecision[], drops: ItemId[]): Promise<void> {
     const { graphRunner } = this.deps;
     await this.runAndRecord(id, "review", () => withSessionSpan("review", id, async (span) => setOutcomeAttributes(span, await graphRunner.review(id, decisions, drops))));
   }
@@ -603,7 +603,7 @@ function tailoredCv(status: RunStatus, cv: Cv, changes: Change[]): Cv {
  * A failed Run marks the step that broke as `failed`: `coverage` when the extraction results exist, otherwise
  * `extract`. Scores are rounded here for display. Validating against the schema keeps the response honest.
  */
-function toRunView(run: StoredRun, state: RunSnapshot | null, fit?: ReviewFit): RunView {
+function toRunView(run: StoredRun, state: RunSnapshot | null, fit: ReviewFit | undefined): RunView {
   const common = {
     id: run.id,
     createdAt: run.createdAt.toISOString(),

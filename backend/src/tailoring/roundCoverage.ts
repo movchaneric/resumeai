@@ -11,3 +11,14 @@ export function mergeCoverage(previous: Coverage[], rejudged: Coverage[]): Cover
   const fresh = new Map(rejudged.map((c) => [c.requirementId as string, c]));
   return previous.map((c) => fresh.get(c.requirementId) ?? c);
 }
+
+/**
+ * The Requirements to judge again once Review is over, in Job Profile order. `undone` is the Changes the user rejected or
+ * revised, their own drops included (a drop is a revised `remove`). A Requirement counts when one of them lists it, or when
+ * its verdict cites an Item one of them rewrites or removes: that Evidence is not what the CV says any more.
+ */
+export function requirementsAffectedByReview(requirements: Requirement[], coverage: Coverage[], undone: Change[]): Requirement[] {
+  const listed = new Set(requirementsListedBy(requirements, undone).map((r) => r.id as string));
+  const touched = new Set(undone.flatMap((c) => (c.op === "replace" || c.op === "remove" ? [c.targetItemId as string] : [])));
+  return requirements.filter((r) => listed.has(r.id) || coverage.some((c) => c.requirementId === r.id && c.evidenceIds.some((id) => touched.has(id))));
+}

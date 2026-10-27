@@ -181,3 +181,22 @@ describe("stage1Checks with User Evidence", () => {
     expect(run(other).rejected[0]!.reason).toBe(STAGE1_REASONS.numberAdded);
   });
 });
+
+describe("stage1Checks item tags", () => {
+  it("rejects a replace whose text starts with the summary tag", () => {
+    const c = change({ op: "replace", targetItemId: "summary", before: "", after: "[summary] Backend developer", evidenceIds: ["exp1.b1"] });
+    expect(reasonFor(c)).toBe(STAGE1_REASONS.itemTag);
+  });
+
+  it("rejects an add whose text holds an Item tag mid-text", () => {
+    const c = change({ op: "add", parentId: "exp1", after: "Built the API [exp1.b2] for orders", evidenceIds: ["exp1.b1"] });
+    expect(reasonFor(c)).toBe(STAGE1_REASONS.itemTag);
+  });
+
+  it("passes ordinary brackets that are not ID-shaped", () => {
+    const c = change({ op: "add", parentId: "exp1", after: "Built a CLI [open source] and a [beta] tool", evidenceIds: ["exp1.b1"] });
+    const result = check(c);
+    expect(result.rejected).toEqual([]);
+    expect(result.passed).toEqual([c]);
+  });
+});

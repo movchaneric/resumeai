@@ -11,7 +11,9 @@ function newIdPrefix(parentId: string): string {
 /**
  * The draft CV: the original plus the validated Changes. Pure; the input is never mutated.
  * Order: all `add`s (in array order, so the same Changes always give the same IDs), then `replace`s
- * (which may target an added Item), then `reorder`s (which may list added Items).
+ * (which may target an added Item), then `reorder`s (which may list added Items), then `remove`s.
+ * Removes go last so that dropping a bullet never changes the number a later `add` gets: an added Item's ID is the same
+ * with or without the removes.
  * A new Item's number is one past the highest in its list and skips any ID already in use.
  * Throws when a Change does not fit the CV: pass only Changes that stage 1 accepted.
  */
@@ -58,5 +60,17 @@ export function applyChanges(original: Cv, changes: Change[]): Cv {
     // Items the Change did not list keep their place at the end, so nothing is lost.
     list.splice(0, list.length, ...ordered, ...byId.values());
   }
+
+  for (const change of changes) {
+    if (change.op !== "remove") continue;
+    const parent = bulletParentOf(draft, change.targetItemId);
+    if (parent === undefined) throw new Error(`Cannot remove ${change.targetItemId}: not a bullet`);
+    parent.bullets.splice(parent.bullets.findIndex((b) => b.id === change.targetItemId), 1);
+  }
   return draft;
+}
+
+/** The job, project or education entry that holds this bullet. */
+function bulletParentOf(cv: Cv, bulletId: string) {
+  return [...cv.experience, ...cv.projects, ...cv.education].find((p) => p.bullets.some((b) => b.id === bulletId));
 }

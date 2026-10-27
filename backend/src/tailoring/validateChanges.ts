@@ -1,4 +1,4 @@
-import type { Change, Cv, UserEvidence } from "@resume-ai/shared";
+import type { Change, Coverage, Cv, UserEvidence } from "@resume-ai/shared";
 import type { LlmClient } from "@/llm/llmClient.js";
 import { claimCheck, type ClaimCheckInput } from "@/tailoring/claimCheck.js";
 import { itemTexts } from "@/tailoring/cvItems.js";
@@ -18,27 +18,29 @@ export type ValidateInput = {
   round: number;
   /** What the user said in the Answers; Changes may cite it as Evidence. */
   userEvidence?: UserEvidence[];
+  /** The Coverage a `remove` is checked against: bullets it cites as Evidence cannot be removed. Without it every `remove` is rejected. */
+  coverage?: Coverage[];
 };
 
 /**
  * Stage 1 (code) then the claim check (model) on the Changes that passed and carry new text.
- * Reorders have no new text, so they skip the claim check. Evidence IDs are resolved here: CV Items to the original CV's text, `ue` IDs to the Answer text.
+ * Reorders and removes have no new text, so they skip the claim check. Evidence IDs are resolved here: CV Items to the original CV's text, `ue` IDs to the Answer text.
  * Returns the valid Changes in their proposed order, and the rejections.
  */
 export async function validateChanges(
   judgeLlm: LlmClient,
-  { original, draft, changes, round, userEvidence = [] }: ValidateInput,
+  { original, draft, changes, round, userEvidence = [], coverage }: ValidateInput,
 ): Promise<{ valid: Change[]; rejections: RecordedRejection[] }> {
   return withSpan("validate", async (span) => {
     span.setAttribute("round", round);
-    const { passed, rejected } = stage1Checks(original, draft, changes, userEvidence);
+    const { passed, rejected } = stage1Checks(original, draft, changes, userEvidence, { coverage });
     const rejections: RecordedRejection[] = rejected.map((r) => ({ round, change: r.change, stage: "stage1", reason: r.reason }));
 
     const texts = itemTexts(original);
     const answers = new Map(userEvidence.map((u) => [u.id as string, u.text]));
     const toCheck: ClaimCheckInput[] = [];
     for (const c of passed) {
-      if (c.op === "reorder") continue;
+      if (c.op === "reorder" || c.op === "remove") continue;
       toCheck.push({
         id: c.id,
         before: c.op === "replace" ? c.before : "",

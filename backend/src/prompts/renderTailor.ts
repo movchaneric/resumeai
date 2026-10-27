@@ -22,6 +22,8 @@ function renderChange(change: Change): string {
   switch (change.op) {
     case "replace":
       return `replace [${change.targetItemId}] with "${change.after}"`;
+    case "remove":
+      return `remove [${change.targetItemId}] (dropped to fit one page)`;
     case "add":
       return `add to [${change.parentId}] the text "${change.after}"`;
     case "reorder":

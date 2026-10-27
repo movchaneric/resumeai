@@ -188,6 +188,7 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
           changes: pending.proposed,
           round: pending.round,
           userEvidence: state.userEvidence,
+          coverage: state.coverage!,
         });
         return { pending: { ...pending, valid }, rejections: [...state.rejections, ...rejections] };
       } catch (error) {

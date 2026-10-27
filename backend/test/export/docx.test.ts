@@ -38,6 +38,7 @@ describe("renderDocx", () => {
     const blocks = layoutCv(fixtureCv());
     const fit = await measureFit(fixtureCv());
     if (!fit.fits) throw new Error("fixture should fit");
+    expect(fit.blocks).toEqual(blocks);
     const pdf = await getDocumentProxy(new Uint8Array((await renderPdf(blocks, fit.sizes)).buffer));
     const pdfText = (await extractText(pdf, { mergePages: true })).text;
     const docx = await docxText(await renderDocx(blocks, docxSizes(fit.step)));

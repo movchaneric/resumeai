@@ -14,16 +14,15 @@ import type { IParagraphOptions } from "docx";
 import { readFileSync } from "node:fs";
 import { fontPath } from "@/export/fonts.js";
 import type { FontName } from "@/export/fonts.js";
-import type { Block, Run } from "@/export/layout.js";
+import type { Block } from "@/export/layout.js";
 import type { Sizes } from "@/export/sizes.js";
+import { GRAY_BAR_HEX, TEXT_HEX } from "@/export/style.js";
 
 /*
  * The same blocks as the PDF, as Word paragraphs. Units: font sizes are half-points (rounded down), spacing, indents,
  * margins and tab positions are twips (1/20 point, rounded to nearest), the page is A4 (210 x 297 mm).
  */
 
-const GRAY_BAR = "e4e4e7";
-const TEXT = "111111";
 const A4_WIDTH_TWIPS = 11906;
 const A4_HEIGHT_TWIPS = 16838;
 /** Run font names. They are the families the fonts are embedded under. */
@@ -35,6 +34,14 @@ const HEADING_FONT = "Poppins SemiBold";
 const LINE_HEIGHT = 1.2;
 type FontOptions = NonNullable<ConstructorParameters<typeof Document>[0]["fonts"]>[number];
 const BULLET_REF = "cv-bullet";
+/** How one piece of text differs from the body default. `spacing` is the character spacing in twips. */
+interface TextStyle {
+  bold?: boolean;
+  italic?: boolean;
+  font?: string;
+  size?: number;
+  spacing?: number;
+}
 
 const twips = (points: number): number => Math.round(points * 20);
 /** Word sizes are whole half-points: round DOWN so the DOCX is never larger than its size step (10.25pt -> 10pt, not 10.5pt). */
@@ -76,15 +83,15 @@ export async function renderDocx(blocks: Block[], sizes: Sizes): Promise<Buffer>
     lineRule: LineRuleType.AUTO,
   });
 
-  const text = (value: string, run: Run & { font?: string; size?: number; spacing?: number } = { text: value }): TextRun =>
+  const text = (value: string, style: TextStyle = {}): TextRun =>
     new TextRun({
       text: value,
-      bold: run.bold,
-      italics: run.italic,
-      font: run.font ?? BODY_FONT,
-      size: run.size ?? bodySize,
-      color: TEXT,
-      characterSpacing: run.spacing,
+      bold: style.bold,
+      italics: style.italic,
+      font: style.font ?? BODY_FONT,
+      size: style.size ?? bodySize,
+      color: TEXT_HEX,
+      characterSpacing: style.spacing,
     });
 
   const paragraph = (block: Block): Paragraph => {
@@ -92,12 +99,12 @@ export async function renderDocx(blocks: Block[], sizes: Sizes): Promise<Buffer>
       case "name":
         return new Paragraph({
           spacing: { before: 0, after: 0 },
-          children: [text(block.text, { text: block.text, bold: true, font: NAME_FONT, size: halfPoints(sizes.name) })],
+          children: [text(block.text, { bold: true, font: NAME_FONT, size: halfPoints(sizes.name) })],
         });
       case "headline":
         return new Paragraph({
           spacing: { before: 0, after: twips(sizes.lineGap) },
-          children: [text(block.text, { text: block.text, bold: true, font: NAME_FONT, size: halfPoints(sizes.headline) })],
+          children: [text(block.text, { bold: true, font: NAME_FONT, size: halfPoints(sizes.headline) })],
         });
       case "contact":
         return new Paragraph({
@@ -105,16 +112,16 @@ export async function renderDocx(blocks: Block[], sizes: Sizes): Promise<Buffer>
           children:
             block.label === null
               ? [text(block.value)]
-              : [text(`${block.label}: `, { text: "", bold: true }), text(block.value)],
+              : [text(`${block.label}: `, { bold: true }), text(block.value)],
         });
       case "heading":
         return new Paragraph({
           keepNext: true,
           spacing: spacing(sizes.sectionGap, sizes.headingGap),
           // Square, full-width light-gray bar: paragraph shading spans the text area.
-          shading: { type: ShadingType.CLEAR, color: "auto", fill: GRAY_BAR },
+          shading: { type: ShadingType.CLEAR, color: "auto", fill: GRAY_BAR_HEX },
           indent: { left: 0 },
-          children: [text(block.text, { text: "", italic: true, font: HEADING_FONT, size: halfPoints(sizes.heading), spacing: 8 })],
+          children: [text(block.text, { italic: true, font: HEADING_FONT, size: halfPoints(sizes.heading), spacing: twips(sizes.headingSpacing) })],
         });
       case "entry":
         return new Paragraph({
@@ -122,12 +129,12 @@ export async function renderDocx(blocks: Block[], sizes: Sizes): Promise<Buffer>
           spacing: spacing(sizes.entryGap),
           tabStops: [{ type: TabStopType.RIGHT, position: contentWidth }],
           children: [
-            ...block.left.map((run) => text(run.text, run)),
-            ...(block.right === null ? [] : [text("\t", { text: "" }), text(block.right, { text: "", italic: true })]),
+            ...block.left.map((span) => text(span.text, span)),
+            ...(block.right === null ? [] : [text("\t"), text(block.right, { italic: true })]),
           ],
         });
       case "note":
-        return new Paragraph({ spacing: spacing(0), children: [text(block.text, { text: "", italic: true })] });
+        return new Paragraph({ spacing: spacing(0), children: [text(block.text, { italic: true })] });
       case "bullet":
         return new Paragraph({
           numbering: { reference: BULLET_REF, level: 0 },
@@ -143,7 +150,7 @@ export async function renderDocx(blocks: Block[], sizes: Sizes): Promise<Buffer>
   const doc = new Document({
     title: "CV",
     fonts: embeddedFonts(),
-    styles: { default: { document: { run: { font: BODY_FONT, size: bodySize, color: TEXT } } } },
+    styles: { default: { document: { run: { font: BODY_FONT, size: bodySize, color: TEXT_HEX } } } },
     numbering: {
       config: [
         {
@@ -156,7 +163,7 @@ export async function renderDocx(blocks: Block[], sizes: Sizes): Promise<Buffer>
               alignment: AlignmentType.LEFT,
               style: {
                 paragraph: { indent: { left: indent, hanging: indent } },
-                run: { font: BODY_FONT, size: bodySize, color: TEXT },
+                run: { font: BODY_FONT, size: bodySize, color: TEXT_HEX },
               },
             },
           ],

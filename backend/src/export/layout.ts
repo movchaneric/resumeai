@@ -6,7 +6,7 @@ import type { Cv, DateRange, PartialDate } from "@resume-ai/shared";
  */
 
 /** A piece of text with its emphasis. */
-export interface Run {
+export interface TextSpan {
   text: string;
   bold?: boolean;
   italic?: boolean;
@@ -18,7 +18,7 @@ export type Block =
   | { kind: "contact"; label: string | null; value: string }
   | { kind: "heading"; text: string }
   /** A job, project, degree or certification: `left` at the start of the line, `right` (dates, URL) at the end. */
-  | { kind: "entry"; left: Run[]; right: string | null }
+  | { kind: "entry"; left: TextSpan[]; right: string | null }
   /** A plain italic line under an entry (a project's dates). */
   | { kind: "note"; text: string }
   | { kind: "bullet"; text: string }
@@ -75,7 +75,7 @@ export function layoutCv(cv: Cv): Block[] {
   const summary: Block[] = cv.summary !== null && filled(cv.summary.text) ? [{ kind: "line", text: cv.summary.text }] : [];
 
   const experience = cv.experience.flatMap((job): Block[] => {
-    const left: Run[] = [{ text: titled([job.title, job.company]), bold: true }];
+    const left: TextSpan[] = [{ text: titled([job.title, job.company]), bold: true }];
     if (filled(job.location)) left.push({ text: `, ${job.location}` });
     return [{ kind: "entry", left, right: formatDateRange(job.dates) }, ...bullets(job.bullets)];
   });

@@ -66,7 +66,7 @@ function shortYearProven(raw: string, year: string): boolean {
 }
 
 /**
- * Proves protected fields (company, title, institution, degree, field, certification name and the
+ * Proves protected fields (headline, company, title, institution, degree, field, certification name and the
  * year of every date, and the month of YYYY-MM dates) come from the CV text. Other text only counts as a soft mismatch.
  */
 export function checkVerbatim(cv: ExtractedCv, sourceText: string): { issues: string[]; softMismatches: number } {
@@ -103,6 +103,7 @@ export function checkVerbatim(cv: ExtractedCv, sourceText: string): { issues: st
     year(`${path}.dates.end`, d.end);
   };
 
+  protectedField("contact.headline", cv.contact.headline);
   cv.experience.forEach((e, i) => {
     protectedField(`experience[${i}].company`, e.company);
     protectedField(`experience[${i}].title`, e.title);

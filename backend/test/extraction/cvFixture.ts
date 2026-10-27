@@ -5,7 +5,7 @@ const range = { start: "2020", end: "2022", current: false };
 /** A hand-written extracted CV with every section. */
 export function fullCv(): ExtractedCv {
   return {
-    contact: { name: "Ada Lovelace", email: null, phone: null, location: null, links: [] },
+    contact: { name: "Ada Lovelace", headline: null, email: null, phone: null, location: null, links: [] },
     summary: "Engineer.",
     experience: [
       { company: "Acme", title: "Dev", location: null, dates: range, bullets: ["Built a", "Built b"] },

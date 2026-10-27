@@ -7,7 +7,7 @@ const range = { start: "2020-01", end: "2022-06", current: false };
 /** A made-up CV with IDs: exp1.b1-b2, exp2.b1, edu1.b1, skill1-3, proj1.b1, cert1, sec1.i1-i2. */
 export function testCv(): Cv {
   return assignCvIds({
-    contact: { name: "Nora Quill", email: "nora@example.com", phone: null, location: null, links: [] },
+    contact: { name: "Nora Quill", headline: null, email: "nora@example.com", phone: null, location: null, links: [] },
     summary: "Backend developer with 5 years of experience.",
     experience: [
       {

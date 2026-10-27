@@ -4,7 +4,7 @@ const range = (start: string, end: string | null) => ({ start, end, current: end
 
 /** What a model would extract from the text of `fixtures/cv.pdf`; every protected field is quoted from it. */
 export const extractedCv: ExtractedCv = {
-  contact: { name: "Jane Doe", email: "jane.doe@example.com", phone: null, location: "Springfield", links: [] },
+  contact: { name: "Jane Doe", headline: null, email: "jane.doe@example.com", phone: null, location: "Springfield", links: [] },
   summary: null,
   experience: [
     {

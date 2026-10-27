@@ -182,7 +182,7 @@ describe("renderReport", () => {
   it("contains no CV Item text", () => {
     const MARKER = "ZXQ-CV-MARKER-4417";
     const cv = {
-      contact: { id: "contact", name: MARKER, email: `${MARKER}@example.com`, phone: MARKER, location: MARKER, links: [] },
+      contact: { id: "contact", name: MARKER, headline: null, email: `${MARKER}@example.com`, phone: MARKER, location: MARKER, links: [] },
       summary: { id: "summary", text: MARKER },
       experience: [{ id: "exp1", company: MARKER, title: MARKER, location: null, dates: { start: "2020", end: null, current: true }, bullets: [{ id: "exp1.b1", text: `Built ${MARKER}` }] }],
       education: [],

@@ -1,14 +1,10 @@
 import type { Change, Coverage, Cv } from "@resume-ai/shared";
 import { applyChanges } from "@/tailoring/applyChanges.js";
+import { bulletParents, originalBulletIds } from "@/tailoring/cvItems.js";
 
 /** The IDs cited as Evidence by a Coverage whose verdict is `met` or `partially_met`: removing one would weaken a covered Requirement. */
 export function citedByCoverage(coverage: Coverage[]): Set<string> {
   return new Set(coverage.filter((c) => c.verdict !== "unmet").flatMap((c) => c.evidenceIds));
-}
-
-/** The jobs, projects and education entries of the CV: the only parents whose bullets can be removed. */
-function bulletParents(cv: Cv): { id: string; bullets: { id: string }[] }[] {
-  return [...cv.experience, ...cv.projects, ...cv.education];
 }
 
 /**
@@ -24,10 +20,9 @@ function bulletParents(cv: Cv): { id: string; bullets: { id: string }[] }[] {
 export function removableBullets(cv: Cv, coverage: Coverage[], changes: Change[]): Set<string> {
   const draft = applyChanges(cv, changes);
   const cited = citedByCoverage(coverage);
-  const originalIds = new Set(bulletParents(cv).flatMap((p) => p.bullets.map((b) => b.id)));
+  const originalIds = originalBulletIds(cv);
   const result = new Set<string>();
   for (const parent of bulletParents(draft)) {
-    // Only original bullets count as staying: the user can reject an `add` at Review.
     const left = parent.bullets.map((b) => b.id).filter((id) => originalIds.has(id));
     if (left.length <= 1) continue;
     const eligible = left.filter((id) => !cited.has(id));

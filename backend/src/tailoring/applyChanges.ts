@@ -1,6 +1,6 @@
 import { ItemIdSchema } from "@resume-ai/shared";
 import type { Change, Cv } from "@resume-ai/shared";
-import { SECTION_ID_PATTERN, allIds, childLists, textItems, textParentIds } from "@/tailoring/cvItems.js";
+import { SECTION_ID_PATTERN, allIds, bulletParents, childLists, textItems, textParentIds } from "@/tailoring/cvItems.js";
 
 /** ID prefix for a new Item under a parent: `skill`, `exp1.b`, `sec1.i`. Matches `assignCvIds`. */
 function newIdPrefix(parentId: string): string {
@@ -72,5 +72,5 @@ export function applyChanges(original: Cv, changes: Change[]): Cv {
 
 /** The job, project or education entry that holds this bullet. */
 function bulletParentOf(cv: Cv, bulletId: string) {
-  return [...cv.experience, ...cv.projects, ...cv.education].find((p) => p.bullets.some((b) => b.id === bulletId));
+  return bulletParents(cv).find((p) => p.bullets.some((b) => b.id === bulletId));
 }

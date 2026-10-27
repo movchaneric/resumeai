@@ -1,7 +1,7 @@
 import { ChangeSchema } from "@resume-ai/shared";
 import type { Change, Cv, ItemId, ReviewDecision, UserEvidence } from "@resume-ai/shared";
 import { applyChanges } from "@/tailoring/applyChanges.js";
-import { textItems } from "@/tailoring/cvItems.js";
+import { bulletParents, originalBulletIds, textItems } from "@/tailoring/cvItems.js";
 import { stage1Checks } from "@/tailoring/stage1Checks.js";
 
 /** The Change with the user's version in place of the proposal: `revised`, with their `after` or `orderedItemIds`. */
@@ -45,9 +45,6 @@ export function userDrops(original: Cv, drops: ItemId[]): Change[] {
     }),
   );
 }
-
-/** The jobs, projects and education entries: the only parents whose bullets can be dropped. */
-const bulletParents = (cv: Cv) => [...cv.experience, ...cv.projects, ...cv.education];
 
 /** The Changes the Tailored CV is built from: accepted and revised ones. */
 export const keptChanges = (changes: Change[]): Change[] => changes.filter((c) => c.status === "accepted" || c.status === "revised");
@@ -101,9 +98,8 @@ export function reviewProblem(original: Cv, changes: Change[], decisions: Review
  */
 function dropProblem(original: Cv, changes: Change[], decided: Change[], drops: ItemId[]): string | null {
   if (drops.length === 0) return null;
-  const idsOf = (cv: Cv) => new Set(bulletParents(cv).flatMap((p) => p.bullets.map((b) => b.id as string)));
-  const originalBullets = idsOf(original);
-  const withAdds = idsOf(applyChanges(original, changes));
+  const originalBullets = originalBulletIds(original);
+  const withAdds = originalBulletIds(applyChanges(original, changes));
   const seen = new Set<string>();
   for (const id of drops) {
     if (seen.has(id)) return `Drop ${id} appears more than once.`;

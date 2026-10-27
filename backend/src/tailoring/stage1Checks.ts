@@ -1,5 +1,5 @@
 import type { Change, Coverage, Cv, UserEvidence } from "@resume-ai/shared";
-import { LIST_IDS, SECTION_ID_PATTERN, allIds, childLists, itemTexts, textItems, textParentIds } from "@/tailoring/cvItems.js";
+import { LIST_IDS, SECTION_ID_PATTERN, allIds, bulletParents, childLists, itemTexts, originalBulletIds, textItems, textParentIds } from "@/tailoring/cvItems.js";
 import { citedByCoverage } from "@/tailoring/removable.js";
 import { collectItemIds } from "@/scoring/coverageRules.js";
 
@@ -84,12 +84,10 @@ function firstProblem(original: Cv, draft: Cv, change: Change, userEvidence: Use
 
 /** A remove is checked by structure and by the removable rule only: it has no text, so no Evidence, tag or number checks. */
 function removeProblem(original: Cv, draft: Cv, targetId: string, cited: Set<string>, removed: Set<string>): string | null {
-  const parent = [...draft.experience, ...draft.projects, ...draft.education].find((p) => p.bullets.some((b) => b.id === targetId));
+  const parent = bulletParents(draft).find((p) => p.bullets.some((b) => b.id === targetId));
   if (parent === undefined || removed.has(targetId)) return allIds(draft).has(targetId) ? STAGE1_REASONS.notRemovable : STAGE1_REASONS.unknownTarget;
-  const inOriginal = [...original.experience, ...original.projects, ...original.education].some((p) => p.bullets.some((b) => b.id === targetId));
-  if (!inOriginal || cited.has(targetId)) return STAGE1_REASONS.notRemovable;
-  // Only original bullets count as staying: the user can reject an `add` at Review.
-  const originalBullets = new Set([...original.experience, ...original.projects, ...original.education].flatMap((p) => p.bullets.map((b) => b.id)));
+  const originalBullets = originalBulletIds(original);
+  if (!originalBullets.has(targetId) || cited.has(targetId)) return STAGE1_REASONS.notRemovable;
   const left = parent.bullets.filter((b) => originalBullets.has(b.id) && !removed.has(b.id)).length;
   return left <= 1 ? STAGE1_REASONS.lastBullet : null;
 }

@@ -12,6 +12,17 @@ export function mergeCoverage(previous: Coverage[], rejudged: Coverage[]): Cover
   return previous.map((c) => fresh.get(c.requirementId) ?? c);
 }
 
+/** The IDs of the Items the Changes rewrite or remove: the targets of their `replace` and `remove`. */
+export function touchedItemIds(changes: Change[]): string[] {
+  return changes.flatMap((c) => (c.op === "replace" || c.op === "remove" ? [c.targetItemId as string] : []));
+}
+
+/** The Requirements whose Coverage cites any of these Items as Evidence, in Job Profile order. */
+export function requirementsCiting(requirements: Requirement[], coverage: Coverage[], itemIds: Iterable<string>): Requirement[] {
+  const touched = new Set(itemIds);
+  return requirements.filter((r) => coverage.some((c) => c.requirementId === r.id && c.evidenceIds.some((id) => touched.has(id))));
+}
+
 /**
  * The Requirements to judge again once Review is over, in Job Profile order. `undone` is the Changes the user rejected or
  * revised, their own drops included (a drop is a revised `remove`). A Requirement counts when one of them lists it, or when
@@ -19,6 +30,6 @@ export function mergeCoverage(previous: Coverage[], rejudged: Coverage[]): Cover
  */
 export function requirementsAffectedByReview(requirements: Requirement[], coverage: Coverage[], undone: Change[]): Requirement[] {
   const listed = new Set(requirementsListedBy(requirements, undone).map((r) => r.id as string));
-  const touched = new Set(undone.flatMap((c) => (c.op === "replace" || c.op === "remove" ? [c.targetItemId as string] : [])));
-  return requirements.filter((r) => listed.has(r.id) || coverage.some((c) => c.requirementId === r.id && c.evidenceIds.some((id) => touched.has(id))));
+  const cited = new Set(requirementsCiting(requirements, coverage, touchedItemIds(undone)).map((r) => r.id as string));
+  return requirements.filter((r) => listed.has(r.id) || cited.has(r.id));
 }

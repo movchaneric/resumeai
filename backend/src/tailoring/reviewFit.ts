@@ -1,5 +1,5 @@
 import type { Change, Cv, ItemId, ReviewDecision, ReviewFit } from "@resume-ai/shared";
-import { fitOf } from "@/export/fit.js";
+import { fitOf } from "@/export/index.js";
 import { applyChanges } from "@/tailoring/applyChanges.js";
 import { bulletParents, textItems } from "@/tailoring/cvItems.js";
 import { applyDecisions, keptChanges, userDrops } from "@/tailoring/review.js";
@@ -23,13 +23,13 @@ export function minimalCv(original: Cv, changes: Change[]): Cv {
 
 /**
  * Does the CV built from `kept` fit one page? When it does, `fittable` is true without a second measure. When it does not,
- * `fittable` says whether the minimal CV of `changes` fits. Each measure renders up to 7 PDFs, so the minimal CV is only
+ * `fittable` says whether the minimal CV of `proposed` fits. Each measure renders up to 7 PDFs, so the minimal CV is only
  * measured when it is needed.
  */
-export async function fitOfChanges(original: Cv, kept: Change[], changes: Change[]): Promise<ReviewFit> {
+export async function fitOfChanges(original: Cv, kept: Change[], proposed: Change[]): Promise<ReviewFit> {
   const fit = await fitOf(applyChanges(original, kept));
   if (fit.fits) return { fits: true, step: fit.step, fittable: true };
-  const floor = await fitOf(minimalCv(original, changes));
+  const floor = await fitOf(minimalCv(original, proposed));
   return { fits: false, overByLines: fit.overByLines, fittable: floor.fits };
 }
 

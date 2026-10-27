@@ -267,7 +267,7 @@ export class RunsService {
   /**
    * Accepts the Review for a Run paused in `awaiting_review` and resumes it in the background (`resumeFromPause`):
    * 404, 409, then 400 for decisions or drops that do not fit the Run (`validateReview`, nothing is resumed), then 400
-   * `CV_TOO_LONG` when the result runs over one page although the shortest possible CV fits (`reviewFitOrThrow`), then the claim.
+   * `CV_TOO_LONG` when the result runs over one page although the shortest possible CV fits (`reviewFit`), then the claim.
    */
   async submitReview(rawId: string, body: unknown): Promise<void> {
     const { graphRunner } = this.deps;

@@ -1,7 +1,7 @@
 import PDFDocument from "pdfkit";
 import { fontPath } from "@/export/fonts.js";
 import type { FontName } from "@/export/fonts.js";
-import type { Block, Run } from "@/export/layout.js";
+import type { Block, TextSpan } from "@/export/layout.js";
 import type { Sizes } from "@/export/sizes.js";
 
 /** What a render produced. `overflow` is 0 for a one-page result, else how far the content runs past the first page (points). */
@@ -51,9 +51,9 @@ export function renderPdf(blocks: Block[], sizes: Sizes): Promise<PdfRender> {
     return margin;
   }
 
-  const bodyFont = (run?: Run): FontName => (run?.bold ? "bodyBold" : run?.italic ? "bodyItalic" : "body");
+  const bodyFont = (span?: TextSpan): FontName => (span?.bold ? "bodyBold" : span?.italic ? "bodyItalic" : "body");
 
-  function drawEntry(runs: Run[], right: string | null): void {
+  function drawEntry(spans: TextSpan[], right: string | null): void {
     const y = startY(sizes.entryGap, sizes.body * 1.4);
     doc.fillColor(TEXT).fontSize(sizes.body);
     let rightWidth = 0;
@@ -61,11 +61,11 @@ export function renderPdf(blocks: Block[], sizes: Sizes): Promise<PdfRender> {
       doc.font("bodyItalic");
       rightWidth = doc.widthOfString(right) + RIGHT_GAP;
     }
-    runs.forEach((run, i) => {
-      doc.font(bodyFont(run));
-      const options = { width: width - rightWidth, lineGap: sizes.lineGap, continued: i < runs.length - 1 };
-      if (i === 0) doc.text(run.text, left, y, options);
-      else doc.text(run.text, options);
+    spans.forEach((span, i) => {
+      doc.font(bodyFont(span));
+      const options = { width: width - rightWidth, lineGap: sizes.lineGap, continued: i < spans.length - 1 };
+      if (i === 0) doc.text(span.text, left, y, options);
+      else doc.text(span.text, options);
     });
     if (right !== null) {
       // Drawn after the left text so the text order reads title first; a URL or date stays on one line.

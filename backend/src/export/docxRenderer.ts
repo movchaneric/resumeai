@@ -14,7 +14,7 @@ import type { IParagraphOptions } from "docx";
 import { readFileSync } from "node:fs";
 import { fontPath } from "@/export/fonts.js";
 import type { FontName } from "@/export/fonts.js";
-import type { Block, Run } from "@/export/layout.js";
+import type { Block } from "@/export/layout.js";
 import type { Sizes } from "@/export/sizes.js";
 
 /*
@@ -35,6 +35,14 @@ const HEADING_FONT = "Poppins SemiBold";
 const LINE_HEIGHT = 1.2;
 type FontOptions = NonNullable<ConstructorParameters<typeof Document>[0]["fonts"]>[number];
 const BULLET_REF = "cv-bullet";
+/** How one piece of text differs from the body default. `spacing` is the character spacing in twips. */
+interface TextStyle {
+  bold?: boolean;
+  italic?: boolean;
+  font?: string;
+  size?: number;
+  spacing?: number;
+}
 
 const twips = (points: number): number => Math.round(points * 20);
 /** Word sizes are whole half-points: round DOWN so the DOCX is never larger than its size step (10.25pt -> 10pt, not 10.5pt). */
@@ -76,15 +84,15 @@ export async function renderDocx(blocks: Block[], sizes: Sizes): Promise<Buffer>
     lineRule: LineRuleType.AUTO,
   });
 
-  const text = (value: string, run: Run & { font?: string; size?: number; spacing?: number } = { text: value }): TextRun =>
+  const text = (value: string, style: TextStyle = {}): TextRun =>
     new TextRun({
       text: value,
-      bold: run.bold,
-      italics: run.italic,
-      font: run.font ?? BODY_FONT,
-      size: run.size ?? bodySize,
+      bold: style.bold,
+      italics: style.italic,
+      font: style.font ?? BODY_FONT,
+      size: style.size ?? bodySize,
       color: TEXT,
-      characterSpacing: run.spacing,
+      characterSpacing: style.spacing,
     });
 
   const paragraph = (block: Block): Paragraph => {
@@ -92,12 +100,12 @@ export async function renderDocx(blocks: Block[], sizes: Sizes): Promise<Buffer>
       case "name":
         return new Paragraph({
           spacing: { before: 0, after: 0 },
-          children: [text(block.text, { text: block.text, bold: true, font: NAME_FONT, size: halfPoints(sizes.name) })],
+          children: [text(block.text, { bold: true, font: NAME_FONT, size: halfPoints(sizes.name) })],
         });
       case "headline":
         return new Paragraph({
           spacing: { before: 0, after: twips(sizes.lineGap) },
-          children: [text(block.text, { text: block.text, bold: true, font: NAME_FONT, size: halfPoints(sizes.headline) })],
+          children: [text(block.text, { bold: true, font: NAME_FONT, size: halfPoints(sizes.headline) })],
         });
       case "contact":
         return new Paragraph({
@@ -105,7 +113,7 @@ export async function renderDocx(blocks: Block[], sizes: Sizes): Promise<Buffer>
           children:
             block.label === null
               ? [text(block.value)]
-              : [text(`${block.label}: `, { text: "", bold: true }), text(block.value)],
+              : [text(`${block.label}: `, { bold: true }), text(block.value)],
         });
       case "heading":
         return new Paragraph({
@@ -114,7 +122,7 @@ export async function renderDocx(blocks: Block[], sizes: Sizes): Promise<Buffer>
           // Square, full-width light-gray bar: paragraph shading spans the text area.
           shading: { type: ShadingType.CLEAR, color: "auto", fill: GRAY_BAR },
           indent: { left: 0 },
-          children: [text(block.text, { text: "", italic: true, font: HEADING_FONT, size: halfPoints(sizes.heading), spacing: 8 })],
+          children: [text(block.text, { italic: true, font: HEADING_FONT, size: halfPoints(sizes.heading), spacing: 8 })],
         });
       case "entry":
         return new Paragraph({
@@ -122,12 +130,12 @@ export async function renderDocx(blocks: Block[], sizes: Sizes): Promise<Buffer>
           spacing: spacing(sizes.entryGap),
           tabStops: [{ type: TabStopType.RIGHT, position: contentWidth }],
           children: [
-            ...block.left.map((run) => text(run.text, run)),
-            ...(block.right === null ? [] : [text("\t", { text: "" }), text(block.right, { text: "", italic: true })]),
+            ...block.left.map((span) => text(span.text, span)),
+            ...(block.right === null ? [] : [text("\t"), text(block.right, { italic: true })]),
           ],
         });
       case "note":
-        return new Paragraph({ spacing: spacing(0), children: [text(block.text, { text: "", italic: true })] });
+        return new Paragraph({ spacing: spacing(0), children: [text(block.text, { italic: true })] });
       case "bullet":
         return new Paragraph({
           numbering: { reference: BULLET_REF, level: 0 },

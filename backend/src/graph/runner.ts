@@ -1,5 +1,5 @@
 import { Command } from "@langchain/langgraph";
-import type { Answer, ReviewDecision, RunId, RunStatus } from "@resume-ai/shared";
+import type { Answer, ItemId, ReviewDecision, RunId, RunStatus } from "@resume-ai/shared";
 import { STATUS_AT_POSITION, type GraphRunner, type RunEvents, type RunSnapshot, type StartRunInput } from "@/services/runs.js";
 import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import { withSessionSpan } from "@/utils/spans.js";
@@ -92,11 +92,11 @@ export class LangGraphRunner implements GraphRunner {
   }
 
   /**
-   * Resumes the Run paused in `review`, with the decisions as the value of its `interrupt()`, and runs to the end. It
-   * opens no span of its own: the service wraps the call in a `review` root span (`session.id` = the Run id).
+   * Resumes the Run paused in `review`, with the decisions and the dropped bullets as the value of its `interrupt()`, and
+   * runs to the end. It opens no span of its own: the service wraps the call in a `review` root span (`session.id` = the Run id).
    */
-  async review(runId: RunId, decisions: ReviewDecision[]): Promise<RunSnapshot> {
-    return this.runUntilPause(runId, new Command({ resume: decisions }));
+  async review(runId: RunId, decisions: ReviewDecision[], drops: ItemId[] = []): Promise<RunSnapshot> {
+    return this.runUntilPause(runId, new Command({ resume: { decisions, drops } }));
   }
 
   /**

@@ -5,12 +5,12 @@ import { selectQuestions } from "@/tailoring/questions.js";
 import { tailorCv } from "@/tailoring/tailorCv.js";
 import { validateChanges } from "@/tailoring/validateChanges.js";
 import { applyChanges } from "@/tailoring/applyChanges.js";
-import { applyDecisions, keptChanges } from "@/tailoring/review.js";
+import { applyDecisions, keptChanges, userDrops } from "@/tailoring/review.js";
 import { setActiveSpanAttribute } from "@/utils/spans.js";
 import { condenseDrop, condenseReword, measureCondense, type CondenseInput, type CondenseStepResult } from "@/tailoring/condense.js";
 import { removableBullets } from "@/tailoring/removable.js";
 import { mergeRoundIntoChanges } from "@/tailoring/mergeChanges.js";
-import { mergeCoverage, requirementsListedBy } from "@/tailoring/roundCoverage.js";
+import { mergeCoverage, requirementsAffectedByReview, requirementsListedBy } from "@/tailoring/roundCoverage.js";
 import { onlyGapsLeft, routeAfterRound, shouldSkipTailoring } from "@/scoring/exitRouter.js";
 import { assessCoverage } from "@/scoring/assessCoverage.js";
 import { matchScore } from "@/scoring/matchScore.js";
@@ -18,7 +18,7 @@ import { resolveJobProfile, type JobProfileCache } from "@/graph/jobProfileCache
 import { STATUS_AT_POSITION } from "@/services/runs.js";
 import { RunState, type CondenseProgress, type RunStateValues } from "@/graph/state.js";
 import type { RecordedRejection } from "@/tailoring/validateChanges.js";
-import { UserEvidenceIdSchema, type Answer, type Change, type Question, type RequirementId, type ReviewDecision, type UserEvidence } from "@resume-ai/shared";
+import { UserEvidenceIdSchema, type Answer, type Change, type Question, type RequirementId, type ReviewSubmission, type UserEvidence } from "@resume-ai/shared";
 
 /** The Run status a node writes when the graph enters it (decisions record, "Storage and status"). */
 export const NODE_STATUS = {
@@ -353,17 +353,19 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
     // again from the top on resume, so everything before the `interrupt()` must be pure. It only records the final
     // statuses; the model work is in `final_rejudge`, so a crash during it resumes from this node's checkpoint.
     .addNode("review", (state) => {
-      const decisions = interrupt<null, ReviewDecision[]>(null);
-      return { changes: applyDecisions(state.changes, decisions) };
+      const { decisions, drops } = interrupt<null, ReviewSubmission>(null);
+      // The user's drops join the Changes as revised removes, after the model's, so the IDs of the others never move.
+      return { changes: [...applyDecisions(state.changes, decisions), ...userDrops(state.cv!, drops)] };
     })
-    // Judges again the Requirements that rejected or revised Changes list, against the CV the user ends up with. Every
+    // Judges again the Requirements that rejected or revised Changes list, or whose verdict cites an Item such a Change
+    // rewrites or removes (a bullet the user dropped is a revised remove), against the CV the user ends up with. Every
     // other verdict carries over. A failure here never fails the Run: those Requirements go back to their verdict before
     // tailoring, so the score errs low.
     .addNode("final_rejudge", async (state) => {
       await onEnter(state.runId, "final_rejudge");
       const { requirements } = state.jobProfile!;
       const undone = state.changes.filter((c) => c.status === "rejected" || c.status === "revised");
-      const affected = requirementsListedBy(requirements, undone);
+      const affected = requirementsAffectedByReview(requirements, state.coverage!, undone);
       if (affected.length === 0) return {};
       try {
         const reviewed = applyChanges(state.cv!, keptChanges(state.changes));

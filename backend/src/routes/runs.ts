@@ -21,5 +21,7 @@ export function createRunsRouter(controller: RunsController, { limits }: Config)
   router.post("/:id/answers", express.json({ limit: "64kb" }), controller.answer);
   // A decision per Change, with the user's text for the revised ones: bigger than Answers, still small.
   router.post("/:id/review", express.json({ limit: "256kb" }), controller.review);
+  // The same body, to ask whether the result fits one page; nothing is submitted.
+  router.post("/:id/review/preview", express.json({ limit: "256kb" }), controller.previewReview);
   return router;
 }

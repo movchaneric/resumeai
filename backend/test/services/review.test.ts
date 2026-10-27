@@ -75,16 +75,16 @@ describe("the Review and the final re-judge", () => {
     expect(v.cv.skills.map((s) => s.text)).toEqual(["Node.js", "TypeScript"]);
   });
 
-  it("a revise re-judges against the user's own text", async () => {
-    p.llm.enqueueVoted("assess_coverage", only("req2", "met"));
+  it("a revise re-judges against the user's own text, and with it every Requirement that cites the revised bullet", async () => {
+    // r1.c1 lists req2, and all three verdicts cite its target exp1.b1.
+    p.llm.enqueueVoted("assess_coverage", ALL_MET);
     await submit({ decisions: decisions({ "r1.c1": { decision: "revise", after: "  Built PostgreSQL-backed Node.js APIs.  " } }) });
 
     const calls = finalJudgeCalls(p);
     expect(calls).toHaveLength(3);
     for (const call of calls) {
       expect(call).toContain("Built PostgreSQL-backed Node.js APIs.");
-      expect(call).toContain("[req2]");
-      expect(call).not.toContain("[req3]");
+      for (const requirement of ["[req1]", "[req2]", "[req3]"]) expect(call).toContain(requirement);
     }
     const v = await view();
     if (v.status !== "completed") throw new Error(`expected completed, got ${v.status}`);
@@ -93,7 +93,7 @@ describe("the Review and the final re-judge", () => {
     expect(v.cv.experience[0]!.bullets[0]!.text).toBe("Built PostgreSQL-backed Node.js APIs.");
   });
 
-  it("a failing judge ends completed with the affected verdicts back at coverageBefore and the score recomputed", async () => {
+  it("a failing judge ends completed with the affected verdicts (those listed by or citing the undone Changes) back at coverageBefore and the score recomputed", async () => {
     // Nothing queued for assess_coverage: every judge call fails.
     await submit({ decisions: decisions({ "r1.c1": { decision: "reject" }, "r1.c2": { decision: "reject" } }) });
 
@@ -102,7 +102,7 @@ describe("the Review and the final re-judge", () => {
     if (v.status !== "completed") return;
     expect(v.requirements.map((r) => r.after.verdict)).toEqual(["met", "unmet", "unmet"]);
     expect(v.score.after).toBe(v.score.before);
-    expect(errors.some((e) => e.startsWith(`Run ${id}: final re-judge failed, 2 verdicts reverted`))).toBe(true);
+    expect(errors.some((e) => e.startsWith(`Run ${id}: final re-judge failed, 3 verdicts reverted`))).toBe(true);
   });
 
   it("the completed view excludes rejected Changes and carries the final statuses", async () => {

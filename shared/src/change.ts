@@ -68,3 +68,13 @@ export const ReviewDecisionSchema = z.object({
   orderedItemIds: z.array(ItemIdSchema).optional(),
 });
 export type ReviewDecision = z.infer<typeof ReviewDecisionSchema>;
+
+/**
+ * The body of a Review: a decision per Change, and the bullets of the original CV the user drops on top of them. `drops`
+ * defaults to none, so a client that predates drops still works. Whether each drop is allowed is checked by the service.
+ */
+export const ReviewSubmissionSchema = z.object({
+  decisions: z.array(ReviewDecisionSchema),
+  drops: z.array(ItemIdSchema).default([]),
+});
+export type ReviewSubmission = z.infer<typeof ReviewSubmissionSchema>;

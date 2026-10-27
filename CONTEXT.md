@@ -24,6 +24,10 @@ _Avoid_: Block, category
 A single addressable piece of CV content, such as one job, one bullet, or one skill. Every Item has a stable ID that never changes during a run, and Changes and Evidence refer to Items by that ID.
 _Avoid_: Entry, node, element
 
+**Headline**:
+The line under the candidate's name that says what they are ("Software engineer"). Part of the contact details, extracted verbatim, and never changed or removed by tailoring.
+_Avoid_: Title (that is a job's title), tagline
+
 **Job Description**:
 The raw text of the target job posting supplied by the candidate.
 _Avoid_: JD, posting, vacancy
@@ -53,7 +57,7 @@ A Requirement the user has said they cannot satisfy. It is not asked about again
 _Avoid_: Skipped question, missing skill
 
 **Tailored CV**:
-A new CV generated from the candidate's CV, adjusted to fit one Job Description and rendered into a template. It never invents facts.
+A new CV generated from the candidate's CV, adjusted to fit one Job Description and rendered into a template, always on one page. It never invents facts. It is downloaded as DOCX or PDF, rendered on demand and never stored (ADR 0008).
 _Avoid_: Improved CV, optimized CV, rewritten CV
 
 **Change**:

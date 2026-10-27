@@ -18,6 +18,7 @@ const section = (heading: string, lines: string[]) => (lines.length === 0 ? null
 export function renderCv(cv: Cv): string {
   const contact = [
     cv.contact.name,
+    cv.contact.headline,
     cv.contact.email,
     cv.contact.phone,
     cv.contact.location,

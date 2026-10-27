@@ -38,6 +38,21 @@ describe("extractCv", () => {
     expect(llm.calls[0]?.messages.some((m) => m.content.includes("Ada Lovelace"))).toBe(true);
   });
 
+  it("returns the headline when the CV has one", async () => {
+    const withHeadline = fullCv();
+    withHeadline.contact.headline = "Software engineer";
+    const llm = new FakeLlmClient().enqueue("extract_cv", withHeadline);
+    const { cv } = await extractCv(llm, cvText.replace("Ada Lovelace\n", "Ada Lovelace\nSoftware engineer\n"));
+    expect(cv.contact.headline).toBe("Software engineer");
+    expect(llm.calls[0]?.messages[0]?.content).toContain("headline");
+  });
+
+  it("returns a null headline when the CV has none", async () => {
+    const llm = new FakeLlmClient().enqueue("extract_cv", fullCv());
+    const { cv } = await extractCv(llm, cvText);
+    expect(cv.contact.headline).toBeNull();
+  });
+
   it("tells the model that combined headings go to the typed section", async () => {
     const llm = new FakeLlmClient().enqueue("extract_cv", fullCv());
     await extractCv(llm, cvText);

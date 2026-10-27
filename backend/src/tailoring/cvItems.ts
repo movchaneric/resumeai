@@ -60,7 +60,7 @@ export function itemTexts(cv: Cv): Map<string, string> {
   for (const [id, item] of textItems(cv)) texts.set(id, item.text);
   const join = (parts: (string | null | undefined)[]) => parts.filter((p): p is string => !!p).join(" ");
   const range = (d: { start: string | null; end: string | null } | null) => (d ? join([d.start, d.end]) : "");
-  texts.set(cv.contact.id, join([cv.contact.name, cv.contact.email, cv.contact.phone, cv.contact.location]));
+  texts.set(cv.contact.id, join([cv.contact.name, cv.contact.headline, cv.contact.email, cv.contact.phone, cv.contact.location]));
   for (const e of cv.experience) texts.set(e.id, join([e.title, e.company, e.location, range(e.dates)]));
   for (const e of cv.education) texts.set(e.id, join([e.institution, e.degree, e.field, range(e.dates)]));
   for (const p of cv.projects) texts.set(p.id, join([p.name, p.url, range(p.dates)]));

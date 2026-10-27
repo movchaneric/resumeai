@@ -15,6 +15,7 @@ export const STAGE1_REASONS = {
   addedItemEvidence: "An Item added by a Change is never Evidence; cite an Item from the original CV.",
   notPermutation: "The reorder must list exactly the Items currently under the parent, each once.",
   numberDropped: "A number or date in the original text is missing from the new text; numbers and dates must stay as written.",
+  itemTag: "The new text contains an Item ID tag like \"[summary]\"; write only the CV text, without IDs.",
   numberAdded: "The new text contains a number or date that is in neither the original text nor the cited Evidence.",
 } as const;
 
@@ -23,6 +24,13 @@ export type Stage1Result = { passed: Change[]; rejected: Stage1Rejection[] };
 
 /** A number is a run of digits with any decimal part, then an optional `%` or `+`. Dates are covered through their digits. */
 const NUMBER = /[0-9]+(?:[.,][0-9]+)*[%+]?/g;
+
+/**
+ * A prompt item tag as `renderCv` writes it: `[` + an Item or section ID + `]`. The IDs are `contact`, `summary`,
+ * `exp1`, `edu1`, `proj1`, `cert1`, `skill1`, `sec1`, with `.b1` (bullets) or `.i1` (section items) after a parent,
+ * plus `ue1` and `req1` from the other prompt blocks. Ordinary brackets like "[beta]" do not match.
+ */
+const ITEM_TAG = /\[(?:contact|summary|(?:exp|edu|proj)[0-9]+(?:\.b[0-9]+)?|cert[0-9]+|skill[0-9]+|sec[0-9]+(?:\.i[0-9]+)?|ue[0-9]+|req[0-9]+)\]/;
 
 function numbersIn(text: string): Set<string> {
   return new Set(text.match(NUMBER) ?? []);
@@ -51,6 +59,7 @@ function firstProblem(original: Cv, draft: Cv, change: Change, userEvidence: Use
   const evidence = evidenceProblem(original, draft, change, userEvidence);
   if (evidence !== null) return evidence;
   if (change.op === "reorder") return null;
+  if (ITEM_TAG.test(change.after)) return STAGE1_REASONS.itemTag;
   return numberProblem(original, change.op === "replace" ? change.before : "", change.after, change.evidenceIds, userEvidence);
 }
 

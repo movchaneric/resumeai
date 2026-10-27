@@ -21,6 +21,8 @@ import {
   type UserEvidence,
   type RunView,
 } from "@resume-ai/shared";
+import { docxSizes, measureFit, renderDocx } from "@/export/index.js";
+import type { ExportFormat } from "@/export/index.js";
 import { applyChanges } from "@/tailoring/applyChanges.js";
 import { keptChanges, reviewProblem } from "@/tailoring/review.js";
 import type { RecordedRejection } from "@/tailoring/validateChanges.js";
@@ -281,9 +283,7 @@ export class RunsService {
   ): Promise<void> {
     const { store, events } = this.deps;
     const notFound = () => new ApiError("RUN_NOT_FOUND", "Run not found.");
-    const parsed = RunIdSchema.safeParse(rawId);
-    const run = parsed.success ? await store.get(parsed.data) : null;
-    if (!run || run.expiresAt <= this.now()) throw notFound();
+    const run = await this.findLiveRun(rawId);
     if (run.status !== pause.status) throw new ApiError(pause.code, pause.message);
 
     const input = await prepare(run.id);
@@ -422,16 +422,38 @@ export class RunsService {
     return true;
   }
 
+  /** The Run with this ID, or the 404 `RUN_NOT_FOUND` for a malformed, unknown or expired ID. */
+  private async findLiveRun(rawId: string): Promise<StoredRun> {
+    const id = RunIdSchema.safeParse(rawId);
+    const run = id.success ? await this.deps.store.get(id.data) : null;
+    if (!run || run.expiresAt <= this.now()) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
+    return run;
+  }
+
   /**
    * A malformed, unknown or expired ID all look the same, so an ID reveals nothing about whether it ever existed.
    * Expiry is checked on read; the slice 5 sweep is only cleanup.
    */
   async getRunView(rawId: string): Promise<RunView> {
-    const id = RunIdSchema.safeParse(rawId);
-    const run = id.success ? await this.deps.store.get(id.data) : null;
-    if (!run || run.expiresAt <= this.now()) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
+    const run = await this.findLiveRun(rawId);
     // A Run with no checkpoint yet (the graph has not started) reads as null.
     return toRunView(run, await this.deps.graphRunner.read(run.id));
+  }
+
+  /**
+   * Renders the completed Run's Tailored CV (the one its `completed` view shows) as a file, in memory (ADR 0008).
+   * Same 404 as `getRunView`; 409 `RUN_NOT_COMPLETED` for any other status; 409 `CV_TOO_LONG` when it does not fit one page at the smallest size.
+   */
+  async exportCv(rawId: string, format: ExportFormat): Promise<Buffer> {
+    const run = await this.findLiveRun(rawId);
+    if (run.status !== "completed") throw new ApiError("RUN_NOT_COMPLETED", "The CV can be downloaded once the Run is completed.");
+    const state = await this.deps.graphRunner.read(run.id);
+    if (!state?.cv) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
+    const cv = tailoredCv(run.status, state.cv, state.changes);
+    const fit = await measureFit(cv);
+    if (!fit.fits) throw new ApiError("CV_TOO_LONG", "The CV does not fit one page at the smallest size, so it cannot be exported yet.");
+    if (format === "pdf") return fit.pdf.buffer;
+    return renderDocx(fit.blocks, docxSizes(fit.step));
   }
 
   /**
@@ -531,6 +553,11 @@ function validateReview(body: unknown, snapshot: RunSnapshot | null): ReviewDeci
   return decisions;
 }
 
+/** The Tailored CV: while the user is reviewing, the original plus every proposed Change; once completed, only the accepted and revised ones. */
+function tailoredCv(status: RunStatus, cv: Cv, changes: Change[]): Cv {
+  return applyChanges(cv, status === "completed" ? keptChanges(changes) : changes);
+}
+
 /**
  * Derives the view from the `runs` row (status, error, timestamps) and the graph state (everything else).
  * A failed Run marks the step that broke as `failed`: `coverage` when the extraction results exist, otherwise
@@ -578,12 +605,12 @@ function toRunView(run: StoredRun, state: RunSnapshot | null): RunView {
         };
       }),
       // The Tailored CV: while the user is reviewing, the original plus every proposed Change; once completed, only the accepted and revised ones.
-      cv: applyChanges(cv, run.status === "completed" ? keptChanges(state.changes) : state.changes),
+      cv: tailoredCv(run.status, cv, state.changes),
       changes: state.changes,
       userEvidence: state.userEvidence,
       iterations: { used: state.rounds, max: MAX_ROUNDS },
       exitReason: state.exitReason,
-      ...(run.status === "completed" ? { download: { docx: null, pdf: null } } : {}),
+      ...(run.status === "completed" ? { download: { docx: `/runs/${run.id}/cv.docx`, pdf: `/runs/${run.id}/cv.pdf` } } : {}),
     });
   }
   if (run.status === "awaiting_answers" && extracted && state) {

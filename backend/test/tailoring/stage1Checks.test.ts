@@ -35,6 +35,21 @@ describe("stage1Checks structure", () => {
     }
   });
 
+  it("rejects every Change that targets the contact Item, headline included", () => {
+    const cv = testCv();
+    cv.contact.headline = "Backend engineer";
+    const changes = [
+      change({ op: "replace", targetItemId: "contact", before: "Backend engineer", after: "Principal architect", evidenceIds: ["exp1.b1"] }),
+      change({ op: "add", parentId: "contact", after: "Principal architect", evidenceIds: ["exp1.b1"] }),
+      change({ op: "reorder", parentId: "contact", orderedItemIds: ["contact"] }),
+    ];
+    for (const c of changes) {
+      const result = stage1Checks(cv, cv, [c]);
+      expect(result.passed).toEqual([]);
+      expect(result.rejected).toHaveLength(1);
+    }
+  });
+
   it("rejects a protected target: a job, education or certification entry", () => {
     for (const id of ["exp1", "edu1", "cert1", "proj1"]) {
       expect(reasonFor(change({ op: "replace", targetItemId: id, before: "", after: "x", evidenceIds: ["exp1.b1"] }))).toBe(STAGE1_REASONS.protectedField);
@@ -164,5 +179,24 @@ describe("stage1Checks with User Evidence", () => {
     const other = change({ op: "add", parentId: "exp1", after: "Ran 13 clusters", evidenceIds: ["ue1"] });
     expect(run(cited).passed).toEqual([cited]);
     expect(run(other).rejected[0]!.reason).toBe(STAGE1_REASONS.numberAdded);
+  });
+});
+
+describe("stage1Checks item tags", () => {
+  it("rejects a replace whose text starts with the summary tag", () => {
+    const c = change({ op: "replace", targetItemId: "summary", before: "", after: "[summary] Backend developer", evidenceIds: ["exp1.b1"] });
+    expect(reasonFor(c)).toBe(STAGE1_REASONS.itemTag);
+  });
+
+  it("rejects an add whose text holds an Item tag mid-text", () => {
+    const c = change({ op: "add", parentId: "exp1", after: "Built the API [exp1.b2] for orders", evidenceIds: ["exp1.b1"] });
+    expect(reasonFor(c)).toBe(STAGE1_REASONS.itemTag);
+  });
+
+  it("passes ordinary brackets that are not ID-shaped", () => {
+    const c = change({ op: "add", parentId: "exp1", after: "Built a CLI [open source] and a [beta] tool", evidenceIds: ["exp1.b1"] });
+    const result = check(c);
+    expect(result.rejected).toEqual([]);
+    expect(result.passed).toEqual([c]);
   });
 });

@@ -58,7 +58,7 @@ describe("dates", () => {
 
 describe("cv", () => {
   const extracted = {
-    contact: { name: "A", email: null, phone: null, location: null, links: [] },
+    contact: { name: "A", headline: null, email: null, phone: null, location: null, links: [] },
     summary: null,
     experience: [{ company: "Acme", title: "Dev", location: null, dates, bullets: ["Built APIs"] }],
     education: [],
@@ -68,7 +68,7 @@ describe("cv", () => {
     additionalSections: [{ title: "Volunteering", items: ["Mentor"] }],
   };
   const withIds = {
-    contact: { id: "contact", name: "A", email: null, phone: null, location: null, links: [] },
+    contact: { id: "contact", name: "A", headline: null, email: null, phone: null, location: null, links: [] },
     summary: { id: "summary", text: "Backend dev" },
     experience: [
       { id: "exp-1", company: "Acme", title: "Dev", location: null, dates, bullets: [{ id: "exp-1-b1", text: "Built APIs" }] },
@@ -94,6 +94,19 @@ describe("cv", () => {
   });
   it("parses a CV with stable IDs", () => {
     expect(CvSchema.safeParse(withIds).success).toBe(true);
+  });
+  it("reads a CV without a headline (an older checkpoint) as null", () => {
+    const { headline: _omit, ...oldContact } = withIds.contact;
+    const parsed = CvSchema.parse({ ...withIds, contact: oldContact });
+    expect(parsed.contact.headline).toBeNull();
+  });
+  it("keeps a headline on the identified CV", () => {
+    const parsed = CvSchema.parse({ ...withIds, contact: { ...withIds.contact, headline: "Software engineer" } });
+    expect(parsed.contact.headline).toBe("Software engineer");
+  });
+  it("requires the headline on the extracted CV (nullable, not optional)", () => {
+    const { headline: _omit, ...noHeadline } = extracted.contact;
+    expect(ExtractedCvSchema.safeParse({ ...extracted, contact: noHeadline }).success).toBe(false);
   });
   it("requires IDs on the identified CV", () => {
     expect(CvSchema.safeParse(extracted).success).toBe(false);
@@ -198,7 +211,7 @@ describe("run view", () => {
     steps: [{ key: "parse", state: "done" }],
   };
   const cv = {
-    contact: { id: "contact", name: "A", email: null, phone: null, location: null, links: [] },
+    contact: { id: "contact", name: "A", headline: null, email: null, phone: null, location: null, links: [] },
     summary: null,
     experience: [],
     education: [],
@@ -250,7 +263,7 @@ describe("run view", () => {
     expect(RunViewSchema.safeParse({ ...base, status: "awaiting_review", ...review }).success).toBe(true);
   });
   it("parses completed with download links", () => {
-    const completed = { ...base, status: "completed", ...review, download: { docx: "/runs/x/cv.docx", pdf: null } };
+    const completed = { ...base, status: "completed", ...review, download: { docx: "/runs/x/cv.docx", pdf: "/runs/x/cv.pdf" } };
     expect(RunViewSchema.safeParse(completed).success).toBe(true);
   });
   it("no longer parses the retired scored status", () => {

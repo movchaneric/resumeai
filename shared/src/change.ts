@@ -19,7 +19,8 @@ const changeCommon = {
 };
 
 /*
- * v1 operations: replace, add, reorder. No `remove` (see ADR-0003).
+ * Operations: replace, add, reorder, and `remove`, which only Condensing proposes, to fit one page (see ADR-0003).
+ * A `remove` drops a bullet of the original CV; it carries no text, so its `evidenceIds` and `requirementIds` are empty.
  * `replace` only rewrites the text of a text Item (bullet, skill, summary, additional-section
  * item); company, title, dates and degrees are never targets. Claim validation (step 8) rejects a
  * `replace` whose target is not a text Item, and an `add` / `replace` with no Evidence. The schema
@@ -32,6 +33,12 @@ export const ChangeSchema = z.discriminatedUnion("op", [
     targetItemId: ItemIdSchema,
     before: z.string(),
     after: z.string(),
+  }),
+  z.object({
+    ...changeCommon,
+    op: z.literal("remove"),
+    targetItemId: ItemIdSchema,
+    before: z.string(),
   }),
   z.object({
     ...changeCommon,

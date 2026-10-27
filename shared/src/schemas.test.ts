@@ -165,8 +165,15 @@ describe("change", () => {
     expect(parsed.status).toBe("revised");
     expect(parsed.op === "replace" && parsed.after).toBe("user text");
   });
-  it("rejects remove, and the dropped `origin` field is not required", () => {
-    expect(ChangeSchema.safeParse({ ...common, op: "remove", targetItemId: "exp-1-b1" }).success).toBe(false);
+  it("accepts a remove with a target and its original text, and needs both", () => {
+    const remove = { ...common, evidenceIds: [], requirementIds: [], op: "remove", targetItemId: "exp-1-b1", before: "a" };
+    const parsed = ChangeSchema.parse(remove);
+    expect(parsed.op === "remove" && parsed.before).toBe("a");
+    expect(ChangeSchema.safeParse({ ...remove, before: undefined }).success).toBe(false);
+    expect(ChangeSchema.safeParse({ ...remove, targetItemId: undefined }).success).toBe(false);
+    expect(ChangeSchema.safeParse({ ...remove, targetItemId: "" }).success).toBe(false);
+  });
+  it("the dropped `origin` field is not required", () => {
     expect(ChangeSchema.safeParse({ ...common, op: "add", parentId: "exp-1", after: "b" }).success).toBe(true);
   });
 });

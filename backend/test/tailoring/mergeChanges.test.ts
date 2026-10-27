@@ -65,3 +65,32 @@ describe("mergeRoundIntoChanges", () => {
     expect(kept).toEqual(snapshot);
   });
 });
+
+describe("mergeRoundIntoChanges remove", () => {
+  const remove = (id: string, target: string, before = "orig") =>
+    change({ id, op: "remove", targetItemId: target, before, evidenceIds: [], requirementIds: [] });
+
+  it("appends a remove of an Item with no Change", () => {
+    const kept = [replace("r1.c1", "exp1.b1", "orig", "one")];
+    const merged = mergeRoundIntoChanges(testCv(), kept, [remove("r2.c1", "exp1.b2")]);
+    expect(merged.map((c) => [c.id, c.op])).toEqual([["r1.c1", "replace"], ["r2.c1", "remove"]]);
+  });
+
+  it("a remove of a replaced Item takes the replace's place, keeping its ID and original before", () => {
+    const kept = [replace("r1.c1", "exp1.b1", "original text", "first"), replace("r1.c2", "exp1.b2", "o2", "x")];
+    const merged = mergeRoundIntoChanges(testCv(), kept, [remove("r2.c1", "exp1.b1", "first")]);
+    expect(merged).toHaveLength(2);
+    expect(merged[0]).toMatchObject({ id: "r1.c1", op: "remove", targetItemId: "exp1.b1", before: "original text" });
+  });
+
+  it("keeps the IDs of added Items stable across a remove", () => {
+    const add = change({ id: "r1.c1", op: "add", parentId: "exp1", after: "New", evidenceIds: ["exp1.b1"] });
+    const merged = mergeRoundIntoChanges(testCv(), [add], [remove("r2.c1", "exp1.b2")]);
+    expect(applyChanges(testCv(), merged).experience[0]!.bullets.map((b) => b.id)).toEqual(["exp1.b1", "exp1.b3"]);
+  });
+
+  it("does not repeat a remove of an already removed Item", () => {
+    const kept = [remove("r1.c1", "exp1.b2")];
+    expect(mergeRoundIntoChanges(testCv(), kept, [remove("r2.c1", "exp1.b2")]).map((c) => c.id)).toEqual(["r1.c1"]);
+  });
+});

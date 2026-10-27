@@ -26,6 +26,8 @@ function addedItemIds(original: Cv, kept: Change[]): Map<string, string> {
  *   and merges the Requirement IDs.
  * - One reorder per list: the latest wins and keeps the earlier ID.
  * - A `replace` of an Item an earlier round added becomes a new version of that `add` (same parent and ID, new text).
+ * - A `remove` of an Item that has a `replace` takes that Change's place, keeping its ID and the original `before`; a `remove` of an
+ *   Item with no Change is appended. (A `remove` never targets an Item an `add` created.)
  * A replaced Change stays at its old position, so the IDs of added Items never shift. Pure; inputs are not mutated.
  */
 export function mergeRoundIntoChanges(original: Cv, kept: Change[], round: Change[]): Change[] {
@@ -40,7 +42,7 @@ export function mergeRoundIntoChanges(original: Cv, kept: Change[], round: Chang
     const index = merged.findIndex((existing) => {
       if (incoming.op === "reorder") return existing.op === "reorder" && existing.parentId === incoming.parentId;
       return (
-        (existing.op === "replace" && existing.targetItemId === incoming.targetItemId) ||
+        ((existing.op === "replace" || existing.op === "remove") && existing.targetItemId === incoming.targetItemId) ||
         (existing.op === "add" && added.get(existing.id) === incoming.targetItemId)
       );
     });
@@ -49,9 +51,11 @@ export function mergeRoundIntoChanges(original: Cv, kept: Change[], round: Chang
       merged.push(incoming);
     } else if (incoming.op === "reorder") {
       merged[index] = { ...incoming, id: existing.id, requirementIds: union(existing.requirementIds, incoming.requirementIds) };
-    } else if (existing.op === "add") {
+    } else if (existing.op === "add" && incoming.op !== "remove") {
       merged[index] = { ...existing, after: incoming.after, rationale: incoming.rationale, evidenceIds: incoming.evidenceIds, requirementIds: union(existing.requirementIds, incoming.requirementIds), status: incoming.status };
-    } else if (existing.op === "replace") {
+    } else if (existing.op === "replace" && incoming.op === "remove") {
+      merged[index] = { ...incoming, id: existing.id, before: existing.before, requirementIds: union(existing.requirementIds, incoming.requirementIds) };
+    } else if (existing.op === "replace" && incoming.op === "replace") {
       merged[index] = { ...incoming, id: existing.id, before: existing.before, requirementIds: union(existing.requirementIds, incoming.requirementIds) };
     }
   }

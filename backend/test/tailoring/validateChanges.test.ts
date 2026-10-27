@@ -1,6 +1,8 @@
+import { CoverageSchema } from "@resume-ai/shared";
 import { trace } from "@opentelemetry/api";
 import { InMemorySpanExporter, NodeTracerProvider, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-node";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { STAGE1_REASONS } from "@/tailoring/stage1Checks.js";
 import { validateChanges } from "@/tailoring/validateChanges.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
 import { change, testCv } from "./testCv.js";
@@ -89,5 +91,20 @@ describe("validateChanges with User Evidence", () => {
     const llm = new FakeLlmClient().enqueue("claim_check", { verdicts: [verdict("r1.c1", "not_supported", "scale is new")] });
     const result = await validateChanges(llm, { original, draft: original, changes: [fromAnswer], round: 1, userEvidence });
     expect(result.rejections).toMatchObject([{ stage: "claim_check", reason: "scale is new" }]);
+  });
+});
+
+describe("validateChanges remove", () => {
+  it("passes a valid remove without a claim check, and rejects one that cites Coverage", async () => {
+    const remove = change({ id: "r1.c1", op: "remove", targetItemId: "exp1.b2", before: "x", evidenceIds: [], requirementIds: [] });
+    const llm = new FakeLlmClient();
+    const free = await validateChanges(llm, { original, draft: original, changes: [remove], round: 1 });
+    expect(llm.calls).toHaveLength(0);
+    expect(free.valid).toEqual([remove]);
+
+    const coverage = [CoverageSchema.parse({ requirementId: "req1", verdict: "partially_met", evidenceIds: ["exp1.b2"], reason: "r" })];
+    const held = await validateChanges(new FakeLlmClient(), { original, draft: original, changes: [remove], round: 1, coverage });
+    expect(held.valid).toEqual([]);
+    expect(held.rejections).toMatchObject([{ stage: "stage1", reason: STAGE1_REASONS.notRemovable }]);
   });
 });

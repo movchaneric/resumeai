@@ -41,6 +41,7 @@ export function formatCoverage(requirements: Requirement[], coverage: Coverage[]
 function changeHead(change: Change): string {
   if (change.op === "replace") return `${change.id} replace ${change.targetItemId}`;
   if (change.op === "add") return `${change.id} add under ${change.parentId}`;
+  if (change.op === "remove") return `${change.id} remove ${change.targetItemId}`;
   return `${change.id} reorder ${change.parentId}`;
 }
 
@@ -50,7 +51,9 @@ function changeBody(change: Change): string[] {
       ? `  "${change.before}" -> "${change.after}"`
       : change.op === "add"
         ? `  (new) -> "${change.after}"`
-        : `  order: ${list(change.orderedItemIds)}`;
+        : change.op === "remove"
+          ? `  "${change.before}" -> (removed)`
+          : `  order: ${list(change.orderedItemIds)}`;
   return [body, `  evidence: ${list(change.evidenceIds)}  requirements: ${list(change.requirementIds)}`];
 }
 

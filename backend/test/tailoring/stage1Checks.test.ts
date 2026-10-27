@@ -1,3 +1,5 @@
+import { CoverageSchema } from "@resume-ai/shared";
+import type { Coverage } from "@resume-ai/shared";
 import { describe, expect, it } from "vitest";
 import { applyChanges } from "@/tailoring/applyChanges.js";
 import { STAGE1_REASONS, stage1Checks } from "@/tailoring/stage1Checks.js";
@@ -198,5 +200,56 @@ describe("stage1Checks item tags", () => {
     const result = check(c);
     expect(result.rejected).toEqual([]);
     expect(result.passed).toEqual([c]);
+  });
+});
+
+describe("stage1Checks remove", () => {
+  const remove = (targetItemId: string) => change({ op: "remove", targetItemId, before: "x", evidenceIds: [], requirementIds: [] });
+  const met = (evidenceIds: string[]) => [CoverageSchema.parse({ requirementId: "req1", verdict: "met", evidenceIds, reason: "r" })];
+  const run = (changes: ReturnType<typeof change>[], coverage: Coverage[] = []) => {
+    const cv = testCv();
+    return stage1Checks(cv, cv, changes, [], { coverage });
+  };
+
+  it("passes a remove of a free bullet, with no Evidence, tag or number checks", () => {
+    const c = remove("exp1.b2");
+    expect(run([c]).passed).toEqual([c]);
+  });
+
+  it("rejects an unknown target and a target that is not a bullet", () => {
+    expect(run([remove("exp9.b1")]).rejected[0]!.reason).toBe(STAGE1_REASONS.unknownTarget);
+    for (const id of ["skill1", "summary", "exp1", "sec1.i1"]) expect(run([remove(id)]).rejected[0]!.reason).toBe(STAGE1_REASONS.notRemovable);
+  });
+
+  it("rejects a bullet that a met or partially met Coverage cites", () => {
+    expect(run([remove("exp1.b2")], met(["exp1.b2"])).rejected[0]!.reason).toBe(STAGE1_REASONS.notRemovable);
+  });
+
+  it("rejects a bullet an add created", () => {
+    const cv = testCv();
+    const add = change({ op: "add", parentId: "exp1", after: "New", evidenceIds: ["exp1.b1"] });
+    const draft = applyChanges(cv, [add]);
+    const result = stage1Checks(cv, draft, [remove("exp1.b3")]);
+    expect(result.rejected[0]!.reason).toBe(STAGE1_REASONS.notRemovable);
+  });
+
+  it("rejects the last bullet of a parent", () => {
+    expect(run([remove("exp2.b1")]).rejected[0]!.reason).toBe(STAGE1_REASONS.lastBullet);
+  });
+
+  it("checks removes in order, so a batch cannot empty a parent", () => {
+    const first = remove("exp1.b1");
+    const second = remove("exp1.b2");
+    const result = run([first, second]);
+    expect(result.passed).toEqual([first]);
+    expect(result.rejected).toEqual([{ change: second, reason: STAGE1_REASONS.lastBullet }]);
+  });
+
+  it("rejects the same bullet removed twice in one batch", () => {
+    const cv = testCv();
+    cv.experience[0]!.bullets.push({ id: "exp1.b3" as never, text: "Third" });
+    const result = stage1Checks(cv, cv, [remove("exp1.b2"), remove("exp1.b2")]);
+    expect(result.passed).toHaveLength(1);
+    expect(result.rejected[0]!.reason).toBe(STAGE1_REASONS.notRemovable);
   });
 });

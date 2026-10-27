@@ -4,6 +4,7 @@ import { stage1Checks } from "@/tailoring/stage1Checks.js";
 
 /** The Change with the user's version in place of the proposal: `revised`, with their `after` or `orderedItemIds`. */
 function revise(change: Change, decision: ReviewDecision): Change {
+  if (change.op === "remove") throw new Error("A remove cannot be revised");
   if (change.op === "reorder") return { ...change, status: "revised", orderedItemIds: decision.orderedItemIds ?? change.orderedItemIds };
   return { ...change, status: "revised", after: decision.after ?? change.after };
 }
@@ -50,6 +51,7 @@ export function reviewProblem(original: Cv, changes: Change[], decisions: Review
       if (decision.after !== undefined || decision.orderedItemIds !== undefined) return `${label}: only a revision carries \`after\` or \`orderedItemIds\`.`;
       continue;
     }
+    if (change.op === "remove") return `${label}: a remove has no text to revise; accept or reject it.`;
     if (change.op === "reorder") {
       if (decision.after !== undefined) return `${label}: a reorder is revised with \`orderedItemIds\`, not \`after\`.`;
       if (decision.orderedItemIds === undefined) return `${label}: a revised reorder needs \`orderedItemIds\`.`;

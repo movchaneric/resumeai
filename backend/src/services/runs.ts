@@ -646,6 +646,7 @@ function toRunView(run: StoredRun, state: RunSnapshot | null, fit: ReviewFit | u
       }),
       // The Tailored CV: while the user is reviewing, the original plus every proposed Change; once completed, only the accepted and revised ones.
       cv: tailoredCv(run.status, cv, state.changes),
+      originalCv: cv,
       changes: state.changes,
       userEvidence: state.userEvidence,
       iterations: { used: state.rounds, max: MAX_ROUNDS },

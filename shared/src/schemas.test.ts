@@ -270,6 +270,7 @@ describe("run view", () => {
       },
     ],
     cv,
+    originalCv: cv,
     changes: [],
     userEvidence: [{ id: "ue-1", questionId: "q-1", requirementId: "req-3", text: "Used Node.js at a startup" }],
     iterations: { used: 2, max: 3 },
@@ -313,6 +314,14 @@ describe("run view", () => {
     const completed = { ...base, status: "completed", ...review, download: { docx: "/runs/x/cv.docx", pdf: "/runs/x/cv.pdf" } };
     expect(RunViewSchema.parse(completed)).not.toHaveProperty("fit");
     expect(RunViewSchema.parse({ ...completed, fit: { fits: true, step: 0, fittable: true } })).not.toHaveProperty("fit");
+  });
+  it("requires originalCv in awaiting_review and completed", () => {
+    const { originalCv: _omit, ...withoutOriginal } = review;
+    const fit = { fits: true, step: 0, fittable: true };
+    expect(RunViewSchema.safeParse({ ...base, status: "awaiting_review", ...withoutOriginal, fit }).success).toBe(false);
+    const download = { docx: "/runs/x/cv.docx", pdf: "/runs/x/cv.pdf" };
+    expect(RunViewSchema.safeParse({ ...base, status: "completed", ...withoutOriginal, download }).success).toBe(false);
+    expect(RunViewSchema.safeParse({ ...base, status: "completed", ...review, originalCv: { ...cv, skills: [] }, download }).success).toBe(true);
   });
   it("parses completed with download links", () => {
     const completed = { ...base, status: "completed", ...review, download: { docx: "/runs/x/cv.docx", pdf: "/runs/x/cv.pdf" } };

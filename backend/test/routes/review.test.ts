@@ -26,6 +26,28 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
+describe("originalCv", () => {
+  const skillIds = (cv: { skills: { id: string }[] }) => cv.skills.map((skill) => skill.id);
+
+  it("keeps the extracted order at awaiting_review, while cv has every Change applied", async () => {
+    const view = RunViewSchema.parse((await request(p.app).get(`/runs/${id}`)).body);
+    if (view.status !== "awaiting_review") throw new Error("expected awaiting_review");
+    expect(skillIds(view.originalCv)).toEqual(["skill1", "skill2"]);
+    expect(skillIds(view.cv)).toEqual(["skill2", "skill1", "skill3"]);
+    expect(view.originalCv.experience[0]!.bullets[0]!.text).toBe("Designed and maintained Node.js services backed by PostgreSQL.");
+  });
+
+  it("is the same at completed, where cv holds the kept Changes", async () => {
+    await post(id, { decisions: decisions({ "r1.c3": { decision: "reject" } }) });
+    await p.settle();
+    const view = RunViewSchema.parse((await request(p.app).get(`/runs/${id}`)).body);
+    if (view.status !== "completed") throw new Error("expected completed");
+    expect(skillIds(view.originalCv)).toEqual(["skill1", "skill2"]);
+    expect(skillIds(view.cv)).toEqual(["skill1", "skill2", "skill3"]);
+    expect(view.originalCv.experience[0]!.bullets[0]!.text).toBe("Designed and maintained Node.js services backed by PostgreSQL.");
+  });
+});
+
 describe("POST /runs/:id/review", () => {
   it("answers 202 with the Run ID, resumes the graph, and ends completed", async () => {
     expect(await statusOf()).toBe("awaiting_review");

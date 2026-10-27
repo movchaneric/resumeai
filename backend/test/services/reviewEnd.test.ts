@@ -95,7 +95,7 @@ describe("Review as an interrupt", () => {
     expect(last.status).toBe("completed");
     const view = await process.service.getRunView(id);
     expect(RunViewSchema.safeParse(view).success).toBe(true);
-    expect(view).toMatchObject({ status: "completed", download: { docx: null, pdf: null } });
+    expect(view).toMatchObject({ status: "completed", download: { docx: `/runs/${id}/cv.docx`, pdf: `/runs/${id}/cv.pdf` } });
   });
 });
 

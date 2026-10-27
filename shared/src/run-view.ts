@@ -75,7 +75,7 @@ export const RunViewSchema = z.discriminatedUnion("status", [
     ...runViewCommon,
     status: z.literal("completed"),
     ...reviewSummaryFields,
-    download: z.object({ docx: z.string().nullable(), pdf: z.string().nullable() }),
+    download: z.object({ docx: z.string(), pdf: z.string() }),
   }),
   z.object({
     ...runViewCommon,

@@ -1,8 +1,13 @@
 import type { Request, Response } from "express";
 import { ApiError } from "@/utils/errors.js";
 import type { Config } from "@/utils/config.js";
-import type { RunsService } from "@/services/runs.js";
+import type { ExportFormat, RunsService } from "@/services/runs.js";
 import type { OpenStreams } from "@/utils/openStreams.js";
+
+const DOWNLOADS: Record<ExportFormat, { contentType: string }> = {
+  pdf: { contentType: "application/pdf" },
+  docx: { contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
+};
 
 /** The HTTP edge of Runs: reads the request, calls the service, shapes the response. */
 export class RunsController {
@@ -38,6 +43,15 @@ export class RunsController {
 
   get = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
     res.json(await this.service.getRunView(req.params.id));
+  };
+
+  /** `GET /runs/:id/cv.pdf` and `cv.docx`: the file is built in memory and sent as an attachment; nothing is cached or stored. */
+  download = (format: ExportFormat) => async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+    const buffer = await this.service.exportCv(req.params.id, format);
+    res
+      .status(200)
+      .set({ "Content-Type": DOWNLOADS[format].contentType, "Content-Disposition": `attachment; filename="tailored-cv.${format}"`, "Cache-Control": "no-store" })
+      .send(buffer);
   };
 
   /**

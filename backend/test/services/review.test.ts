@@ -52,7 +52,7 @@ describe("the Review and the final re-judge", () => {
     expect(after.score).toEqual(before.score);
     expect(after.changes.map((c) => c.status)).toEqual(["accepted", "accepted", "accepted"]);
     expect(after.cv).toEqual(before.cv);
-    expect(after.download).toEqual({ docx: null, pdf: null });
+    expect(after.download).toEqual({ docx: `/runs/${after.id}/cv.docx`, pdf: `/runs/${after.id}/cv.pdf` });
   });
 
   it("a reject re-judges only the Requirements it lists, against a CV without the Change", async () => {

@@ -263,7 +263,7 @@ describe("run view", () => {
     expect(RunViewSchema.safeParse({ ...base, status: "awaiting_review", ...review }).success).toBe(true);
   });
   it("parses completed with download links", () => {
-    const completed = { ...base, status: "completed", ...review, download: { docx: "/runs/x/cv.docx", pdf: null } };
+    const completed = { ...base, status: "completed", ...review, download: { docx: "/runs/x/cv.docx", pdf: "/runs/x/cv.pdf" } };
     expect(RunViewSchema.safeParse(completed).success).toBe(true);
   });
   it("no longer parses the retired scored status", () => {

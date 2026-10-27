@@ -20,12 +20,17 @@ export const STAGE1_REASONS = {
   notRemovable: "Only a bullet of the original CV that no met or partially met Requirement cites as Evidence can be removed.",
   noCoverage: "A remove cannot be checked without the Coverage verdicts.",
   lastBullet: "A job, project or education entry keeps at least one bullet; this is its last.",
+  notShorter: "A condensing rewording must have fewer characters than the Item's current text.",
   numberAdded: "The new text contains a number or date that is in neither the original text nor the cited Evidence.",
 } as const;
 
 export type Stage1Rejection = { change: Change; reason: string };
 /** `coverage` is the verdicts a `remove` is checked against (bullets they cite as Evidence stay). Without it every `remove` is rejected, so a caller that forgets it cannot drop cited bullets. */
-export type Stage1Options = { coverage?: Coverage[] };
+export type Stage1Options = {
+  coverage?: Coverage[];
+  /** Condensing: a `replace` whose text is not shorter (in characters) than the Item's text in the draft is rejected. */
+  shorter?: boolean;
+};
 export type Stage1Result = { passed: Change[]; rejected: Stage1Rejection[] };
 
 /** A number is a run of digits with any decimal part, then an optional `%` or `+`. Dates are covered through their digits. */
@@ -56,7 +61,7 @@ export function stage1Checks(original: Cv, draft: Cv, changes: Change[], userEvi
   // The removes that passed in this batch: they are checked one by one, so a batch cannot empty a parent.
   const removed = new Set<string>();
   for (const change of changes) {
-    const reason = change.op === "remove" ? (hasCoverage ? removeProblem(original, draft, change.targetItemId, cited, removed) : STAGE1_REASONS.noCoverage) : firstProblem(original, draft, change, userEvidence);
+    const reason = change.op === "remove" ? (hasCoverage ? removeProblem(original, draft, change.targetItemId, cited, removed) : STAGE1_REASONS.noCoverage) : firstProblem(original, draft, change, userEvidence, options.shorter === true);
     if (reason === null) {
       passed.push(change);
       if (change.op === "remove") removed.add(change.targetItemId);
@@ -65,12 +70,13 @@ export function stage1Checks(original: Cv, draft: Cv, changes: Change[], userEvi
   return { passed, rejected };
 }
 
-function firstProblem(original: Cv, draft: Cv, change: Change, userEvidence: UserEvidence[]): string | null {
+function firstProblem(original: Cv, draft: Cv, change: Change, userEvidence: UserEvidence[], shorter: boolean): string | null {
   const structure = structureProblem(draft, change);
   if (structure !== null) return structure;
   const evidence = evidenceProblem(original, draft, change, userEvidence);
   if (evidence !== null) return evidence;
   if (change.op === "reorder" || change.op === "remove") return null;
+  if (shorter && change.op === "replace" && change.after.length >= (textItems(draft).get(change.targetItemId)?.text.length ?? 0)) return STAGE1_REASONS.notShorter;
   if (ITEM_TAG.test(change.after)) return STAGE1_REASONS.itemTag;
   return numberProblem(original, change.op === "replace" ? change.before : "", change.after, change.evidenceIds, userEvidence);
 }

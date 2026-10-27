@@ -91,14 +91,15 @@ describe("architecture rules", () => {
     expectNoViolations(violations, "src/prompts/** may import only @resume-ai/shared and @/prompts/*");
   });
 
-  it("src/export imports only @resume-ai/shared, @/export/*, pdfkit and node built-ins", () => {
+  it("src/export imports only @resume-ai/shared, @/export/*, pdfkit, docx and node built-ins", () => {
     const allowed = (specifier: string): boolean =>
       specifier === "@resume-ai/shared" ||
       specifier.startsWith("@resume-ai/shared/") ||
       specifier.startsWith("@/export/") ||
       specifier === "pdfkit" ||
+      specifier === "docx" ||
       specifier.startsWith("node:");
     const violations = srcImports.filter((i) => isIn(i.file, join(srcDir, "export")) && !allowed(i.specifier));
-    expectNoViolations(violations, "src/export/** may import only @resume-ai/shared, @/export/*, pdfkit and node: built-ins (no model, DB, Express or other layers)");
+    expectNoViolations(violations, "src/export/** may import only @resume-ai/shared, @/export/*, pdfkit, docx and node: built-ins (no model, DB, Express or other layers)");
   });
 });

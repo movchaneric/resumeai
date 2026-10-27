@@ -58,3 +58,9 @@ export function sizesForStep(step: number): Sizes {
     margin: round2(marginCm * PT_PER_CM),
   };
 }
+
+/**
+ * The sizes the DOCX uses for a CV whose PDF fits at `pdfStep`: one step smaller, because Word lays text out
+ * a little looser than PDFKit, and the same as the PDF at the floor (there is no smaller step to take).
+ */
+export const docxSizes = (pdfStep: number): Sizes => sizesForStep(Math.min(pdfStep + 1, FLOOR_STEP));

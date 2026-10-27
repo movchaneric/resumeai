@@ -989,6 +989,25 @@ describe("RunsService.submitAnswers", () => {
     expect(tasks).toHaveLength(1);
   });
 
+  it("answers 404 when a simultaneous DELETE removed the Run before the claim, and 409 when it only moved on", async () => {
+    const gone = answerSetup();
+    gone.store.claimStatus = async (id) => {
+      gone.store.rows.delete(id);
+      return false;
+    };
+    const error = await rejection(gone.service.submitAnswers(runId, { answers: [] }));
+    expect([error.code, error.status]).toEqual(["RUN_NOT_FOUND", 404]);
+    expect(gone.tasks).toHaveLength(0);
+
+    const moved = answerSetup();
+    moved.store.claimStatus = async (id) => {
+      await moved.store.setStatus(id, "tailoring");
+      return false;
+    };
+    const conflict = await rejection(moved.service.submitAnswers(runId, { answers: [] }));
+    expect([conflict.code, conflict.status]).toEqual(["RUN_NOT_AWAITING_ANSWERS", 409]);
+  });
+
   it("records a failed resume as a failed Run with a code and message, and never throws", async () => {
     const { service, store, answer, tasks } = answerSetup();
     answer.mockRejectedValueOnce(new CoverageError("bad", []));
@@ -1009,17 +1028,51 @@ describe("RunsService.submitAnswers", () => {
   });
 });
 
+describe("RunsService.submitReview when the claim is lost", () => {
+  const runId = "44444444-4444-4444-8444-444444444444" as RunId;
+  const now = () => new Date("2026-10-01T00:00:00Z");
+  const snapshot = { position: "review", cv: extractedCv, changes: [], userEvidence: [] } as unknown as RunSnapshot;
+
+  function reviewSetup(lose: (store: FakeStore, id: RunId) => Promise<void>) {
+    const store = new FakeStore() as FakeStore & { claimStatus(id: RunId, from: RunStatus, to: RunStatus): Promise<boolean> };
+    store.claimStatus = async (id) => {
+      await lose(store, id);
+      return false;
+    };
+    store.rows.set(runId, { id: runId, status: "awaiting_review", createdAt: now(), expiresAt: new Date(now().getTime() + 1000), exportPath: null, error: null });
+    const graphRunner: GraphRunner = { start: async () => snapshot, answer: async () => snapshot, review: async () => snapshot, recover: async () => snapshot, read: async () => snapshot, deleteThread: async () => {} };
+    const tasks: (() => Promise<void>)[] = [];
+    const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner, events: new InProcessRunEvents(), now, runInBackground: (t) => void tasks.push(t) });
+    return { tasks, service };
+  }
+  const rejection = async (promise: Promise<unknown>) => (await promise.then(() => null, (e) => e)) as ApiError;
+
+  it("answers 404 when a simultaneous DELETE removed the Run before the claim", async () => {
+    const { service, tasks } = reviewSetup(async (store, id) => void store.rows.delete(id));
+    const error = await rejection(service.submitReview(runId, { decisions: [] }));
+    expect([error.code, error.status]).toEqual(["RUN_NOT_FOUND", 404]);
+    expect(tasks).toHaveLength(0);
+  });
+
+  it("answers 409 when the Run only moved on", async () => {
+    const { service, tasks } = reviewSetup((store, id) => store.setStatus(id, "tailoring"));
+    const error = await rejection(service.submitReview(runId, { decisions: [] }));
+    expect([error.code, error.status]).toEqual(["RUN_NOT_AWAITING_REVIEW", 409]);
+    expect(tasks).toHaveLength(0);
+  });
+});
+
 describe("RunsService.deleteRun", () => {
   const runId = "33333333-3333-4333-8333-333333333333" as RunId;
   const now = () => new Date("2026-10-01T00:00:00Z");
 
   /** A store holding one Run, with the conditional delete the real store does in SQL, and a runner whose `deleteThread` is a spy. */
   function deleteSetup(deleteThread: GraphRunner["deleteThread"] = async () => {}) {
-    const store = new FakeStore() as FakeStore & { deleteUnless(id: RunId, busy: RunStatus[], liveAt?: Date): Promise<boolean> };
+    const store = new FakeStore() as FakeStore & { deleteIdleLive(id: RunId, busy: RunStatus[], liveAt: Date): Promise<boolean> };
     store.rows.set(runId, { id: runId, status: "awaiting_review", createdAt: now(), expiresAt: new Date(now().getTime() + 1000), exportPath: null, error: null });
-    store.deleteUnless = async (id, busy, liveAt) => {
+    store.deleteIdleLive = async (id, busy, liveAt) => {
       const row = store.rows.get(id);
-      if (!row || busy.includes(row.status) || (liveAt && row.expiresAt <= liveAt)) return false;
+      if (!row || busy.includes(row.status) || row.expiresAt <= liveAt) return false;
       store.rows.delete(id);
       return true;
     };

@@ -1,13 +1,12 @@
 import { RunIdSchema } from "@resume-ai/shared";
-import pg from "pg";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "@/app.js";
-import { createPostgresCheckpointer } from "@/graph/checkpointer.js";
 import { RunStore } from "@/stores/runs.js";
 import { loadConfig } from "@/utils/config.js";
 import { createPrisma } from "@/utils/db.js";
 import { InProcessRunEvents } from "@/utils/runEvents.js";
+import { CHECKPOINT_TABLES, createCheckpointDb } from "../fakes/checkpointDb.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
 import { makeGraphRunner } from "../fakes/runGraph.js";
 import { coverageAnswer, extractedCv, extractedJob } from "../runFixtures.js";
@@ -21,8 +20,7 @@ const url = process.env.DATABASE_URL!;
 const config = loadConfig(process.env);
 const prisma = createPrisma(config.databaseUrl);
 const store = new RunStore(prisma);
-const pool = new pg.Pool({ connectionString: url });
-const checkpointer = createPostgresCheckpointer(`${url}?schema=app`);
+const { checkpointer, rowsFor, end: endCheckpointDb } = createCheckpointDb(url);
 const llm = new FakeLlmClient();
 const events = new InProcessRunEvents();
 let tasks: Promise<void>[] = [];
@@ -33,9 +31,6 @@ const graphRunner = makeGraphRunner(store, llm, llm, undefined, events, checkpoi
 const app = createApp({ store, config, graphRunner, events, runInBackground });
 
 const cv = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf"));
-const CHECKPOINT_TABLES = ["checkpoints", "checkpoint_blobs", "checkpoint_writes"];
-const rowsFor = async (table: string, id: string) =>
-  (await pool.query(`SELECT count(*)::int AS n FROM checkpoints.${table} WHERE thread_id = $1`, [id])).rows[0].n as number;
 
 beforeAll(async () => {
   await checkpointer.setup();
@@ -45,8 +40,7 @@ beforeEach(async () => {
   tasks = [];
 });
 afterAll(async () => {
-  await checkpointer.end();
-  await pool.end();
+  await endCheckpointDb();
   await prisma.$disconnect();
 });
 

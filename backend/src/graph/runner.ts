@@ -1,6 +1,6 @@
 import { Command } from "@langchain/langgraph";
 import type { Answer, ReviewDecision, RunId, RunStatus } from "@resume-ai/shared";
-import type { GraphRunner, RunEvents, RunSnapshot, StartRunInput } from "@/services/runs.js";
+import { STATUS_AT_POSITION, type GraphRunner, type RunEvents, type RunSnapshot, type StartRunInput } from "@/services/runs.js";
 import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import { withSessionSpan } from "@/utils/spans.js";
 import type { LlmClient } from "@/llm/llmClient.js";
@@ -116,9 +116,7 @@ export class LangGraphRunner implements GraphRunner {
       // the Run is `completed`.
       const state = await this.graph.getState(config);
       const snapshot = toSnapshot(state);
-      if (snapshot.position === "answers") await this.write(runId, "awaiting_answers");
-      else if (snapshot.position === "review") await this.write(runId, "awaiting_review");
-      else if (snapshot.position === "ended") await this.write(runId, "completed");
+      if (snapshot.position !== null) await this.write(runId, STATUS_AT_POSITION[snapshot.position]);
       this.events.publish(runId);
       return snapshot;
     } finally {

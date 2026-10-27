@@ -1,13 +1,11 @@
 import { RunIdSchema, type RunId, type RunStatus } from "@resume-ai/shared";
-import pg from "pg";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { createPostgresCheckpointer } from "@/graph/checkpointer.js";
 import { parseCv } from "@/parsing/parseCv.js";
-import { RunsService } from "@/services/runs.js";
+import { RunsService, type GraphRunner } from "@/services/runs.js";
 import { SweepService } from "@/services/sweep.js";
 import { CheckpointStore } from "@/stores/checkpoints.js";
 import { JobProfileStore } from "@/stores/jobProfiles.js";
@@ -15,6 +13,7 @@ import { RunStore } from "@/stores/runs.js";
 import { loadConfig } from "@/utils/config.js";
 import { createPrisma } from "@/utils/db.js";
 import { InProcessRunEvents } from "@/utils/runEvents.js";
+import { CHECKPOINT_TABLES, createCheckpointDb } from "../fakes/checkpointDb.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
 import { makeGraphRunner } from "../fakes/runGraph.js";
 import { coverageAnswer, extractedCv, extractedJob } from "../runFixtures.js";
@@ -24,23 +23,17 @@ import { coverageAnswer, extractedCv, extractedJob } from "../runFixtures.js";
 const url = process.env.DATABASE_URL!;
 const config = loadConfig(process.env);
 const prisma = createPrisma(config.databaseUrl);
-// Runs seeded below are created after this, so they count as "this process's own" unless a test makes them older.
-const startedAt = new Date();
 const store = new RunStore(prisma);
-const pool = new pg.Pool({ connectionString: url });
-const checkpointer = createPostgresCheckpointer(`${url}?schema=app`);
+const { pool, checkpointer, rowsFor, end: endCheckpointDb } = createCheckpointDb(url);
 const llm = new FakeLlmClient();
 const events = new InProcessRunEvents();
 const graphRunner = makeGraphRunner(store, llm, llm, undefined, events, checkpointer);
 const runs = new RunsService({ store, config, graphRunner, events });
 const profiles = new JobProfileStore(prisma, { ttlMs: 1000 });
-const sweep = new SweepService({ store, jobProfiles: profiles, checkpoints: new CheckpointStore(prisma), purgeRun: (id, liveAt, cutOffBefore) => runs.purgeRun(id, liveAt, cutOffBefore), startedAt });
+const sweep = new SweepService({ store, jobProfiles: profiles, checkpoints: new CheckpointStore(prisma), purgeExpiredRun: (id, status) => runs.purgeExpiredRun(id, status) });
 
 const cvText = await parseCv(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf")), config.limits);
 const HOUR = 60 * 60 * 1000;
-const CHECKPOINT_TABLES = ["checkpoints", "checkpoint_blobs", "checkpoint_writes"];
-const rowsFor = async (table: string, id: string) =>
-  (await pool.query(`SELECT count(*)::int AS n FROM checkpoints.${table} WHERE thread_id = $1`, [id])).rows[0].n as number;
 const expectThread = async (id: string, present: boolean) => {
   for (const table of CHECKPOINT_TABLES) {
     if (present) expect(await rowsFor(table, id), table).toBeGreaterThan(0);
@@ -49,9 +42,9 @@ const expectThread = async (id: string, present: boolean) => {
 };
 
 /** A Run row with a real checkpoint thread, set to `status` and expiring `expiresInMs` from now (negative: already expired). */
-async function seedRun(status: RunStatus, expiresInMs: number, createdAt = new Date()): Promise<RunId> {
+async function seedRun(status: RunStatus, expiresInMs: number): Promise<RunId> {
   const id = RunIdSchema.parse(randomUUID());
-  await store.create({ id, status: "extracting", createdAt, expiresAt: new Date(Date.now() + HOUR) });
+  await store.create({ id, status: "extracting", createdAt: new Date(), expiresAt: new Date(Date.now() + HOUR) });
   llm.enqueue("extract_job_profile", extractedJob).enqueue("extract_cv", extractedCv).enqueueVoted("assess_coverage", coverageAnswer);
   await graphRunner.start({ runId: id, cvText, jobDescriptionText: "Backend developer with Node.js and PostgreSQL." });
   await prisma.run.update({ where: { id }, data: { status, expiresAt: new Date(Date.now() + expiresInMs) } });
@@ -69,8 +62,7 @@ beforeEach(async () => {
   await pool.query("TRUNCATE checkpoints.checkpoints, checkpoints.checkpoint_blobs, checkpoints.checkpoint_writes");
 });
 afterAll(async () => {
-  await checkpointer.end();
-  await pool.end();
+  await endCheckpointDb();
   await prisma.$disconnect();
 });
 
@@ -96,19 +88,8 @@ describe("SweepService.sweep with Postgres", () => {
     await expectThread(live, true);
   });
 
-  it("skips an expired busy Run created since this process started", async () => {
+  it("deletes an expired busy Run that this process is not running, with all its checkpoints", async () => {
     const ids = [await seedRun("parsing", -HOUR), await seedRun("extracting", -HOUR), await seedRun("tailoring", -HOUR)];
-    const result = await sweep.sweep();
-    expect(result.runs).toBe(0);
-    for (const id of ids) {
-      expect(await store.get(id)).not.toBeNull();
-      await expectThread(id, true);
-    }
-  });
-
-  it("deletes an expired busy Run created before this process started, with all its checkpoints", async () => {
-    const before = new Date(startedAt.getTime() - HOUR);
-    const ids = [await seedRun("parsing", -HOUR, before), await seedRun("extracting", -HOUR, before), await seedRun("tailoring", -HOUR, before)];
     const result = await sweep.sweep();
     expect(result.runs).toBe(3);
     for (const id of ids) {
@@ -117,10 +98,65 @@ describe("SweepService.sweep with Postgres", () => {
     }
   });
 
-  it("leaves a busy Run created before this process started alone while it has not expired", async () => {
-    const id = await seedRun("tailoring", HOUR, new Date(startedAt.getTime() - HOUR));
+  it("leaves a busy Run alone while it has not expired", async () => {
+    const id = await seedRun("tailoring", HOUR);
     await sweep.sweep();
     expect(await store.get(id)).not.toBeNull();
+    await expectThread(id, true);
+  });
+
+  it("skips a Run this process resumed that expires mid-run, and deletes it once the work has ended", async () => {
+    const id = await seedRun("awaiting_review", HOUR);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const gated: GraphRunner = {
+      start: (input) => graphRunner.start(input),
+      answer: (runId, answers) => graphRunner.answer(runId, answers),
+      review: async (runId, decisions) => {
+        await gate;
+        return graphRunner.review(runId, decisions);
+      },
+      recover: (runId) => graphRunner.recover(runId),
+      read: (runId) => graphRunner.read(runId),
+      deleteThread: (runId) => graphRunner.deleteThread(runId),
+    };
+    const tasks: Promise<void>[] = [];
+    const resumer = new RunsService({ store, config, graphRunner: gated, events, runInBackground: (task) => void tasks.push(task()) });
+    const sweepResumer = new SweepService({ store, jobProfiles: profiles, checkpoints: new CheckpointStore(prisma), purgeExpiredRun: (runId, status) => resumer.purgeExpiredRun(runId, status) });
+
+    await resumer.submitReview(id, { decisions: [] });
+    expect((await store.get(id))?.status).toBe("tailoring");
+    await prisma.run.update({ where: { id }, data: { expiresAt: new Date(Date.now() - HOUR) } });
+
+    expect((await sweepResumer.sweep()).runs).toBe(0);
+    expect(await store.get(id)).not.toBeNull();
+    await expectThread(id, true);
+
+    release();
+    await Promise.all(tasks);
+    expect((await store.get(id))?.status).toBe("completed");
+    expect((await sweepResumer.sweep()).runs).toBe(1);
+    expect(await store.get(id)).toBeNull();
+    await expectThread(id, false);
+  });
+
+  it("does not delete a Run whose status changed between the listing and the delete", async () => {
+    const id = await seedRun("awaiting_review", -HOUR);
+    const moving = new SweepService({
+      store: {
+        listExpired: async (now) => {
+          const listed = await store.listExpired(now);
+          await store.claimStatus(id, "awaiting_review", "tailoring");
+          return listed;
+        },
+      },
+      jobProfiles: profiles,
+      checkpoints: new CheckpointStore(prisma),
+      purgeExpiredRun: (runId, status) => runs.purgeExpiredRun(runId, status),
+    });
+
+    expect((await moving.sweep()).runs).toBe(0);
+    expect((await store.get(id))?.status).toBe("tailoring");
     await expectThread(id, true);
   });
 
@@ -164,11 +200,10 @@ describe("SweepService.sweep with Postgres", () => {
 
 describe("SweepService.sweep when a step fails", () => {
   const fakes = () => ({
-    store: { listExpiredIds: vi.fn(async () => ["a", "b"] as RunId[]) },
+    store: { listExpired: vi.fn(async () => [{ id: "a" as RunId, status: "awaiting_review" as RunStatus }, { id: "b" as RunId, status: "failed" as RunStatus }]) },
     jobProfiles: { deleteExpired: vi.fn(async () => 2) },
     checkpoints: { deleteOrphans: vi.fn(async () => 5) },
-    purgeRun: vi.fn(async () => true),
-    startedAt: new Date(),
+    purgeExpiredRun: vi.fn(async () => true),
   });
 
   it("still runs the other steps when the Job Profile delete throws", async () => {
@@ -181,11 +216,11 @@ describe("SweepService.sweep when a step fails", () => {
   it("still runs the other steps when listing Runs throws, and when one Run's delete throws", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const listFails = fakes();
-    listFails.store.listExpiredIds.mockRejectedValue(new Error("boom"));
+    listFails.store.listExpired.mockRejectedValue(new Error("boom"));
     expect(await new SweepService(listFails).sweep()).toEqual({ runs: 0, jobProfiles: 2, orphanRows: 5 });
 
     const oneFails = fakes();
-    oneFails.purgeRun.mockRejectedValueOnce(new Error("boom"));
+    oneFails.purgeExpiredRun.mockRejectedValueOnce(new Error("boom"));
     expect(await new SweepService(oneFails).sweep()).toEqual({ runs: 1, jobProfiles: 2, orphanRows: 5 });
   });
 

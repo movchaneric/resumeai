@@ -22,6 +22,16 @@ Settled in the slice 7 grilling (2026-10-27); every decision is owner-approved. 
   - from `review.ts`: `applyDecisions`, `keptChanges`, `userDrops` and `dropProblem`.
 - **Stays in the backend:** `reviewProblem`, because it uses stage-1 checks. No behaviour change: the moved tests and the backend suite pass as they are.
 
+## Settled during implementation
+- **The probe order in `measureFit` (#65):**
+  - **Order:** step 0 first (1 render, the common case, and tailoring rounds measure every round), then the floor (2 renders when the CV is over: the floor's overflow is the answer), then a binary search over the steps in between (at most 5 renders, down from 7).
+  - **Why not floor-first:** an earlier floor-first version capped the search at 4 renders, but a CV that fits at the normal size then cost 4 renders instead of 1, which slowed the routes that measure such CVs. The ticket's "at most 4" was an estimate, not a requirement.
+  - **Tests:** check the exact counts (1 and 2) and the cap (5), and compare against a linear scan on real renders.
+  - **Timings:** the route suite went from 46.3s to 24.9s, and `reviewFit.test.ts` from 31.7s to 13.0s.
+- **No stubbed fit in route tests (#65):** the ticket assumed the services already accept a swappable fit-checking function, but `RunsService` and the graph call `fitOf`, `reviewFit` and `measureFit` directly. Adding a `measure` dependency through `RunsDeps` and the graph is a design change, not worth it once the search made the slow file fast. `measureFit` only gained an optional `render` argument for its own tests.
+- **What moved to shared (#66):** besides the helpers listed above, `revise` moved too, renamed `reviseChange`, because `reviewProblem` needs it. `shared/src/testCv.ts`, a copy of the backend test CV with its IDs written out, serves the moved tests and is left out of the shared build.
+- **Watch:** one full backend run saw `test/graph/checkpointer.test.ts` ("pauses for Answers and resumes…") fail once. It passed alone and in the next full run, and it doesn't touch the moved code.
+
 ## Proof
 A real Run through `scripts/proof-run.sh`. At `awaiting_review`:
 - a removed bullet is in `originalCv` but not in `cv`;

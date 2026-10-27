@@ -70,9 +70,10 @@ Nothing in 6a is hard to reverse. 6b probably needs one (files on disk versus re
 ## After implementation
 Changes and findings from the build, the reviews of each ticket and the proof.
 - **`DELETE` order and busy statuses** (#45): `parsing` also counts as busy. The `runs` row goes first in one conditional delete, then the thread. `purgeRun` also publishes, so an open stream on the Run closes on its 404.
-- **Sweep deletes stale busy Runs** (found in review of #46): see "TTL sweep". A pass is scheduled only when the previous one ends; shutdown stops the sweep before closing the server and pools.
+- **Sweep deletes stale busy Runs** (found in review of #46), then **skips the Runs this process is running** (P1 in the slice review, which replaced the "created before startup" rule): see "TTL sweep". A pass is scheduled only when the previous one ends; shutdown stops the sweep before closing the server and pools.
 - **One `review` root span**, opened by the service (found in review of #44; the runner opened a second one).
-- **Graph position in one place** (#43, S4): `graph/position.ts`; `RunSnapshot.pausedAt` became `position` (`answers | review | ended | null`).
+- **Graph position in one place** (#43, S4): `graph/position.ts`; `RunSnapshot.pausedAt` became `position` (`answers | review | ended | null`). After the slice review, the position → status map is `STATUS_AT_POSITION` in `services/runs.ts`, next to `RunSnapshot`, so `services/` imports nothing from `graph/`.
+- **Slice review fixes:** `submitAnswers` and `submitReview` share one claim-and-resume helper; a claim lost to a `DELETE` is 404, not 409 (P2, S6). The sweep's store calls are `listExpired` and `deleteExpiredIn` (compare-and-delete on the listed status); `DELETE` uses `deleteIdleLive`.
 - **Notes for slice 7, no change now:**
   - When an `add` is rejected, later added Items in that list are numbered from the kept ones, so a reorder that listed them may place them slightly differently. Nothing is lost.
   - A revised reorder must list every Item under the parent as proposed, including Items from `add` Changes the user rejects.
@@ -86,3 +87,10 @@ Made-up CV fixture (`backend/test/fixtures/cv.docx`) and a made-up Job Descripti
 - **Run 2, revise by hand:** `r1.c1` revised (its own text plus a short edit), `r2.c1` accepted. 202, then 409 on a second POST. The revised text is in the CV, req5 was re-judged against it (still `met`), and the score stays 89.
 - **`DELETE` on Run 1:** 204, then 404 on `GET` and on a second `DELETE`. Rows before: 1 run, 18 checkpoints, 73 blobs, 61 writes; after: none.
 - **Sweep:** restarted with `RUN_TTL_DAYS=0.0007` and `SWEEP_INTERVAL_MS=20000`. A new Run (`failed`, 13 checkpoint rows) was gone from all four tables after it expired; the log shows `deleted 1 expired Runs`.
+
+## Proof of the review fixes (2026-10-27)
+Same fixture CV, a new made-up Job Description, `gemini-3.5-flash-lite`, `RUN_TTL_DAYS=0.0007` (about 60 s) and `SWEEP_INTERVAL_MS=20000`.
+- **Sweep:** five Runs (paused at `awaiting_review` or `completed`) were each deleted after they expired, one `deleted 1 expired Runs` line each; no rows left in `app.runs` or the four checkpoint tables, no orphaned checkpoint rows, no failure in the log.
+- **Run that expires mid-work:** not caught live. A Review was submitted 0.8 s before expiry, and Answers 6 s before, but the work ended (2 s of tailoring) before a sweep pass landed. The case is covered by `sweep.test.ts` against Postgres and the real service, which fails without the running-set check.
+- **`proof-run.sh --review revise-first`:** works live. One `add` Change revised and four accepted; `completed`, score 28 → 77. Two earlier Runs answered with the same vague sentence for every Question ended with no Changes (`ceiling`), and the script correctly said there was nothing to revise.
+- The model asked 5, 4 and 5 Questions on the same inputs, so an answers file must match the Run's Questions.

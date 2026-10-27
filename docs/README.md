@@ -29,6 +29,6 @@ Every decision record, handoff, review or note belongs to the slice being worked
 | [`18-score-stability`](./slices/18-score-stability) | Fix for #18: cached Job Profile, Soft Skill kind, Coverage votes | Done |
 | [`05-questions`](./slices/05-questions) | 5a: Questions and Answers interrupt, User Evidence, Confirmed Gaps | Done |
 | [`05b-live-updates`](./slices/05b-live-updates) | 5b: SSE live updates, crash resume (`interrupted`) | Done |
-| [`06a-review-cleanup`](./slices/06a-review-cleanup) | 6a: Review (one final decision per Change), P6 fix, `DELETE /runs/:id`, TTL sweep | Planned |
+| [`06a-review-cleanup`](./slices/06a-review-cleanup) | 6a: Review (one final decision per Change), P6 fix, `DELETE /runs/:id`, TTL sweep | Done |
 | `06b-export` | 6b: DOCX/PDF export of the Tailored CV | Planned |
 | `07-frontend` | Vite SPA, starting with a Claude Design pass (owner's request) | Planned |

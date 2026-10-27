@@ -20,6 +20,7 @@ export const STAGE1_REASONS = {
   notRemovable: "Only a bullet of the original CV that no met or partially met Requirement cites as Evidence can be removed.",
   noCoverage: "A remove cannot be checked without the Coverage verdicts.",
   lastBullet: "A job, project or education entry keeps at least one bullet; this is its last.",
+  pastOnePage: "The Change would push the CV past one page.",
   numberAdded: "The new text contains a number or date that is in neither the original text nor the cited Evidence.",
 } as const;
 

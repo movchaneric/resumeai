@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { ChangeSchema } from "@resume-ai/shared";
 import type { Change, Coverage, Cv, Requirement, RequirementId, UserEvidence } from "@resume-ai/shared";
+import { FLOOR_STEP, fitOf } from "@/export/index.js";
 import { LlmSchemaError, type LlmClient, type LlmMessage } from "@/llm/llmClient.js";
-import { renderTailorInput, type TailorRejection } from "@/prompts/renderTailor.js";
+import { renderTailorInput, type TailorFit, type TailorRejection } from "@/prompts/renderTailor.js";
 import { LIST_IDS } from "@/tailoring/cvItems.js";
 import { TailorError } from "@/tailoring/tailorErrors.js";
 import { withSpan } from "@/utils/spans.js";
@@ -21,6 +22,7 @@ Rules:
   - Reorder a list so relevant Items come first.
   - Rewrite the summary using only facts from cited Items.
   - Add a skill only when a cited experience, project or education Item shows it in use.
+- The Tailored CV must fit one page. Prefer "replace" (rewording) over "add": each added Item costs space. The page status of the draft is given in the input.
 - Never remove content. The operations are:
   - "replace": new text for one text Item (a bullet, a skill, the summary or an item in another section). Set targetItemId and text.
   - "add": a new text Item under a job, a project, a section, or a top-level list (${LIST_IDS.join(", ")}). Set parentId and text.
@@ -155,6 +157,8 @@ const asLines = (issues: string[]) => issues.map((i) => `- ${i}`).join("\n");
 export async function tailorCv(llm: LlmClient, input: TailorInput): Promise<{ changes: Change[]; retries: number }> {
   return withSpan(CALL_NAME, async (span) => {
     span.setAttribute("round", input.round);
+    const fit = await fitOf(input.draftCv);
+    const tailorFit: TailorFit = fit.fits ? { fits: true, step: fit.step + 1, steps: FLOOR_STEP + 1 } : fit;
     const messages: LlmMessage[] = [
       { role: "system", content: TAILOR_SYSTEM_PROMPT },
       {
@@ -166,6 +170,7 @@ export async function tailorCv(llm: LlmClient, input: TailorInput): Promise<{ ch
           rejections: input.rejections,
           userEvidence: input.userEvidence,
           confirmedGaps: input.confirmedGaps,
+          fit: tailorFit,
         }),
       },
     ];

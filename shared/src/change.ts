@@ -19,7 +19,8 @@ const changeCommon = {
 };
 
 /*
- * v1 operations: replace, add, reorder. No `remove` (see ADR-0003).
+ * Operations: replace, add, reorder, and `remove`, which only Condensing proposes, to fit one page (see ADR-0003).
+ * A `remove` drops a bullet of the original CV; it carries no text, so its `evidenceIds` and `requirementIds` are empty.
  * `replace` only rewrites the text of a text Item (bullet, skill, summary, additional-section
  * item); company, title, dates and degrees are never targets. Claim validation (step 8) rejects a
  * `replace` whose target is not a text Item, and an `add` / `replace` with no Evidence. The schema
@@ -32,6 +33,12 @@ export const ChangeSchema = z.discriminatedUnion("op", [
     targetItemId: ItemIdSchema,
     before: z.string(),
     after: z.string(),
+  }),
+  z.object({
+    ...changeCommon,
+    op: z.literal("remove"),
+    targetItemId: ItemIdSchema,
+    before: z.string(),
   }),
   z.object({
     ...changeCommon,
@@ -61,3 +68,13 @@ export const ReviewDecisionSchema = z.object({
   orderedItemIds: z.array(ItemIdSchema).optional(),
 });
 export type ReviewDecision = z.infer<typeof ReviewDecisionSchema>;
+
+/**
+ * The body of a Review: a decision per Change, and the bullets of the original CV the user drops on top of them. `drops`
+ * defaults to none, so a client that predates drops still works. Whether each drop is allowed is checked by the service.
+ */
+export const ReviewSubmissionSchema = z.object({
+  decisions: z.array(ReviewDecisionSchema),
+  drops: z.array(ItemIdSchema).default([]),
+});
+export type ReviewSubmission = z.infer<typeof ReviewSubmissionSchema>;

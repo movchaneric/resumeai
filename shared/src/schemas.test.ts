@@ -8,11 +8,14 @@ import {
   ExtractedJobProfileSchema,
   ItemIdSchema,
   ReviewDecisionSchema,
+  ReviewFitSchema,
+  ReviewSubmissionSchema,
   PartialDateSchema,
   RequirementIdSchema,
   ExitReasonSchema,
   RunIdSchema,
   RunViewSchema,
+  StepKeySchema,
   normalizeDateRange,
   type ItemId,
   type RequirementId,
@@ -165,9 +168,43 @@ describe("change", () => {
     expect(parsed.status).toBe("revised");
     expect(parsed.op === "replace" && parsed.after).toBe("user text");
   });
-  it("rejects remove, and the dropped `origin` field is not required", () => {
-    expect(ChangeSchema.safeParse({ ...common, op: "remove", targetItemId: "exp-1-b1" }).success).toBe(false);
+  it("accepts a remove with a target and its original text, and needs both", () => {
+    const remove = { ...common, evidenceIds: [], requirementIds: [], op: "remove", targetItemId: "exp-1-b1", before: "a" };
+    const parsed = ChangeSchema.parse(remove);
+    expect(parsed.op === "remove" && parsed.before).toBe("a");
+    expect(ChangeSchema.safeParse({ ...remove, before: undefined }).success).toBe(false);
+    expect(ChangeSchema.safeParse({ ...remove, targetItemId: undefined }).success).toBe(false);
+    expect(ChangeSchema.safeParse({ ...remove, targetItemId: "" }).success).toBe(false);
+  });
+  it("the dropped `origin` field is not required", () => {
     expect(ChangeSchema.safeParse({ ...common, op: "add", parentId: "exp-1", after: "b" }).success).toBe(true);
+  });
+});
+
+describe("review fit", () => {
+  it("is a fit with a step, or an overflow in lines, each with fittable", () => {
+    expect(ReviewFitSchema.safeParse({ fits: true, step: 0, fittable: true }).success).toBe(true);
+    expect(ReviewFitSchema.safeParse({ fits: false, overByLines: 3, fittable: false }).success).toBe(true);
+  });
+  it("rejects a fit with no step, an overflow with no lines or none over, and a missing fittable", () => {
+    expect(ReviewFitSchema.safeParse({ fits: true, fittable: true }).success).toBe(false);
+    expect(ReviewFitSchema.safeParse({ fits: false, fittable: true }).success).toBe(false);
+    expect(ReviewFitSchema.safeParse({ fits: false, overByLines: 0, fittable: true }).success).toBe(false);
+    expect(ReviewFitSchema.safeParse({ fits: true, step: 1 }).success).toBe(false);
+  });
+});
+
+describe("review submission", () => {
+  it("defaults drops to none, so a body without them still parses", () => {
+    expect(ReviewSubmissionSchema.parse({ decisions: [{ changeId: "c1", decision: "accept" }] }).drops).toEqual([]);
+  });
+  it("takes Item IDs as drops", () => {
+    expect(ReviewSubmissionSchema.parse({ decisions: [], drops: ["exp1.b2"] }).drops).toEqual(["exp1.b2"]);
+  });
+  it("rejects drops that are not a list of non-empty IDs, and a missing decisions list", () => {
+    expect(ReviewSubmissionSchema.safeParse({ decisions: [], drops: "exp1.b2" }).success).toBe(false);
+    expect(ReviewSubmissionSchema.safeParse({ decisions: [], drops: [""] }).success).toBe(false);
+    expect(ReviewSubmissionSchema.safeParse({ drops: [] }).success).toBe(false);
   });
 });
 
@@ -255,12 +292,27 @@ describe("run view", () => {
     const questions = [{ id: "q-1", requirementId: "req-3", text: "Have you used Kubernetes?" }];
     expect(RunViewSchema.safeParse({ ...base, status: "awaiting_answers", questions }).success).toBe(true);
   });
+  it("lists the `fit` step between `tailor` and `review`", () => {
+    const keys = StepKeySchema.options;
+    expect(keys.indexOf("fit")).toBe(keys.indexOf("tailor") + 1);
+    expect(keys.indexOf("review")).toBe(keys.indexOf("fit") + 1);
+    const tailoring = { ...base, status: "tailoring", steps: [{ key: "fit", state: "running" }], iterations: { used: 1, max: 3 }, score: { before: 48, after: null } };
+    expect(RunViewSchema.safeParse(tailoring).success).toBe(true);
+  });
+
   it("parses tailoring with a score that has no `after` yet", () => {
     const tailoring = { ...base, status: "tailoring", iterations: { used: 1, max: 3 }, score: { before: 48, after: null } };
     expect(RunViewSchema.safeParse(tailoring).success).toBe(true);
   });
-  it("parses awaiting_review with the coverage list and user evidence", () => {
-    expect(RunViewSchema.safeParse({ ...base, status: "awaiting_review", ...review }).success).toBe(true);
+  it("parses awaiting_review with the coverage list, user evidence and the fit", () => {
+    expect(RunViewSchema.safeParse({ ...base, status: "awaiting_review", ...review, fit: { fits: true, step: 2, fittable: true } }).success).toBe(true);
+    expect(RunViewSchema.safeParse({ ...base, status: "awaiting_review", ...review, fit: { fits: false, overByLines: 4, fittable: false } }).success).toBe(true);
+  });
+  it("requires the fit in awaiting_review, and leaves it out of completed", () => {
+    expect(RunViewSchema.safeParse({ ...base, status: "awaiting_review", ...review }).success).toBe(false);
+    const completed = { ...base, status: "completed", ...review, download: { docx: "/runs/x/cv.docx", pdf: "/runs/x/cv.pdf" } };
+    expect(RunViewSchema.parse(completed)).not.toHaveProperty("fit");
+    expect(RunViewSchema.parse({ ...completed, fit: { fits: true, step: 0, fittable: true } })).not.toHaveProperty("fit");
   });
   it("parses completed with download links", () => {
     const completed = { ...base, status: "completed", ...review, download: { docx: "/runs/x/cv.docx", pdf: "/runs/x/cv.pdf" } };

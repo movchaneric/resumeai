@@ -6,7 +6,7 @@ import { CvSchema } from "./cv.js";
 import { QuestionSchema, UserEvidenceSchema } from "./evidence.js";
 import { ImportanceSchema } from "./job-profile.js";
 
-export const StepKeySchema = z.enum(["parse", "extract", "coverage", "questions", "tailor", "review", "export"]);
+export const StepKeySchema = z.enum(["parse", "extract", "coverage", "questions", "tailor", "fit", "review", "export"]);
 export const StepStateSchema = z.enum(["pending", "running", "done", "failed"]);
 export type StepState = z.infer<typeof StepStateSchema>;
 
@@ -49,6 +49,18 @@ export const RequirementCoverageSummarySchema = z.object({
 });
 export type RequirementCoverageSummary = z.infer<typeof RequirementCoverageSummarySchema>;
 
+/**
+ * Does the CV fit one A4 page, and could it? On a fit: the size step it fits at, counted from 0 (0 is the normal size, 6 the
+ * smallest); the tailor prompt's "step N of 7" line counts from 1. Over: how many lines it is over at the
+ * smallest size (about 14 points each). `fittable` says whether the shortest CV the user could submit fits: when it does
+ * not, a Review that runs over is still accepted.
+ */
+export const ReviewFitSchema = z.discriminatedUnion("fits", [
+  z.object({ fits: z.literal(true), step: z.number().int().min(0), fittable: z.boolean() }),
+  z.object({ fits: z.literal(false), overByLines: z.number().int().min(1), fittable: z.boolean() }),
+]);
+export type ReviewFit = z.infer<typeof ReviewFitSchema>;
+
 /** Data shared by `awaiting_review` and `completed`. */
 const reviewSummaryFields = {
   score: beforeAfter(ScoreSchema),
@@ -70,7 +82,8 @@ export const RunViewSchema = z.discriminatedUnion("status", [
     iterations: IterationsSchema,
     score: z.object({ before: ScoreSchema, after: ScoreSchema.nullable() }),
   }),
-  z.object({ ...runViewCommon, status: z.literal("awaiting_review"), ...reviewSummaryFields }),
+  /** `fit` is the CV as shown (every Change accepted, no drops); it is computed on read, never stored. */
+  z.object({ ...runViewCommon, status: z.literal("awaiting_review"), ...reviewSummaryFields, fit: ReviewFitSchema }),
   z.object({
     ...runViewCommon,
     status: z.literal("completed"),

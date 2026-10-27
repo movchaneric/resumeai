@@ -193,6 +193,7 @@ describe("RunsService", () => {
         "coverage:done",
         "questions:done",
         "tailor:done",
+        "fit:done",
         "review:running",
       ]);
     });
@@ -910,7 +911,7 @@ describe("RunsService.submitAnswers", () => {
   ];
   const snapshot = {
     jobProfile: null, cv: null, coverageBefore: null, coverage: null, changes: [], scoreBefore: null, scoreAfter: null,
-    position: "answers", rejections: [], questions, userEvidence: [], confirmedGaps: [], rounds: 0, exitReason: null,
+    position: "answers", rejections: [], questions, userEvidence: [], confirmedGaps: [], rounds: 0, exitReason: null, fit: "pending",
   } as unknown as RunSnapshot;
 
   /** A store (extended with the atomic claim) holding a Run in `status`, and a runner whose `answer` is a spy. */

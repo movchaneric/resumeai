@@ -36,6 +36,11 @@ export class RunsController {
     res.status(202).json({ id: req.params.id });
   };
 
+  /** `200`: the fit of the Review as it would be submitted. Nothing is claimed or resumed. */
+  previewReview = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+    res.json(await this.service.previewReview(req.params.id, req.body));
+  };
+
   /** `204`: the Run and everything stored for it are gone. */
   remove = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
     await this.service.deleteRun(req.params.id);

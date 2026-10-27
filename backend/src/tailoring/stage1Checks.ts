@@ -1,5 +1,6 @@
-import type { Change, Cv, UserEvidence } from "@resume-ai/shared";
-import { LIST_IDS, SECTION_ID_PATTERN, allIds, childLists, itemTexts, textItems, textParentIds } from "@/tailoring/cvItems.js";
+import type { Change, Coverage, Cv, UserEvidence } from "@resume-ai/shared";
+import { LIST_IDS, SECTION_ID_PATTERN, allIds, bulletParents, childLists, itemTexts, originalBulletIds, textItems, textParentIds } from "@/tailoring/cvItems.js";
+import { citedByCoverage } from "@/tailoring/removable.js";
 import { collectItemIds } from "@/scoring/coverageRules.js";
 
 /** The fixed reason recorded for each rejection. The tailor reads them on the next round. */
@@ -16,10 +17,21 @@ export const STAGE1_REASONS = {
   notPermutation: "The reorder must list exactly the Items currently under the parent, each once.",
   numberDropped: "A number or date in the original text is missing from the new text; numbers and dates must stay as written.",
   itemTag: "The new text contains an Item ID tag like \"[summary]\"; write only the CV text, without IDs.",
+  notRemovable: "Only a bullet of the original CV that no met or partially met Requirement cites as Evidence can be removed.",
+  noCoverage: "A remove cannot be checked without the Coverage verdicts.",
+  lastBullet: "A job, project or education entry keeps at least one bullet; this is its last.",
+  notShorter: "A condensing rewording must have fewer characters than the Item's current text.",
+  pastOnePage: "The Change would push the CV past one page.",
   numberAdded: "The new text contains a number or date that is in neither the original text nor the cited Evidence.",
 } as const;
 
 export type Stage1Rejection = { change: Change; reason: string };
+/** `coverage` is the verdicts a `remove` is checked against (bullets they cite as Evidence stay). Without it every `remove` is rejected, so a caller that forgets it cannot drop cited bullets. */
+export type Stage1Options = {
+  coverage?: Coverage[];
+  /** Condensing: a `replace` whose text is not shorter (in characters) than the Item's text in the draft is rejected. */
+  shorter?: boolean;
+};
 export type Stage1Result = { passed: Change[]; rejected: Stage1Rejection[] };
 
 /** A number is a run of digits with any decimal part, then an optional `%` or `+`. Dates are covered through their digits. */
@@ -42,25 +54,42 @@ function numbersIn(text: string): Set<string> {
  * `userEvidence` is what the user said in the Answers: its IDs (`ue1`) are valid Evidence, and its text counts as cited Evidence for the numbers.
  * Returns the Changes that pass and the rejected ones with a fixed reason; rejected Changes go no further.
  */
-export function stage1Checks(original: Cv, draft: Cv, changes: Change[], userEvidence: UserEvidence[] = []): Stage1Result {
+export function stage1Checks(original: Cv, draft: Cv, changes: Change[], userEvidence: UserEvidence[] = [], options: Stage1Options = {}): Stage1Result {
   const passed: Change[] = [];
   const rejected: Stage1Rejection[] = [];
+  const cited = citedByCoverage(options.coverage ?? []);
+  const hasCoverage = options.coverage !== undefined;
+  // The removes that passed in this batch: they are checked one by one, so a batch cannot empty a parent.
+  const removed = new Set<string>();
   for (const change of changes) {
-    const reason = firstProblem(original, draft, change, userEvidence);
-    if (reason === null) passed.push(change);
-    else rejected.push({ change, reason });
+    const reason = change.op === "remove" ? (hasCoverage ? removeProblem(original, draft, change.targetItemId, cited, removed) : STAGE1_REASONS.noCoverage) : firstProblem(original, draft, change, userEvidence, options.shorter === true);
+    if (reason === null) {
+      passed.push(change);
+      if (change.op === "remove") removed.add(change.targetItemId);
+    } else rejected.push({ change, reason });
   }
   return { passed, rejected };
 }
 
-function firstProblem(original: Cv, draft: Cv, change: Change, userEvidence: UserEvidence[]): string | null {
+function firstProblem(original: Cv, draft: Cv, change: Change, userEvidence: UserEvidence[], shorter: boolean): string | null {
   const structure = structureProblem(draft, change);
   if (structure !== null) return structure;
   const evidence = evidenceProblem(original, draft, change, userEvidence);
   if (evidence !== null) return evidence;
-  if (change.op === "reorder") return null;
+  if (change.op === "reorder" || change.op === "remove") return null;
+  if (shorter && change.op === "replace" && change.after.length >= (textItems(draft).get(change.targetItemId)?.text.length ?? 0)) return STAGE1_REASONS.notShorter;
   if (ITEM_TAG.test(change.after)) return STAGE1_REASONS.itemTag;
   return numberProblem(original, change.op === "replace" ? change.before : "", change.after, change.evidenceIds, userEvidence);
+}
+
+/** A remove is checked by structure and by the removable rule only: it has no text, so no Evidence, tag or number checks. */
+function removeProblem(original: Cv, draft: Cv, targetId: string, cited: Set<string>, removed: Set<string>): string | null {
+  const parent = bulletParents(draft).find((p) => p.bullets.some((b) => b.id === targetId));
+  if (parent === undefined || removed.has(targetId)) return allIds(draft).has(targetId) ? STAGE1_REASONS.notRemovable : STAGE1_REASONS.unknownTarget;
+  const originalBullets = originalBulletIds(original);
+  if (!originalBullets.has(targetId) || cited.has(targetId)) return STAGE1_REASONS.notRemovable;
+  const left = parent.bullets.filter((b) => originalBullets.has(b.id) && !removed.has(b.id)).length;
+  return left <= 1 ? STAGE1_REASONS.lastBullet : null;
 }
 
 function structureProblem(draft: Cv, change: Change): string | null {
@@ -77,6 +106,7 @@ function structureProblem(draft: Cv, change: Change): string | null {
       ? STAGE1_REASONS.parentNotText
       : STAGE1_REASONS.unknownParent;
   }
+  if (change.op === "remove") return null;
   const list = childLists(draft).get(change.parentId);
   if (list === undefined) return STAGE1_REASONS.unknownParent;
   const current = list.map((item) => item.id).sort();

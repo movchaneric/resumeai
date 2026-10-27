@@ -24,10 +24,10 @@ backend/src/
   parsing/       CV file parsing (file to text, no model)
   extraction/    Extraction chains, ID assignment, verbatim check. Imports `LlmClient` and `@/utils/spans.js`, never LangChain.
   scoring/       Coverage chain, Match Score, weights, exit router (`exitRouter.ts`). Imports `LlmClient` and `@/utils/spans.js`, never LangChain.
-  tailoring/     Tailor chain, claim-check chain, stage-1 checks, `applyChanges`. Imports `LlmClient` and `@/utils/spans.js`, never LangChain or LangGraph.
+  tailoring/     Tailor chain, claim-check chain, stage-1 checks, `applyChanges`, the removable-bullet rule and Condensing. Imports `LlmClient`, `@/utils/spans.js` and `fitOf` from `export/`, never LangChain or LangGraph.
   prompts/       pure renderers that turn the CV and Requirements into prompt text with IDs. Imports only shared types (`@resume-ai/shared`).
   graph/         the LangGraph Run graph, its thin nodes, the graph runner and the Postgres checkpointer. The only importer of LangGraph (`@langchain/langgraph*`); nodes call `extraction/`, `scoring/` and `tailoring/`, and the service sees the runner only through the `GraphRunner` interface it defines.
-  export/        the Tailored CV as a file, built in memory: layout (CV to page blocks), the size table, the PDF renderer (PDFKit), the DOCX renderer (docx) and `measureFit` (shrink to one page). No model, no DB, no Express. Imports only shared types, `pdfkit`, `docx` and node built-ins. The service calls it for downloads.
+  export/        the Tailored CV as a file, built in memory: layout (CV to page blocks), the size table, the PDF renderer (PDFKit), the DOCX renderer (docx) and `measureFit` (shrink to one page) and `fitOf` (fits, or lines over). No model, no DB, no Express. Imports only shared types, `pdfkit`, `docx` and node built-ins. The service calls it for downloads; `tailoring/` calls `fitOf` to keep the Tailored CV on one page.
   llm/           the `LlmClient` interface and its LangChain implementation. Only `llm/` imports LangChain models (one exception below).
   utils/         config, db client, errors, tracing (`tracing.ts`), named spans (`spans.ts`), the in-process Run event bus (`runEvents.ts`), server shutdown (`shutdown.ts`), the open-stream registry it uses (`openStreams.ts`) and the TTL sweep timer (`sweepScheduler.ts`)
 backend/test/    mirrors src (routes/, export/, services/, graph/, parsing/, prompts/, scoring/, tailoring/, utils/); fixtures live in test/fixtures

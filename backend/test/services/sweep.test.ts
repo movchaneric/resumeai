@@ -114,7 +114,7 @@ describe("SweepService.sweep with Postgres", () => {
       answer: (runId, answers) => graphRunner.answer(runId, answers),
       review: async (runId, decisions) => {
         await gate;
-        return graphRunner.review(runId, decisions);
+        return graphRunner.review(runId, decisions, []);
       },
       recover: (runId) => graphRunner.recover(runId),
       read: (runId) => graphRunner.read(runId),

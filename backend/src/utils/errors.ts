@@ -27,16 +27,23 @@ const STATUS: Record<ApiErrorCode, number> = {
   NOT_FOUND: 404,
 };
 
+/** Beyond the code and the message: fields added to the response body, and a status that replaces the code's usual one. */
+export type ApiErrorExtra = { details?: Record<string, unknown>; status?: number };
+
 /** A request that is rejected at the door. No Run is created for it. */
 export class ApiError extends Error {
   readonly status: number;
+  /** Extra fields for the response body (for example `overByLines`), next to `code` and `message`. */
+  readonly details: Record<string, unknown>;
 
   constructor(
     readonly code: ApiErrorCode,
     message: string,
+    extra: ApiErrorExtra = {},
   ) {
     super(message);
     this.name = "ApiError";
-    this.status = STATUS[code];
+    this.status = extra.status ?? STATUS[code];
+    this.details = extra.details ?? {};
   }
 }

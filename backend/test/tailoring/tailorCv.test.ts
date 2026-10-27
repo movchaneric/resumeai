@@ -5,11 +5,13 @@ import { CoverageSchema, RequirementSchema } from "@resume-ai/shared";
 import type { Coverage, Cv, Requirement } from "@resume-ai/shared";
 import { assignCvIds } from "@/extraction/assignIds.js";
 import { LlmSchemaError, LlmUnavailableError } from "@/llm/llmClient.js";
+import { FLOOR_STEP, fitOf } from "@/export/index.js";
 import { renderTailorInput } from "@/prompts/renderTailor.js";
 import { TAILOR_SYSTEM_PROMPT, tailorCv } from "@/tailoring/tailorCv.js";
 import { TailorError } from "@/tailoring/tailorErrors.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
 import { fullCv } from "../extraction/cvFixture.js";
+import { longCv } from "../export/exportCv.js";
 
 const original = (): Cv => assignCvIds(fullCv());
 const req = (id: string): Requirement =>
@@ -100,13 +102,37 @@ describe("tailorCv", () => {
     const llm = new FakeLlmClient().enqueue("tailor", answer());
     const rejections: [] = [];
     await tailorCv(llm, input({ rejections }));
+    const fit = await fitOf(original());
+    if (!fit.fits) throw new Error("fixture should fit");
 
     const [system, user] = llm.calls[0]!.messages;
     expect(system).toEqual({ role: "system", content: TAILOR_SYSTEM_PROMPT });
     expect(user).toEqual({
       role: "user",
-      content: renderTailorInput({ cv: original(), requirements, coverage, rejections }),
+      content: renderTailorInput({ cv: original(), requirements, coverage, rejections, fit: { fits: true, step: fit.step + 1, steps: FLOOR_STEP + 1 } }),
     });
+  });
+
+  it("gives the model the draft's measured fit, as a size step of the table's length", async () => {
+    const llm = new FakeLlmClient().enqueue("tailor", answer());
+    await tailorCv(llm, input());
+    const fit = await fitOf(original());
+    if (!fit.fits) throw new Error("fixture should fit");
+    expect(llm.calls[0]!.messages[1]!.content).toContain(`The draft fits one page at size step ${fit.step + 1} of ${FLOOR_STEP + 1}.`);
+  });
+
+  it("tells the model how many lines over a too-long draft already is", async () => {
+    const draft = longCv(4, 6);
+    const fit = await fitOf(draft);
+    if (fit.fits) throw new Error("fixture should be too long");
+    const llm = new FakeLlmClient().enqueue("tailor", answer());
+    await tailorCv(llm, input({ draftCv: draft }));
+    expect(llm.calls[0]!.messages[1]!.content).toContain(`The draft is already over one page by ${fit.overByLines} lines at the smallest size.`);
+  });
+
+  it("asks in the system prompt for a one-page result with replace preferred over add", () => {
+    expect(TAILOR_SYSTEM_PROMPT).toContain("must fit one page");
+    expect(TAILOR_SYSTEM_PROMPT).toContain("Prefer \"replace\"");
   });
 
   it("states the strict rule in the system prompt", () => {

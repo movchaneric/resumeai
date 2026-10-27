@@ -130,3 +130,31 @@ describe("applyChanges", () => {
     expect(() => applyChanges(testCv(), [change({ op: "add", parentId: "experience", after: "x" })])).toThrow();
   });
 });
+
+describe("applyChanges remove", () => {
+  const remove = (targetItemId: string) => change({ op: "remove", targetItemId, before: "x", evidenceIds: [], requirementIds: [] });
+
+  it("drops the target bullet and leaves its siblings", () => {
+    const draft = applyChanges(testCv(), [remove("exp1.b1")]);
+    expect(draft.experience[0]!.bullets).toEqual([{ id: "exp1.b2", text: "Cut build time by 40% for 3 services" }]);
+  });
+
+  it("does not shift the IDs of Items that adds create", () => {
+    const add = change({ op: "add", parentId: "exp1", after: "New bullet", evidenceIds: ["exp1.b1"] });
+    const withoutRemove = applyChanges(testCv(), [add]);
+    const withRemove = applyChanges(testCv(), [remove("exp1.b2"), add]);
+    expect(withoutRemove.experience[0]!.bullets.map((b) => b.id)).toEqual(["exp1.b1", "exp1.b2", "exp1.b3"]);
+    // exp1.b2 is gone, yet the added bullet is still exp1.b3 (not exp1.b2)
+    expect(withRemove.experience[0]!.bullets.map((b) => b.id)).toEqual(["exp1.b1", "exp1.b3"]);
+  });
+
+  it("applies a remove after a reorder that lists the removed bullet", () => {
+    const reorder = change({ op: "reorder", parentId: "exp1", orderedItemIds: ["exp1.b2", "exp1.b1"] });
+    const draft = applyChanges(testCv(), [remove("exp1.b2"), reorder]);
+    expect(draft.experience[0]!.bullets.map((b) => b.id)).toEqual(["exp1.b1"]);
+  });
+
+  it("throws when the target is not a bullet", () => {
+    expect(() => applyChanges(testCv(), [remove("skill1")])).toThrow(/not a bullet/);
+  });
+});

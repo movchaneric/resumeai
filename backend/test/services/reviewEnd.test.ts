@@ -86,7 +86,7 @@ describe("Review as an interrupt", () => {
     await process.service.openRunStream(id, { send: (view) => views.push(view), close: () => (closed = true) });
     expect(closed).toBe(false);
 
-    const snapshot = await process.runner.review(id, []);
+    const snapshot = await process.runner.review(id, [], []);
 
     expect(snapshot.position).toBe("ended");
     expect(await statusOf(id)).toBe("completed");
@@ -104,7 +104,7 @@ describe("recovery of a Run whose graph has ended (P6)", () => {
     const checkpointer = createMemoryCheckpointer();
     const before = boot(checkpointer);
     const id = await reachReview(before);
-    await before.runner.review(id, []);
+    await before.runner.review(id, [], []);
     // The crash fell between the last checkpoint and the status write.
     await store.setStatus(id, "tailoring");
 

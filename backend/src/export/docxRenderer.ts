@@ -16,14 +16,13 @@ import { fontPath } from "@/export/fonts.js";
 import type { FontName } from "@/export/fonts.js";
 import type { Block } from "@/export/layout.js";
 import type { Sizes } from "@/export/sizes.js";
+import { GRAY_BAR_HEX, TEXT_HEX } from "@/export/style.js";
 
 /*
  * The same blocks as the PDF, as Word paragraphs. Units: font sizes are half-points (rounded down), spacing, indents,
  * margins and tab positions are twips (1/20 point, rounded to nearest), the page is A4 (210 x 297 mm).
  */
 
-const GRAY_BAR = "e4e4e7";
-const TEXT = "111111";
 const A4_WIDTH_TWIPS = 11906;
 const A4_HEIGHT_TWIPS = 16838;
 /** Run font names. They are the families the fonts are embedded under. */
@@ -91,7 +90,7 @@ export async function renderDocx(blocks: Block[], sizes: Sizes): Promise<Buffer>
       italics: style.italic,
       font: style.font ?? BODY_FONT,
       size: style.size ?? bodySize,
-      color: TEXT,
+      color: TEXT_HEX,
       characterSpacing: style.spacing,
     });
 
@@ -120,9 +119,9 @@ export async function renderDocx(blocks: Block[], sizes: Sizes): Promise<Buffer>
           keepNext: true,
           spacing: spacing(sizes.sectionGap, sizes.headingGap),
           // Square, full-width light-gray bar: paragraph shading spans the text area.
-          shading: { type: ShadingType.CLEAR, color: "auto", fill: GRAY_BAR },
+          shading: { type: ShadingType.CLEAR, color: "auto", fill: GRAY_BAR_HEX },
           indent: { left: 0 },
-          children: [text(block.text, { italic: true, font: HEADING_FONT, size: halfPoints(sizes.heading), spacing: 8 })],
+          children: [text(block.text, { italic: true, font: HEADING_FONT, size: halfPoints(sizes.heading), spacing: twips(sizes.headingSpacing) })],
         });
       case "entry":
         return new Paragraph({
@@ -151,7 +150,7 @@ export async function renderDocx(blocks: Block[], sizes: Sizes): Promise<Buffer>
   const doc = new Document({
     title: "CV",
     fonts: embeddedFonts(),
-    styles: { default: { document: { run: { font: BODY_FONT, size: bodySize, color: TEXT } } } },
+    styles: { default: { document: { run: { font: BODY_FONT, size: bodySize, color: TEXT_HEX } } } },
     numbering: {
       config: [
         {
@@ -164,7 +163,7 @@ export async function renderDocx(blocks: Block[], sizes: Sizes): Promise<Buffer>
               alignment: AlignmentType.LEFT,
               style: {
                 paragraph: { indent: { left: indent, hanging: indent } },
-                run: { font: BODY_FONT, size: bodySize, color: TEXT },
+                run: { font: BODY_FONT, size: bodySize, color: TEXT_HEX },
               },
             },
           ],

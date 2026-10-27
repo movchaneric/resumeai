@@ -3,6 +3,7 @@ import { fontPath } from "@/export/fonts.js";
 import type { FontName } from "@/export/fonts.js";
 import type { Block, TextSpan } from "@/export/layout.js";
 import type { Sizes } from "@/export/sizes.js";
+import { GRAY_BAR_HEX, TEXT_HEX } from "@/export/style.js";
 
 /** What a render produced. `overflow` is 0 for a one-page result, else how far the content runs past the first page (points). */
 export interface PdfRender {
@@ -11,10 +12,8 @@ export interface PdfRender {
   overflow: number;
 }
 
-const GRAY_BAR = "#e4e4e7";
-const TEXT = "#111111";
-const BAR_PADDING = 2.5;
-const RIGHT_GAP = 8;
+const GRAY_BAR = `#${GRAY_BAR_HEX}`;
+const TEXT = `#${TEXT_HEX}`;
 
 /** Draw `blocks` on A4 pages in memory. Never touches the disk. */
 export function renderPdf(blocks: Block[], sizes: Sizes): Promise<PdfRender> {
@@ -59,7 +58,7 @@ export function renderPdf(blocks: Block[], sizes: Sizes): Promise<PdfRender> {
     let rightWidth = 0;
     if (right !== null) {
       doc.font("bodyItalic");
-      rightWidth = doc.widthOfString(right) + RIGHT_GAP;
+      rightWidth = doc.widthOfString(right) + sizes.rightGap;
     }
     spans.forEach((span, i) => {
       doc.font(bodyFont(span));
@@ -97,11 +96,15 @@ export function renderPdf(blocks: Block[], sizes: Sizes): Promise<PdfRender> {
         return;
       }
       case "heading": {
-        const height = sizes.heading * 1.25 + 2 * BAR_PADDING;
+        const height = sizes.heading * 1.25 + 2 * sizes.barPadding;
         const y = startY(sizes.sectionGap, height);
-        doc.roundedRect(left, y, width, height, 3).fill(GRAY_BAR);
+        doc.roundedRect(left, y, width, height, sizes.barRadius).fill(GRAY_BAR);
         doc.fillColor(TEXT).font("headingItalic").fontSize(sizes.heading);
-        doc.text(block.text, left + 6, y + BAR_PADDING, { width: width - 12, lineBreak: false, characterSpacing: 0.4 });
+        doc.text(block.text, left + sizes.headingInset, y + sizes.barPadding, {
+          width: width - 2 * sizes.headingInset,
+          lineBreak: false,
+          characterSpacing: sizes.headingSpacing,
+        });
         doc.y = y + height + sizes.headingGap;
         return;
       }

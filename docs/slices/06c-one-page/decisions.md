@@ -76,6 +76,11 @@ Settled in a grilling session (2026-10-27), building on the outline agreed in 6b
   - `fittable` is computed from the Changes as proposed, not from the user's revised text.
   - **A too-long submit** gets 400 `CV_TOO_LONG` with `overByLines` in the body (`ApiError` gained an optional `details`). It's checked before the claim, so the Run stays `awaiting_review`.
   - **`final_rejudge`:** a user drop is a revised `remove`, so the "cites a dropped bullet" set is covered by the "cites an Item an undone Change touched" set. As a result, revising one bullet now re-judges every Requirement citing it.
+- **Accepted in review (`review.md`):**
+  - **One error code, two statuses:** `CV_TOO_LONG` is a 400 on a Review submit and a 409 on a download, through `ApiError`'s status override, so the frontend handles one code.
+  - **The page check on `add`s can come up short:** it can reject every `add` and the draft still doesn't fit, when the round's `replace`s lengthened it. Condensing catches it after tailoring.
+  - **The reword step leaves out tailor-added bullets,** since there's no Evidence to claim-check them against. The user can reject the `add`.
+  - **The minimal CV keeps `reorder`s,** which don't change length.
 - **The `fit` step in the view (#57):** `pending` until condensing starts, `running` while it runs (the status is `tailoring`), and `done` once condensing has finished or wasn't needed. An Interrupted Run cut off during condensing shows it `failed`.
 
 ## Tickets

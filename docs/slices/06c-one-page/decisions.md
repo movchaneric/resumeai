@@ -67,6 +67,15 @@ Settled in a grilling session (2026-10-27), building on the outline agreed in 6b
   - A failed re-judge after condensing **keeps** the earlier verdicts rather than reverting them, because the claim check already vouched for each rewording.
   - A failure measuring the CV skips condensing.
   - Condense rejections aren't stored in `rejections`, because the tailor never runs again.
+- **Review fit (#58):**
+  - **The body** is `ReviewSubmissionSchema`, `{ decisions, drops }`, with `drops` defaulting to `[]` so older clients still work.
+  - **User drops** become `remove` Changes with IDs `ud.c1`, `ud.c2`, … (status `revised`, rationale "Dropped by you in Review."). They're appended after the model's Changes, so no other ID moves.
+  - **Drop rules** (400 `INVALID_REVIEW`, naming the Item): only an original bullet, no duplicates, not a bullet whose condense `remove` is accepted, and not a bullet with a `replace` unless that `replace` is rejected (one kept Change per Item). The last-bullet rule is checked exactly on the CV the submission produces: every entry that had bullets keeps one.
+  - **The fit shape** is `ReviewFitSchema` (`fits`, `step` or `overByLines`, `fittable`), shared by the preview and the `awaiting_review` view.
+  - **The minimal CV** (for `fittable`): every `add` rejected, every `remove` accepted, a `replace` kept only when it's shorter than the original, then each job, project and education entry cut to its shortest bullet. It's measured only when the CV is over, so a view read or preview costs one `fitOf`, or two when over.
+  - `fittable` is computed from the Changes as proposed, not from the user's revised text.
+  - **A too-long submit** gets 400 `CV_TOO_LONG` with `overByLines` in the body (`ApiError` gained an optional `details`). It's checked before the claim, so the Run stays `awaiting_review`.
+  - **`final_rejudge`:** a user drop is a revised `remove`, so the "cites a dropped bullet" set is covered by the "cites an Item an undone Change touched" set. As a result, revising one bullet now re-judges every Requirement citing it.
 - **The `fit` step in the view (#57):** `pending` until condensing starts, `running` while it runs (the status is `tailoring`), and `done` once condensing has finished or wasn't needed. An Interrupted Run cut off during condensing shows it `failed`.
 
 ## Tickets

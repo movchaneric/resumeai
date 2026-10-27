@@ -45,7 +45,7 @@ A point where a Run waits for the user: for Answers to its Questions, or for rev
 _Avoid_: Interrupt, wait, hold
 
 **Review**:
-The Pause where the user decides on every Change at once: accept, reject, or revise it. A Run has one Review, and it is final: the Tailored CV is built from the accepted and revised Changes, and the Match Score is brought up to date for it.
+The Pause where the user decides on every Change at once: accept, reject, or revise it. A Run has one Review, and it is final: the Tailored CV is built from the accepted and revised Changes, and the Match Score is brought up to date for it. The user may also drop bullets in the Review (never a job's last), and the result must fit one page unless no choice of decisions could make it fit; a preview shows the fit before submitting.
 _Avoid_: Approval, sign-off, edit (edit means a user's revision of one Change)
 
 **Interrupted Run**:

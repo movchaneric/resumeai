@@ -1,13 +1,13 @@
 import { Command } from "@langchain/langgraph";
 import type { Answer, ReviewDecision, RunId, RunStatus } from "@resume-ai/shared";
-import type { GraphRunner, RunEvents, RunSnapshot, StartRunInput } from "@/services/runs.js";
+import { STATUS_AT_POSITION, type GraphRunner, type RunEvents, type RunSnapshot, type StartRunInput } from "@/services/runs.js";
 import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import { withSessionSpan } from "@/utils/spans.js";
 import type { LlmClient } from "@/llm/llmClient.js";
 import { NODE_STATUS, buildRunGraph, type RoundSummary, type RunGraph } from "@/graph/runGraph.js";
 import type { JobProfileCache } from "@/graph/jobProfileCache.js";
 import type { RunStateValues } from "@/graph/state.js";
-import { STATUS_AT_POSITION, positionOf, type GraphStateShape } from "@/graph/position.js";
+import { positionOf, type GraphStateShape } from "@/graph/position.js";
 
 /** The part of the runs store the graph runner needs. */
 export interface StatusWriter {

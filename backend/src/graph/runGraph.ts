@@ -13,7 +13,7 @@ import { onlyGapsLeft, routeAfterRound, shouldSkipTailoring } from "@/scoring/ex
 import { assessCoverage } from "@/scoring/assessCoverage.js";
 import { matchScore } from "@/scoring/matchScore.js";
 import { resolveJobProfile, type JobProfileCache } from "@/graph/jobProfileCache.js";
-import { STATUS_AT_POSITION } from "@/graph/position.js";
+import { STATUS_AT_POSITION } from "@/services/runs.js";
 import { RunState } from "@/graph/state.js";
 import type { RecordedRejection } from "@/tailoring/validateChanges.js";
 import { UserEvidenceIdSchema, type Answer, type Change, type Question, type RequirementId, type ReviewDecision, type UserEvidence } from "@resume-ai/shared";

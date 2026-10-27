@@ -32,7 +32,6 @@ import type { Config } from "@/utils/config.js";
 import { ApiError } from "@/utils/errors.js";
 import { withSessionSpan, type Span } from "@/utils/spans.js";
 import { parseCv, stripNul } from "@/parsing/parseCv.js";
-import { STATUS_AT_POSITION } from "@/graph/position.js";
 import type { RunStore, StoredRun } from "@/stores/runs.js";
 
 /** What the service sees of a Run's graph state: plain data typed with shared types. */
@@ -60,6 +59,16 @@ export type RunSnapshot = {
   rounds: number;
   exitReason: ExitReason | null;
 };
+
+/**
+ * The Run status for each position the graph can rest in, in one place: the runner writes it at a pause or the end,
+ * recovery restores it, and the nodes that wait use it as their `NODE_STATUS`.
+ */
+export const STATUS_AT_POSITION = {
+  answers: "awaiting_answers",
+  review: "awaiting_review",
+  ended: "completed",
+} as const satisfies Record<NonNullable<RunSnapshot["position"]>, RunStatus>;
 
 export type StartRunInput = { runId: RunId; cvText: string; jobDescriptionText: string };
 

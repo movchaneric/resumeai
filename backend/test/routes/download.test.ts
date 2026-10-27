@@ -93,9 +93,17 @@ describe("GET /runs/:id/cv.(pdf|docx)", () => {
 describe("the download links in GET /runs/:id", () => {
   it("holds both links once the Run is completed, even when the CV is too long to export", async () => {
     await complete();
+    const real = p.runner.read.bind(p.runner);
+    vi.spyOn(p.runner, "read").mockImplementation(async (runId) => {
+      const state = await real(runId);
+      return state && { ...state, cv: longCv(4, 6), changes: [] };
+    });
     const view = (await request(p.app).get(`/runs/${id}`)).body;
     expect(view.status).toBe("completed");
     expect(view.download).toEqual({ docx: `/runs/${id}/cv.docx`, pdf: `/runs/${id}/cv.pdf` });
+    const pdf = await request(p.app).get(`/runs/${id}/cv.pdf`);
+    expect(pdf.status).toBe(409);
+    expect(pdf.body.code).toBe("CV_TOO_LONG");
   });
 
   it("is absent for the other statuses", async () => {

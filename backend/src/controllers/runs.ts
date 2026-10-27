@@ -1,7 +1,8 @@
 import type { Request, Response } from "express";
 import { ApiError } from "@/utils/errors.js";
 import type { Config } from "@/utils/config.js";
-import type { ExportFormat, RunsService } from "@/services/runs.js";
+import type { ExportFormat } from "@/export/index.js";
+import type { RunsService } from "@/services/runs.js";
 import type { OpenStreams } from "@/utils/openStreams.js";
 
 const DOWNLOADS: Record<ExportFormat, { contentType: string }> = {

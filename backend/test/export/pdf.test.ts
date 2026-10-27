@@ -65,6 +65,10 @@ describe("measureFit", () => {
     expect(fit.sizes.body).toBeLessThan(10.5);
     const { buffer } = await renderPdf(layoutCv(cv), fit.sizes);
     expect((await readPdf(buffer)).pages).toBe(1);
+    // It hands back the blocks and the winning render, so the caller does not lay out and render again.
+    expect(fit.blocks).toEqual(layoutCv(cv));
+    expect(fit.pdf.pages).toBe(1);
+    expect((await readPdf(fit.pdf.buffer)).text).toEqual((await readPdf(buffer)).text);
     // It is the first step that fits.
     expect((await renderPdf(layoutCv(cv), sizesForStep(fit.step - 1))).pages).toBeGreaterThan(1);
   });

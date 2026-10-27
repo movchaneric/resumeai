@@ -21,7 +21,8 @@ import {
   type UserEvidence,
   type RunView,
 } from "@resume-ai/shared";
-import { docxSizes, layoutCv, measureFit, renderDocx, renderPdf } from "@/export/index.js";
+import { docxSizes, measureFit, renderDocx } from "@/export/index.js";
+import type { ExportFormat } from "@/export/index.js";
 import { applyChanges } from "@/tailoring/applyChanges.js";
 import { keptChanges, reviewProblem } from "@/tailoring/review.js";
 import type { RecordedRejection } from "@/tailoring/validateChanges.js";
@@ -163,8 +164,6 @@ export type RunStreamSink = { send: (view: RunView) => void; close: () => void }
 /** The longest `has_experience` text, after trimming. */
 export const MAX_ANSWER_LENGTH = 1000;
 
-export type ExportFormat = "pdf" | "docx";
-
 export type CreateRunInput = { cv: Buffer; jobDescription: unknown };
 
 /** The business rules for a Run. It knows nothing about HTTP. */
@@ -284,9 +283,7 @@ export class RunsService {
   ): Promise<void> {
     const { store, events } = this.deps;
     const notFound = () => new ApiError("RUN_NOT_FOUND", "Run not found.");
-    const parsed = RunIdSchema.safeParse(rawId);
-    const run = parsed.success ? await store.get(parsed.data) : null;
-    if (!run || run.expiresAt <= this.now()) throw notFound();
+    const run = await this.findLiveRun(rawId);
     if (run.status !== pause.status) throw new ApiError(pause.code, pause.message);
 
     const input = await prepare(run.id);
@@ -425,14 +422,20 @@ export class RunsService {
     return true;
   }
 
+  /** The Run with this ID, or the 404 `RUN_NOT_FOUND` for a malformed, unknown or expired ID. */
+  private async findLiveRun(rawId: string): Promise<StoredRun> {
+    const id = RunIdSchema.safeParse(rawId);
+    const run = id.success ? await this.deps.store.get(id.data) : null;
+    if (!run || run.expiresAt <= this.now()) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
+    return run;
+  }
+
   /**
    * A malformed, unknown or expired ID all look the same, so an ID reveals nothing about whether it ever existed.
    * Expiry is checked on read; the slice 5 sweep is only cleanup.
    */
   async getRunView(rawId: string): Promise<RunView> {
-    const id = RunIdSchema.safeParse(rawId);
-    const run = id.success ? await this.deps.store.get(id.data) : null;
-    if (!run || run.expiresAt <= this.now()) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
+    const run = await this.findLiveRun(rawId);
     // A Run with no checkpoint yet (the graph has not started) reads as null.
     return toRunView(run, await this.deps.graphRunner.read(run.id));
   }
@@ -442,18 +445,15 @@ export class RunsService {
    * Same 404 as `getRunView`; 409 `RUN_NOT_COMPLETED` for any other status; 409 `CV_TOO_LONG` when it does not fit one page at the smallest size.
    */
   async exportCv(rawId: string, format: ExportFormat): Promise<Buffer> {
-    const id = RunIdSchema.safeParse(rawId);
-    const run = id.success ? await this.deps.store.get(id.data) : null;
-    if (!run || run.expiresAt <= this.now()) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
+    const run = await this.findLiveRun(rawId);
     if (run.status !== "completed") throw new ApiError("RUN_NOT_COMPLETED", "The CV can be downloaded once the Run is completed.");
     const state = await this.deps.graphRunner.read(run.id);
     if (!state?.cv) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
     const cv = tailoredCv(run.status, state.cv, state.changes);
     const fit = await measureFit(cv);
     if (!fit.fits) throw new ApiError("CV_TOO_LONG", "The CV does not fit one page at the smallest size, so it cannot be exported yet.");
-    const blocks = layoutCv(cv);
-    if (format === "pdf") return (await renderPdf(blocks, fit.sizes)).buffer;
-    return renderDocx(blocks, docxSizes(fit.step));
+    if (format === "pdf") return fit.pdf.buffer;
+    return renderDocx(fit.blocks, docxSizes(fit.step));
   }
 
   /**

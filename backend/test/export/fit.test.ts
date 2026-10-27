@@ -31,7 +31,7 @@ describe("fitOf", () => {
 });
 
 describe("measureFit's binary search", () => {
-  const MAX_RENDERS = Math.ceil(Math.log2(FLOOR_STEP + 1)) + 1;
+  const MAX_RENDERS = 2 + Math.ceil(Math.log2(FLOOR_STEP - 1));
 
   /** The old way: render from step 0 up and stop at the first one-page render. */
   async function linearScan(cv: ReturnType<typeof fixtureCv>) {
@@ -45,7 +45,7 @@ describe("measureFit's binary search", () => {
     return { fits: false as const, overBy };
   }
 
-  it("finds every possible first fitting step, or none, in at most ceil(log2(7)) + 1 renders", async () => {
+  it("finds every possible first fitting step, or none, in 1 render at the normal size, 2 when over at the floor, and at most 5 otherwise", async () => {
     // A stand-in ruler: the CV fits from step `firstFit` on; `firstFit` 7 means it never fits.
     for (let firstFit = 0; firstFit <= FLOOR_STEP + 1; firstFit++) {
       const steps: number[] = [];
@@ -60,7 +60,9 @@ describe("measureFit's binary search", () => {
       } else {
         expect(fit).toMatchObject({ fits: true, step: firstFit });
       }
-      expect(steps.length).toBeLessThanOrEqual(MAX_RENDERS);
+      if (firstFit === 0) expect(steps).toHaveLength(1);
+      else if (firstFit > FLOOR_STEP) expect(steps).toHaveLength(2);
+      else expect(steps.length).toBeLessThanOrEqual(MAX_RENDERS);
     }
   });
 
@@ -80,7 +82,9 @@ describe("measureFit's binary search", () => {
       } else {
         expect(fit).toEqual({ fits: false, overBy: expected.overBy });
       }
-      expect(renders).toBeLessThanOrEqual(MAX_RENDERS);
+      if (expected.fits && expected.step === 0) expect(renders).toBe(1);
+      else if (!expected.fits) expect(renders).toBe(2);
+      else expect(renders).toBeLessThanOrEqual(MAX_RENDERS);
       results.push(fit.fits ? fit.step : "over");
     }
     // The fixtures cover a fit at the normal size, fits after shrinking, and a CV that is over at the floor.

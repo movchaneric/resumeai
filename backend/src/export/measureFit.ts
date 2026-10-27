@@ -18,16 +18,19 @@ export type RenderAt = (blocks: Block[], sizes: Sizes) => Promise<PdfRender>;
 
 /**
  * Lays the CV out with PDFKit and counts pages: the PDF is the ruler for the DOCX too. Fit is monotonic (a smaller step never
- * runs longer), so it renders the floor first (no fit there means no fit anywhere, and its overflow is the answer), then
- * binary-searches steps 0 to the floor for the first that fits: at most 1 + ceil(log2(FLOOR_STEP)) renders instead of FLOOR_STEP + 1.
+ * runs longer), so it probes in this order: the normal size (a fit costs 1 render, the common case), then the floor (no fit
+ * there means no fit anywhere, and its overflow is the answer: 2 renders), then a binary search of steps 1 to the step before
+ * the floor for the first that fits, with the floor render as the fallback: at most 2 + ceil(log2(FLOOR_STEP - 1)) renders.
  */
 export async function measureFit(cv: Cv, render: RenderAt = renderPdf): Promise<Fit> {
   const blocks = layoutCv(cv);
+  const atNormal = await render(blocks, sizesForStep(0));
+  if (atNormal.pages === 1) return { fits: true, step: 0, sizes: sizesForStep(0), blocks, pdf: atNormal };
   const atFloor = await render(blocks, sizesForStep(FLOOR_STEP));
   if (atFloor.pages !== 1) return { fits: false, overBy: atFloor.overflow };
 
   let best = { step: FLOOR_STEP, pdf: atFloor };
-  let low = 0;
+  let low = 1;
   let high = FLOOR_STEP;
   while (low < high) {
     const mid = Math.floor((low + high) / 2);

@@ -22,6 +22,8 @@ export type ValidateInput = {
   userEvidence?: UserEvidence[];
   /** The Coverage a `remove` is checked against: bullets it cites as Evidence cannot be removed. Without it every `remove` is rejected. */
   coverage?: Coverage[];
+  /** Condensing: a `replace` must be shorter than the Item's current text (stage 1). */
+  shorter?: boolean;
   /** Measures a CV against one page. Defaults to `fitOf`; tests pass a spy. */
   fit?: (cv: Cv) => Promise<FitResult>;
 };
@@ -35,11 +37,11 @@ export type ValidateInput = {
  */
 export async function validateChanges(
   judgeLlm: LlmClient,
-  { original, draft, changes, round, userEvidence = [], coverage, fit = fitOf }: ValidateInput,
+  { original, draft, changes, round, userEvidence = [], coverage, shorter, fit = fitOf }: ValidateInput,
 ): Promise<{ valid: Change[]; rejections: RecordedRejection[] }> {
   return withSpan("validate", async (span) => {
     span.setAttribute("round", round);
-    const { passed, rejected } = stage1Checks(original, draft, changes, userEvidence, { coverage });
+    const { passed, rejected } = stage1Checks(original, draft, changes, userEvidence, { coverage, shorter });
     const rejections: RecordedRejection[] = rejected.map((r) => ({ round, change: r.change, stage: "stage1", reason: r.reason }));
 
     const texts = itemTexts(original);

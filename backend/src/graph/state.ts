@@ -20,6 +20,18 @@ export type PendingRound = {
   failed: boolean;
 };
 
+/** Condensing in progress (a CV that is too long gets shortened before Review). Nothing here is the user's data; it steers the condense nodes. */
+export type CondenseProgress = {
+  /** How far over one page the CV is with every Change accepted, in lines, after the last step. 0 means it fits. */
+  overByLines: number;
+  /** Drop steps finished. */
+  dropPasses: number;
+  /** The Items condensing reworded or removed, for the re-judge. */
+  touched: string[];
+  /** A step threw; the remaining steps are skipped. */
+  failed: boolean;
+};
+
 /**
  * The graph state is the only store for Run data (ADR 0003). The tailoring round's working data sits in `pending` until the exit router commits it.
  */
@@ -52,6 +64,10 @@ export const RunState = Annotation.Root({
   /** Rounds in a row, up to the last one finished, that had no valid Changes. */
   consecutiveEmptyRounds: last(0),
   exitReason: last<ExitReason | null>(null),
+  /** Condensing: null until the CV is measured and found too long. */
+  condense: last<CondenseProgress | null>(null),
+  /** True once condensing is over (or was not needed), so the graph is on its way to `review`. */
+  condensed: last(false),
 });
 
 export type RunStateValues = typeof RunState.State;

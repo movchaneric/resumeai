@@ -13,6 +13,7 @@ import {
   ExitReasonSchema,
   RunIdSchema,
   RunViewSchema,
+  StepKeySchema,
   normalizeDateRange,
   type ItemId,
   type RequirementId,
@@ -262,6 +263,14 @@ describe("run view", () => {
     const questions = [{ id: "q-1", requirementId: "req-3", text: "Have you used Kubernetes?" }];
     expect(RunViewSchema.safeParse({ ...base, status: "awaiting_answers", questions }).success).toBe(true);
   });
+  it("lists the `fit` step between `tailor` and `review`", () => {
+    const keys = StepKeySchema.options;
+    expect(keys.indexOf("fit")).toBe(keys.indexOf("tailor") + 1);
+    expect(keys.indexOf("review")).toBe(keys.indexOf("fit") + 1);
+    const tailoring = { ...base, status: "tailoring", steps: [{ key: "fit", state: "running" }], iterations: { used: 1, max: 3 }, score: { before: 48, after: null } };
+    expect(RunViewSchema.safeParse(tailoring).success).toBe(true);
+  });
+
   it("parses tailoring with a score that has no `after` yet", () => {
     const tailoring = { ...base, status: "tailoring", iterations: { used: 1, max: 3 }, score: { before: 48, after: null } };
     expect(RunViewSchema.safeParse(tailoring).success).toBe(true);

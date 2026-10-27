@@ -135,7 +135,7 @@ export function renderPdf(blocks: Block[], sizes: Sizes): Promise<PdfRender> {
   for (const block of blocks) drawBlock(block);
 
   pageCount = doc.bufferedPageRange().count;
-  overflow = pageCount === 1 ? 0 : (pageCount - 1) * contentHeight + (doc.y - margin);
+  overflow = pageCount === 1 ? 0 : (pageCount - 2) * contentHeight + (doc.y - margin);
   doc.end();
   return done;
 }

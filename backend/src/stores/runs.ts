@@ -87,6 +87,35 @@ export class RunStore {
     await this.prisma.run.updateMany({ where: { id }, data: { status: "failed", errorCode: code, errorMessage: message } });
   }
 
+  /**
+   * Deletes the Run only if its status is not in `busy` and it has not expired at `liveAt`, in one statement, and says
+   * whether it did. Like `claimStatus`, the condition and the delete cannot be split by a simultaneous request. It is
+   * what `DELETE /runs/:id` uses.
+   */
+  async deleteIdleLive(id: RunId, busy: RunStatus[], liveAt: Date): Promise<boolean> {
+    const { count } = await this.prisma.run.deleteMany({ where: { id, status: { notIn: busy }, expiresAt: { gt: liveAt } } });
+    return count === 1;
+  }
+
+  /**
+   * Deletes the Run only if it is still in `status` (the one the sweep listed) and has expired at `now`, in one
+   * statement, and says whether it did. A Run that moved on since the listing is left alone.
+   */
+  async deleteExpiredIn(id: RunId, status: RunStatus, now: Date): Promise<boolean> {
+    const { count } = await this.prisma.run.deleteMany({ where: { id, status, expiresAt: { lte: now } } });
+    return count === 1;
+  }
+
+  /** The id and status of each Run that has expired at `now`, oldest first. */
+  async listExpired(now: Date): Promise<{ id: RunId; status: RunStatus }[]> {
+    const rows = await this.prisma.run.findMany({
+      where: { expiresAt: { lte: now } },
+      select: { id: true, status: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
+    return rows.map((row) => ({ id: row.id as RunId, status: RunStatusSchema.parse(row.status) }));
+  }
+
   async delete(id: RunId): Promise<void> {
     await this.prisma.run.deleteMany({ where: { id } });
   }

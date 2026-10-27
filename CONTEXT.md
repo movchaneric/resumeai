@@ -40,6 +40,10 @@ _Avoid_: Session, job, task, thread
 A point where a Run waits for the user: for Answers to its Questions, or for review of its Changes. A Pause is durable; it ends only when the user acts or the Run's time-to-live runs out.
 _Avoid_: Interrupt, wait, hold
 
+**Review**:
+The Pause where the user decides on every Change at once: accept, reject, or revise it. A Run has one Review, and it is final: the Tailored CV is built from the accepted and revised Changes, and the Match Score is brought up to date for it.
+_Avoid_: Approval, sign-off, edit (edit means a user's revision of one Change)
+
 **Interrupted Run**:
 A Run that a server stop cut off and that could not be resumed from where it was. It is final: the user starts a new Run. A Run a stop cut off that could be resumed simply carries on and is not an Interrupted Run.
 _Avoid_: Crashed run, paused run, failed run (failed means the work itself broke)
@@ -53,7 +57,7 @@ A new CV generated from the candidate's CV, adjusted to fit one Job Description 
 _Avoid_: Improved CV, optimized CV, rewritten CV
 
 **Change**:
-One proposed modification to a single text Item of the CV (reword it, add a new Item, or reorder a list), linked to the Evidence that supports it. Its text may reword the Evidence and use the Job Description's wording, but states nothing the Evidence does not state: no new technologies, numbers, scope, roles or achievements. Dates, companies, titles and degrees are never changed. The user can accept, reject, or revise each Change; a revised Change carries the user's own text, is trusted, and is locked against further rewriting.
+One proposed modification to a single text Item of the CV (reword it, add a new Item, or reorder a list), linked to the Evidence that supports it. Its text may reword the Evidence and use the Job Description's wording, but states nothing the Evidence does not state: no new technologies, numbers, scope, roles or achievements. Dates, companies, titles and degrees are never changed. The user accepts, rejects, or revises each Change in the Review; a revised Change carries the user's own text, is trusted (not checked against Evidence), and goes into the Tailored CV exactly as written.
 _Avoid_: Suggestion, edit (edit means the user's own revision of a Change)
 
 **Evidence**:

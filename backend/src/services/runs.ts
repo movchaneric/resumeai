@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   AnswerSchema,
+  ReviewDecisionSchema,
   RunIdSchema,
   RunViewSchema,
   StepKeySchema,
@@ -11,14 +12,17 @@ import {
   type ExitReason,
   type JobProfile,
   type Question,
+  type ReviewDecision,
   type RequirementId,
   type RunErrorCode,
   type RunId,
+  type RunStatus,
   type StepState,
   type UserEvidence,
   type RunView,
 } from "@resume-ai/shared";
 import { applyChanges } from "@/tailoring/applyChanges.js";
+import { keptChanges, reviewProblem } from "@/tailoring/review.js";
 import type { RecordedRejection } from "@/tailoring/validateChanges.js";
 import { MAX_ROUNDS } from "@/scoring/exitRouter.js";
 import { CoverageError } from "@/scoring/errors.js";
@@ -32,8 +36,11 @@ import type { RunStore, StoredRun } from "@/stores/runs.js";
 
 /** What the service sees of a Run's graph state: plain data typed with shared types. */
 export type RunSnapshot = {
-  /** Where the graph is stopped: waiting for Answers, waiting for review, or not stopped (a node is due to run). */
-  pausedAt: "answers" | "review" | null;
+  /**
+   * Where the graph is (`graph/position.ts`): waiting for Answers, waiting for review, ended, or `null` while a node is
+   * due to run. The only reading of the graph's position; nothing else decides a Pause or the end.
+   */
+  position: "answers" | "review" | "ended" | null;
   jobProfile: JobProfile | null;
   cv: Cv | null;
   coverageBefore: Coverage[] | null;
@@ -52,6 +59,16 @@ export type RunSnapshot = {
   rounds: number;
   exitReason: ExitReason | null;
 };
+
+/**
+ * The Run status for each position the graph can rest in, in one place: the runner writes it at a pause or the end,
+ * recovery restores it, and the nodes that wait use it as their `NODE_STATUS`.
+ */
+export const STATUS_AT_POSITION = {
+  answers: "awaiting_answers",
+  review: "awaiting_review",
+  ended: "completed",
+} as const satisfies Record<NonNullable<RunSnapshot["position"]>, RunStatus>;
 
 export type StartRunInput = { runId: RunId; cvText: string; jobDescriptionText: string };
 
@@ -73,8 +90,15 @@ export interface GraphRunner {
    * runs until the next pause or the end, like `start`. Rejects with the original error on failure.
    */
   recover(runId: RunId): Promise<RunSnapshot>;
+  /**
+   * Resumes a Run paused for review with the decisions (already validated by the caller) and runs to the end, where the
+   * runner writes `completed`. The caller opens the root span for it. Rejects with the original error on failure.
+   */
+  review(runId: RunId, decisions: ReviewDecision[]): Promise<RunSnapshot>;
   /** The current state, or null when no checkpoint exists yet. */
   read(runId: RunId): Promise<RunSnapshot | null>;
+  /** Removes every checkpoint stored for the Run. Only safe once nothing is running it. */
+  deleteThread(runId: RunId): Promise<void>;
 }
 
 /**
@@ -129,6 +153,9 @@ function setOutcomeAttributes(span: Span, result: RunSnapshot): void {
 /** The statuses after which a Run's stream ends: the Run is at a Pause (waiting for the user), Interrupted, failed or completed. */
 const STREAM_END_STATUSES: ReadonlySet<RunView["status"]> = new Set(["awaiting_answers", "awaiting_review", "failed", "interrupted", "completed"]);
 
+/** The statuses in which the graph runner may still write checkpoints for the Run. */
+export const BUSY_STATUSES: RunStatus[] = ["parsing", "extracting", "tailoring"];
+
 /** What a client connection gives `openRunStream`: `send` writes one view, `close` ends the stream. */
 export type RunStreamSink = { send: (view: RunView) => void; close: () => void };
 
@@ -141,6 +168,11 @@ export type CreateRunInput = { cv: Buffer; jobDescription: unknown };
 export class RunsService {
   private readonly now: () => Date;
   private readonly runInBackground: (task: () => Promise<void>) => void;
+  /**
+   * The ids of the Runs this process is working on: added when it starts a Run's background work or claims a paused Run,
+   * removed when that work ends. The TTL sweep never deletes one of these.
+   */
+  private readonly running = new Set<RunId>();
 
   constructor(private readonly deps: RunsDeps) {
     this.now = deps.now ?? (() => new Date());
@@ -165,8 +197,33 @@ export class RunsService {
       createdAt,
       expiresAt: new Date(createdAt.getTime() + config.runTtlMs),
     });
-    this.runInBackground(() => this.runPipeline({ runId: run.id, cvText, jobDescriptionText }));
+    this.background(run.id, () => this.runPipeline({ runId: run.id, cvText, jobDescriptionText }));
     return run.id;
+  }
+
+  /** Starts `work` for the Run in the background and keeps the Run in the running set until it ends, however it ends. */
+  private background(id: RunId, work: () => Promise<void>): void {
+    this.running.add(id);
+    this.runInBackground(async () => {
+      try {
+        await work();
+      } finally {
+        this.running.delete(id);
+      }
+    });
+  }
+
+  /** Runs `work` for a Run, recording a failure on the Run. Never throws: it runs detached from the request. */
+  private async runAndRecord(id: RunId, label: "pipeline" | "resume" | "review", work: () => Promise<void>): Promise<void> {
+    try {
+      try {
+        await work();
+      } catch (error) {
+        await this.recordFailure(id, label, error);
+      }
+    } catch (error) {
+      console.error(`Run ${id}: could not store the ${label} outcome`, error);
+    }
   }
 
   /**
@@ -178,41 +235,75 @@ export class RunsService {
   async runPipeline(input: StartRunInput): Promise<void> {
     const { graphRunner } = this.deps;
     const id = input.runId;
-    try {
-      try {
-        await withSessionSpan("pipeline", id, async (span) => setOutcomeAttributes(span, await graphRunner.start(input)));
-      } catch (error) {
-        await this.recordFailure(id, "pipeline", error);
-      }
-    } catch (error) {
-      console.error(`Run ${id}: could not store the pipeline outcome`, error);
-    }
+    await this.runAndRecord(id, "pipeline", () => withSessionSpan("pipeline", id, async (span) => setOutcomeAttributes(span, await graphRunner.start(input))));
   }
 
   /**
-   * Accepts the Answers for a Run paused in `awaiting_answers` and resumes it in the background. Checks, in order:
-   * the Run exists (404), it is waiting for Answers (409), the Answers are valid (400). Only then does it claim the
-   * Run by moving it to `tailoring` (the status the resumed graph writes first anyway) in one conditional update, so
-   * a second submission, even a simultaneous one, finds it no longer waiting and gets 409 without resuming twice.
+   * Accepts the Answers for a Run paused in `awaiting_answers` and resumes it in the background (`resumeFromPause`):
+   * 404, 409, then 400 for Answers that do not fit the Run's Questions, then the claim.
    */
   async submitAnswers(rawId: string, body: unknown): Promise<void> {
-    const { store, graphRunner } = this.deps;
-    const id = RunIdSchema.safeParse(rawId);
-    const run = id.success ? await store.get(id.data) : null;
-    if (!run || run.expiresAt <= this.now()) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
-    if (run.status !== "awaiting_answers") throw new ApiError("RUN_NOT_AWAITING_ANSWERS", "This Run is not waiting for answers.");
+    const { graphRunner } = this.deps;
+    await this.resumeFromPause(
+      rawId,
+      { status: "awaiting_answers", code: "RUN_NOT_AWAITING_ANSWERS", message: "This Run is not waiting for answers." },
+      async (id) => validateAnswers(body, new Set(((await graphRunner.read(id))?.questions ?? []).map((q) => q.id as string))),
+      (id, answers) => this.runResume(id, answers),
+    );
+  }
 
-    const questions = (await graphRunner.read(run.id))?.questions ?? [];
-    const answers = validateAnswers(body, new Set(questions.map((q) => q.id as string)));
-    if (!(await store.claimStatus(run.id, "awaiting_answers", "tailoring"))) {
-      throw new ApiError("RUN_NOT_AWAITING_ANSWERS", "This Run is not waiting for answers.");
+  /**
+   * Accepts the Review for a Run paused in `awaiting_review` and resumes it in the background (`resumeFromPause`):
+   * 404, 409, then 400 for decisions that do not fit the Run's Changes (`validateReview`, nothing is resumed), then the claim.
+   */
+  async submitReview(rawId: string, body: unknown): Promise<void> {
+    const { graphRunner } = this.deps;
+    await this.resumeFromPause(
+      rawId,
+      { status: "awaiting_review", code: "RUN_NOT_AWAITING_REVIEW", message: "This Run is not waiting for review." },
+      async (id) => validateReview(body, await graphRunner.read(id)),
+      (id, decisions) => this.runReview(id, decisions),
+    );
+  }
+
+  /**
+   * Claims a Run paused in `pause.status` and resumes it in the background. Checks, in order: the Run exists (404), it is
+   * in `pause.status` (409 `pause.code`), `prepare` accepts the input (it throws the 400). Only then does it claim the
+   * Run by moving it to `tailoring` (the status the resumed graph writes first anyway) in one conditional update, so a
+   * second submission, even a simultaneous one, finds it no longer paused and gets 409 without resuming twice. A lost
+   * claim re-reads the Run: gone (deleted or expired meanwhile) is 404, otherwise 409.
+   */
+  private async resumeFromPause<T>(
+    rawId: string,
+    pause: { status: "awaiting_answers" | "awaiting_review"; code: "RUN_NOT_AWAITING_ANSWERS" | "RUN_NOT_AWAITING_REVIEW"; message: string },
+    prepare: (id: RunId) => Promise<T>,
+    resume: (id: RunId, input: T) => Promise<void>,
+  ): Promise<void> {
+    const { store, events } = this.deps;
+    const notFound = () => new ApiError("RUN_NOT_FOUND", "Run not found.");
+    const parsed = RunIdSchema.safeParse(rawId);
+    const run = parsed.success ? await store.get(parsed.data) : null;
+    if (!run || run.expiresAt <= this.now()) throw notFound();
+    if (run.status !== pause.status) throw new ApiError(pause.code, pause.message);
+
+    const input = await prepare(run.id);
+    if (!(await store.claimStatus(run.id, pause.status, "tailoring"))) {
+      const current = await store.get(run.id);
+      if (!current || current.expiresAt <= this.now()) throw notFound();
+      throw new ApiError(pause.code, pause.message);
     }
-    this.deps.events.publish(run.id);
-    this.runInBackground(() => this.runResume(run.id, answers));
+    events.publish(run.id);
+    this.background(run.id, () => resume(run.id, input));
+  }
+
+  /** The background Review: the graph runs on from the decisions to the end, or the failure is recorded on the Run. Never throws. */
+  async runReview(id: RunId, decisions: ReviewDecision[]): Promise<void> {
+    const { graphRunner } = this.deps;
+    await this.runAndRecord(id, "review", () => withSessionSpan("review", id, async (span) => setOutcomeAttributes(span, await graphRunner.review(id, decisions))));
   }
 
   /** Logs a failed background step and marks the Run failed with the matching code and message. */
-  private async recordFailure(id: RunId, label: "pipeline" | "resume" | "recovery", error: unknown): Promise<void> {
+  private async recordFailure(id: RunId, label: "pipeline" | "resume" | "review" | "recovery", error: unknown): Promise<void> {
     const code: RunErrorCode = failureCode(error);
     // Log the code, the error name (with status and code for LLM failures) and the issue count only. Messages and issues can quote CV values or
     // model output, so they are not logged here (known open item: a safe failure log).
@@ -227,15 +318,7 @@ export class RunsService {
   /** The background resume: the graph runs on from the Answers to the next pause, or the failure is recorded on the Run. Never throws. */
   async runResume(id: RunId, answers: Answer[]): Promise<void> {
     const { graphRunner } = this.deps;
-    try {
-      try {
-        await graphRunner.answer(id, answers);
-      } catch (error) {
-        await this.recordFailure(id, "resume", error);
-      }
-    } catch (error) {
-      console.error(`Run ${id}: could not store the resume outcome`, error);
-    }
+    await this.runAndRecord(id, "resume", async () => void (await graphRunner.answer(id, answers)));
   }
 
   /**
@@ -243,7 +326,7 @@ export class RunsService {
    * process started (`startedAt`) and still in `extracting` or `tailoring` had its background work in the process
    * that stopped (single instance); a Run created since is being worked on by this process and is left alone. Each is
    * handled from its checkpoint, one at a time to stay within the model provider's rate limits:
-   * no checkpoint -> `interrupted`; stopped at a Pause -> that Pause's status; mid-graph -> resumed, once (a Run
+   * no checkpoint -> `interrupted`; stopped at a Pause -> that Pause's status; graph ended -> `completed`; mid-graph -> resumed, once (a Run
    * already recovered once becomes `interrupted`, so a Run that crashes the server is not resumed on every restart).
    * Expired Runs and Runs at a Pause are not listed. Never throws: a Run it cannot handle is logged and skipped.
    */
@@ -267,7 +350,7 @@ export class RunsService {
   private async recoverRun(run: StoredRun): Promise<void> {
     const { store, graphRunner, events } = this.deps;
     const snapshot = await graphRunner.read(run.id);
-    const moveTo = async (status: "awaiting_answers" | "awaiting_review" | "interrupted", outcome: string): Promise<void> => {
+    const moveTo = async (status: RunStatus, outcome: string): Promise<void> => {
       // Conditional on the status recovery saw, so a Run a request moved in the meantime is left as it is.
       if (await store.claimStatus(run.id, run.status, status)) {
         console.log(`Run ${run.id}: recovery ${outcome}`);
@@ -278,18 +361,65 @@ export class RunsService {
     };
 
     if (!snapshot) return moveTo("interrupted", "interrupted (no checkpoint)");
-    if (snapshot.pausedAt !== null) {
-      return moveTo(snapshot.pausedAt === "answers" ? "awaiting_answers" : "awaiting_review", "pause restored");
+    if (snapshot.position !== null) {
+      return moveTo(STATUS_AT_POSITION[snapshot.position], snapshot.position === "ended" ? "completed (the graph had ended)" : "pause restored");
     }
     if (!(await store.claimRecovery(run.id, run.status))) {
       return moveTo("interrupted", "interrupted (already recovered once)");
     }
     console.log(`Run ${run.id}: recovery resumed`);
+    this.running.add(run.id);
     try {
       await withSessionSpan("recovery", run.id, async (span) => setOutcomeAttributes(span, await graphRunner.recover(run.id)));
     } catch (error) {
       await this.recordFailure(run.id, "recovery", error);
+    } finally {
+      this.running.delete(run.id);
     }
+  }
+
+  /**
+   * Deletes a Run: its row, then its checkpoints. 404 for a malformed, unknown, expired or already-deleted ID, 409
+   * `RUN_BUSY` while it is `parsing`, `extracting` or `tailoring` (the runner would write checkpoints after the delete),
+   * and then nothing is deleted. The row goes first, in one conditional statement, so a simultaneous `POST /answers`
+   * either claims the Run first (this gets 409) or finds it gone (that gets 404).
+   */
+  async deleteRun(rawId: string): Promise<void> {
+    const { store } = this.deps;
+    const id = RunIdSchema.safeParse(rawId);
+    if (!id.success) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
+    if (await this.purgeRun(id.data, () => store.deleteIdleLive(id.data, BUSY_STATUSES, this.now()))) return;
+    // Nothing was deleted: re-read to say why.
+    const run = await store.get(id.data);
+    if (run && run.expiresAt > this.now()) throw new ApiError("RUN_BUSY", "This Run is still working. Try again when it pauses or ends.");
+    throw new ApiError("RUN_NOT_FOUND", "Run not found.");
+  }
+
+  /**
+   * The sweep's delete of an expired Run: nothing if this process is running it, otherwise the row goes only if the Run
+   * is still in `listedStatus` and expired, in one statement (a Run that moved on since the listing is left alone). A
+   * stale busy Run, one no process is running, is deleted too. Says whether the row was deleted.
+   */
+  async purgeExpiredRun(id: RunId, listedStatus: RunStatus): Promise<boolean> {
+    if (this.running.has(id)) return false;
+    return this.purgeRun(id, () => this.deps.store.deleteExpiredIn(id, listedStatus, this.now()));
+  }
+
+  /**
+   * The one "delete this Run" operation: `deleteRow` deletes the row (a conditional statement, saying whether it did),
+   * then the checkpoints go and the stream is told. Says whether the row was deleted.
+   */
+  private async purgeRun(id: RunId, deleteRow: () => Promise<boolean>): Promise<boolean> {
+    const { graphRunner } = this.deps;
+    if (!(await deleteRow())) return false;
+    try {
+      await graphRunner.deleteThread(id);
+    } catch (error) {
+      // The row is already gone and the caller's job is done: the sweep removes checkpoint threads that have no Run (ADR 0002).
+      console.error(`Run ${id}: could not delete the checkpoints, left for the sweep`, error);
+    }
+    this.deps.events.publish(id);
+    return true;
   }
 
   /**
@@ -383,6 +513,25 @@ function validateAnswers(body: unknown, questionIds: Set<string>): Answer[] {
 }
 
 /**
+ * Checks the body of a review request against the Run's Changes and returns the decisions with `after` trimmed. The
+ * rules are `reviewProblem`'s; the messages never echo the user's text.
+ */
+function validateReview(body: unknown, snapshot: RunSnapshot | null): ReviewDecision[] {
+  const invalid = (message: string) => new ApiError("INVALID_REVIEW", message);
+  const list = (body as { decisions?: unknown } | null | undefined)?.decisions;
+  if (!Array.isArray(list)) throw invalid("Send `decisions` as a list.");
+  const decisions = list.map((raw, i): ReviewDecision => {
+    const parsed = ReviewDecisionSchema.safeParse(raw);
+    if (!parsed.success) throw invalid(`Decision ${i + 1} is not valid.`);
+    return parsed.data.after === undefined ? parsed.data : { ...parsed.data, after: parsed.data.after.trim() };
+  });
+  if (!snapshot?.cv) throw invalid("This Run has nothing to review.");
+  const problem = reviewProblem(snapshot.cv, snapshot.changes, decisions, snapshot.userEvidence);
+  if (problem !== null) throw invalid(problem);
+  return decisions;
+}
+
+/**
  * Derives the view from the `runs` row (status, error, timestamps) and the graph state (everything else).
  * A failed Run marks the step that broke as `failed`: `coverage` when the extraction results exist, otherwise
  * `extract`. Scores are rounded here for display. Validating against the schema keeps the response honest.
@@ -408,13 +557,13 @@ function toRunView(run: StoredRun, state: RunSnapshot | null): RunView {
       error: run.error,
     });
   }
-  if (run.status === "awaiting_review" && cv && jobProfile && state?.coverageBefore && state.coverage && state.scoreBefore !== null && state.scoreAfter !== null && state.exitReason) {
+  if ((run.status === "awaiting_review" || run.status === "completed") && cv && jobProfile && state?.coverageBefore && state.coverage && state.scoreBefore !== null && state.scoreAfter !== null && state.exitReason) {
     const verdict = (coverage: Coverage[], id: string) => coverage.find((c) => c.requirementId === id);
     return RunViewSchema.parse({
       ...common,
-      status: "awaiting_review",
+      status: run.status,
       job,
-      steps: steps({ parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "done", review: "running" }),
+      steps: steps({ parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "done", review: run.status === "completed" ? "done" : "running" }),
       score: { before: Math.round(state.scoreBefore), after: Math.round(state.scoreAfter) },
       requirements: jobProfile.requirements.map((requirement) => {
         const before = verdict(state.coverageBefore!, requirement.id);
@@ -428,12 +577,13 @@ function toRunView(run: StoredRun, state: RunSnapshot | null): RunView {
           confirmedGap: state.confirmedGaps.includes(requirement.id),
         };
       }),
-      // The Tailored CV: the original plus the kept Changes.
-      cv: applyChanges(cv, state.changes),
+      // The Tailored CV: while the user is reviewing, the original plus every proposed Change; once completed, only the accepted and revised ones.
+      cv: applyChanges(cv, run.status === "completed" ? keptChanges(state.changes) : state.changes),
       changes: state.changes,
       userEvidence: state.userEvidence,
       iterations: { used: state.rounds, max: MAX_ROUNDS },
       exitReason: state.exitReason,
+      ...(run.status === "completed" ? { download: { docx: null, pdf: null } } : {}),
     });
   }
   if (run.status === "awaiting_answers" && extracted && state) {
@@ -450,7 +600,12 @@ function toRunView(run: StoredRun, state: RunSnapshot | null): RunView {
       ...common,
       status: "tailoring",
       job,
-      steps: steps({ parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "running" }),
+      // Once the Review is applied the Changes carry their final statuses: this is the final re-judge, so `review` is running.
+      steps: steps(
+        state.changes.every((c) => c.status === "proposed")
+          ? { parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "running" }
+          : { parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "done", review: "running" },
+      ),
       iterations: { used: state.rounds, max: MAX_ROUNDS },
       score: { before: Math.round(state.scoreBefore ?? 0), after: state.scoreAfter === null || state.changes.length === 0 ? null : Math.round(state.scoreAfter) },
     });

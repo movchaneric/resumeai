@@ -3,12 +3,12 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import pg from "pg";
 import type { RunId } from "@resume-ai/shared";
 import { createPostgresCheckpointer } from "@/graph/checkpointer.js";
 import { parseCv } from "@/parsing/parseCv.js";
 import { loadConfig } from "@/utils/config.js";
 import { LangGraphRunner } from "@/graph/runner.js";
+import { createCheckpointDb } from "../fakes/checkpointDb.js";
 import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
 import { FakeJobProfileCache } from "../fakes/jobProfileCache.js";
 import { coverageAnswer, extractedCv, extractedJob } from "../runFixtures.js";
@@ -16,14 +16,14 @@ import { InProcessRunEvents } from "@/utils/runEvents.js";
 
 const url = process.env.DATABASE_URL!;
 const config = loadConfig(process.env);
-const pool = new pg.Pool({ connectionString: url });
-const checkpointer = createPostgresCheckpointer(`${url}?schema=app`);
+const { pool, checkpointer, end: endCheckpointDb } = createCheckpointDb(url);
 
 const tablesIn = async (schema: string) =>
   (await pool.query("SELECT table_name FROM information_schema.tables WHERE table_schema = $1 ORDER BY table_name", [schema])).rows.map(
     (r) => r.table_name as string,
   );
 
+// Every table the checkpointer creates, including its migrations table (which has no `thread_id`).
 const CHECKPOINT_TABLES = ["checkpoint_blobs", "checkpoint_migrations", "checkpoint_writes", "checkpoints"];
 
 beforeAll(async () => {
@@ -33,8 +33,7 @@ beforeAll(async () => {
   await checkpointer.setup();
 });
 afterAll(async () => {
-  await checkpointer.end();
-  await pool.end();
+  await endCheckpointDb();
 });
 
 describe("Postgres checkpointer", () => {

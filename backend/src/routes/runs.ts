@@ -13,8 +13,11 @@ export function createRunsRouter(controller: RunsController, { limits }: Config)
   const router = Router();
   router.post("/", upload.single("cv"), controller.create);
   router.get("/:id", controller.get);
+  router.delete("/:id", controller.remove);
   router.get("/:id/events", controller.events);
   // Answers are a few short texts: a small limit keeps a large body out of memory.
   router.post("/:id/answers", express.json({ limit: "64kb" }), controller.answer);
+  // A decision per Change, with the user's text for the revised ones: bigger than Answers, still small.
+  router.post("/:id/review", express.json({ limit: "256kb" }), controller.review);
   return router;
 }

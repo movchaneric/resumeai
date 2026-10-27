@@ -5,26 +5,30 @@ import { selectQuestions } from "@/tailoring/questions.js";
 import { tailorCv } from "@/tailoring/tailorCv.js";
 import { validateChanges } from "@/tailoring/validateChanges.js";
 import { applyChanges } from "@/tailoring/applyChanges.js";
+import { applyDecisions, keptChanges } from "@/tailoring/review.js";
+import { setActiveSpanAttribute } from "@/utils/spans.js";
 import { mergeRoundIntoChanges } from "@/tailoring/mergeChanges.js";
 import { mergeCoverage, requirementsListedBy } from "@/tailoring/roundCoverage.js";
 import { onlyGapsLeft, routeAfterRound, shouldSkipTailoring } from "@/scoring/exitRouter.js";
 import { assessCoverage } from "@/scoring/assessCoverage.js";
 import { matchScore } from "@/scoring/matchScore.js";
 import { resolveJobProfile, type JobProfileCache } from "@/graph/jobProfileCache.js";
+import { STATUS_AT_POSITION } from "@/services/runs.js";
 import { RunState } from "@/graph/state.js";
 import type { RecordedRejection } from "@/tailoring/validateChanges.js";
-import { UserEvidenceIdSchema, type Answer, type Change, type Question, type RequirementId, type UserEvidence } from "@resume-ai/shared";
+import { UserEvidenceIdSchema, type Answer, type Change, type Question, type RequirementId, type ReviewDecision, type UserEvidence } from "@resume-ai/shared";
 
 /** The Run status a node writes when the graph enters it (decisions record, "Storage and status"). */
 export const NODE_STATUS = {
   extract: "extracting",
   assess_coverage: "extracting",
-  collect_answers: "awaiting_answers",
+  collect_answers: STATUS_AT_POSITION.answers,
   begin_round: "tailoring",
   tailor: "tailoring",
   validate: "tailoring",
   rejudge: "tailoring",
-  review: "awaiting_review",
+  review: STATUS_AT_POSITION.review,
+  final_rejudge: "tailoring",
 } as const;
 
 /** What one finished round did, for an observer such as the dev script. Plain data; the graph never reads it back. */
@@ -96,12 +100,12 @@ function logRoundFailure(runId: string, round: number, error: unknown): void {
 }
 
 /**
- * The Run workflow (ADR 0001): extract, first Coverage, then either the pause before `review` (nothing to tailor)
+ * The Run workflow (ADR 0001): extract, first Coverage, then either `review` (nothing to tailor)
  * or `select_questions` (which pauses in `collect_answers` for the user's Answers when there is anything to ask) and then
  * tailoring rounds: begin_round, tailor, validate, rejudge, route, and back to begin_round while the exit router
  * says so (at most MAX_ROUNDS). Nodes are thin: each calls functions from `extraction/`, `tailoring/` or `scoring/`
  * and returns a state update. `begin_round` counts the round as started; the `route` node is the only place that
- * commits the pending round.
+ * commits the pending round. `review` waits in an `interrupt()` for the decisions, `final_rejudge` judges again what they undid, then the graph ends.
  */
 export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, checkpointer, onEnter, onRound }: RunGraphDeps) {
   return new StateGraph(RunState)
@@ -245,8 +249,35 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
         scoreAfter: pending.score!,
       };
     })
-    // The candidate's turn. The graph stops before it; slice 6 resumes it.
-    .addNode("review", () => ({}))
+    // The candidate's turn: the graph waits inside `interrupt()` for the decisions. Like `collect_answers`, the node runs
+    // again from the top on resume, so everything before the `interrupt()` must be pure. It only records the final
+    // statuses; the model work is in `final_rejudge`, so a crash during it resumes from this node's checkpoint.
+    .addNode("review", (state) => {
+      const decisions = interrupt<null, ReviewDecision[]>(null);
+      return { changes: applyDecisions(state.changes, decisions) };
+    })
+    // Judges again the Requirements that rejected or revised Changes list, against the CV the user ends up with. Every
+    // other verdict carries over. A failure here never fails the Run: those Requirements go back to their verdict before
+    // tailoring, so the score errs low.
+    .addNode("final_rejudge", async (state) => {
+      await onEnter(state.runId, "final_rejudge");
+      const { requirements } = state.jobProfile!;
+      const undone = state.changes.filter((c) => c.status === "rejected" || c.status === "revised");
+      const affected = requirementsListedBy(requirements, undone);
+      if (affected.length === 0) return {};
+      try {
+        const reviewed = applyChanges(state.cv!, keptChanges(state.changes));
+        const { coverage } = await assessCoverage(judgeLlm, reviewed, affected, { round: state.rounds });
+        const merged = mergeCoverage(state.coverage!, coverage);
+        return { coverage: merged, scoreAfter: matchScore(requirements, merged) };
+      } catch (error) {
+        console.error(`Run ${state.runId}: final re-judge failed, ${affected.length} verdicts reverted: ${describeFailure(error)}`);
+        setActiveSpanAttribute("final_rejudge.reverted", affected.length);
+        const ids = new Set<string>(affected.map((r) => r.id));
+        const reverted = mergeCoverage(state.coverage!, state.coverageBefore!.filter((c) => ids.has(c.requirementId)));
+        return { coverage: reverted, scoreAfter: matchScore(requirements, reverted) };
+      }
+    })
     .addEdge(START, "extract")
     .addEdge("extract", "assess_coverage")
     .addConditionalEdges("assess_coverage", (state) => (state.exitReason === null ? "select_questions" : "review"), ["select_questions", "review"])
@@ -257,8 +288,9 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
     .addEdge("validate", "rejudge")
     .addEdge("rejudge", "route")
     .addConditionalEdges("route", (state) => (state.exitReason === null ? "begin_round" : "review"), ["begin_round", "review"])
-    .addEdge("review", END)
-    .compile({ checkpointer, interruptBefore: ["review"] });
+    .addEdge("review", "final_rejudge")
+    .addEdge("final_rejudge", END)
+    .compile({ checkpointer });
 }
 
 export type RunGraph = ReturnType<typeof buildRunGraph>;

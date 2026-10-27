@@ -33,7 +33,9 @@ export function skipQuestions(inner: GraphRunner): GraphRunner {
       return snapshot.questions.length > 0 && snapshot.exitReason === null ? inner.answer(input.runId, []) : snapshot;
     },
     answer: (runId, answers) => inner.answer(runId, answers),
+    review: (runId, decisions) => inner.review(runId, decisions),
     recover: (runId) => inner.recover(runId),
     read: (runId) => inner.read(runId),
+    deleteThread: (runId) => inner.deleteThread(runId),
   };
 }

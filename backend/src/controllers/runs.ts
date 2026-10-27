@@ -24,6 +24,18 @@ export class RunsController {
     res.status(202).json({ id: req.params.id });
   };
 
+  /** `202`: the decisions are accepted and the Run resumes in the background (the final re-judge, then `completed`). */
+  review = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+    await this.service.submitReview(req.params.id, req.body);
+    res.status(202).json({ id: req.params.id });
+  };
+
+  /** `204`: the Run and everything stored for it are gone. */
+  remove = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+    await this.service.deleteRun(req.params.id);
+    res.status(204).end();
+  };
+
   get = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
     res.json(await this.service.getRunView(req.params.id));
   };

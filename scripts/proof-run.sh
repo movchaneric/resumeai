@@ -5,8 +5,8 @@ set -euo pipefail
 usage() {
   cat >&2 <<'USAGE'
 Usage:
-  scripts/proof-run.sh [--watch [--kill-at <spec>]] <cv-file> <job-description-file> [answers.json]
-  scripts/proof-run.sh [--watch [--kill-at <spec>]] --resume <run-id> <answers.json>
+  scripts/proof-run.sh [--watch [--kill-at <spec>]] [--review <mode>] <cv-file> <job-description-file> [answers.json]
+  scripts/proof-run.sh [--watch [--kill-at <spec>]] [--review <mode>] --resume <run-id> <answers.json>
   scripts/proof-run.sh --watch-run <run-id> [--kill-at <spec>]
   scripts/proof-run.sh --help
 
@@ -22,6 +22,10 @@ summary. It starts nothing and sends no answers.
 with lsof; the script's own curl is not touched) as soon as an event matches, prints "KILLED at <spec>" and the Run id
 on stdout, and exits 0. It is for proving restart recovery. <spec> is a status (parsing, extracting, tailoring, ...) or
 round=<N>, which means iterations.used >= N while tailoring.
+--review <mode> (accept-all, reject-first or revise-first): when the Run reaches awaiting_review, POSTs a decision for every
+Change (accept all; or reject the first Change and accept the rest; or revise the first replace Change, or the first add Change
+if there is no replace, by appending a short note to its own text, and accept the rest), waits for completed, and prints the score before/after and each Change's final
+status to stderr. Without it a Run that reaches awaiting_review is only summarised.
 Exits non-zero if the Run ended failed. Needs curl and jq. BASE_URL defaults to http://localhost:3000.
 USAGE
   exit "${1:-2}"
@@ -164,10 +168,12 @@ print_questions() {
 
 # Sends the answers file for a Run that awaits answers; `$2` is that Run's current view.
 send_answers() {
-  local id="$1" view="$2" file="$3" ids unknown code reply
+  local id="$1" view="$2" file="$3" ids unknown code reply body
   [ -f "$file" ] || die "answers file not found: $file"
   jq -e . "$file" >/dev/null 2>&1 || die "answers file is not valid JSON: $file"
   ids="$(jq -r 'if type == "array" then . elif type == "object" and (.answers | type) == "array" then .answers else [] end | map(.questionId // empty) | .[]' "$file")"
+  # The server wants { "answers": [...] }; wrap a bare array and pass an object through.
+  body="$(jq -c 'if type == "array" then {answers: .} else . end' "$file")"
   echo "Answers given for questions:" >&2
   echo "${ids:-  (none)}" | sed 's/^/  /' >&2
   unknown="$(jq -r --argjson ids "$(jq -R . <<<"$ids" | jq -s 'map(select(. != ""))')" \
@@ -178,7 +184,7 @@ send_answers() {
     exit 1
   fi
   reply="$(mktemp)"
-  code="$(curl -sS --max-time 30 -o "$reply" -w '%{http_code}' -X POST -H 'content-type: application/json' --data-binary "@$file" "$BASE_URL/runs/$id/answers")" \
+  code="$(curl -sS --max-time 30 -o "$reply" -w '%{http_code}' -X POST -H 'content-type: application/json' --data-binary "$body" "$BASE_URL/runs/$id/answers")" \
     || die "could not reach $BASE_URL"
   if [ "$code" != "202" ]; then
     echo "error: POST /runs/$id/answers returned HTTP $code: $(api_error "$(cat "$reply")")" >&2
@@ -204,6 +210,46 @@ settle() {
   fi
 }
 
+REVIEW_MODE=""
+
+# Sends the decisions for the mode in REVIEW_MODE for a Run in awaiting_review (`$2` is its view), waits for it to end and
+# leaves the completed view in $final. Prints the score and the Change statuses on stderr.
+send_review() {
+  local id="$1" view="$2" body first edit code reply
+  first="$(jq -r '.changes[0].id // empty' <<<"$view")"
+  case "$REVIEW_MODE" in
+    accept-all) body="$(jq '{decisions: [.changes[] | {changeId: .id, decision: "accept"}]}' <<<"$view")" ;;
+    reject-first)
+      body="$(jq '{decisions: [.changes | to_entries[] | {changeId: .value.id, decision: (if .key == 0 then "reject" else "accept" end)}]}' <<<"$view")"
+      ;;
+    revise-first)
+      first="$(jq -r '([.changes[] | select(.op == "replace")] + [.changes[] | select(.op == "add")])[0].id // empty' <<<"$view")"
+      [ -n "$first" ] || die "revise-first needs a replace or add Change, and this Run has neither"
+      # A short edit of the Change's own text: it adds no number, so it passes the stage-1 checks.
+      edit="$(jq -r --arg id "$first" '[.changes[] | select(.id == $id)][0].after + " (edited by the reviewer)"' <<<"$view")"
+      body="$(jq --arg id "$first" --arg edit "$edit" '{decisions: [.changes[] | if .id == $id then {changeId: .id, decision: "revise", after: $edit} else {changeId: .id, decision: "accept"} end]}' <<<"$view")"
+      ;;
+  esac
+  [ -n "$first" ] || { echo "The Run has no Changes; sending an empty review." >&2; body='{"decisions":[]}'; }
+  reply="$(mktemp)"
+  code="$(curl -sS --max-time 30 -o "$reply" -w '%{http_code}' -X POST -H 'content-type: application/json' --data-binary "$body" "$BASE_URL/runs/$id/review")" \
+    || die "could not reach $BASE_URL"
+  if [ "$code" != "202" ]; then
+    echo "error: POST /runs/$id/review returned HTTP $code: $(api_error "$(cat "$reply")")" >&2
+    rm -f "$reply"
+    exit 1
+  fi
+  rm -f "$reply"
+  final="$(follow_run "$id")"
+  jq -r --arg mode "$REVIEW_MODE" '"Review (\($mode)): status \(.status), score \(.score.before) -> \(.score.after)", (.changes[]? | "  \(.id) \(.op): \(.status)")' <<<"$final" >&2
+}
+
+# After the pauses: reviews a Run that is waiting for review when --review was given.
+maybe_review() {
+  [ -n "$REVIEW_MODE" ] || return 0
+  if [ "$(jq -r '.status' <<<"$final")" = "awaiting_review" ]; then send_review "$1" "$final"; fi
+}
+
 summarise() {
   jq '{
     status,
@@ -225,6 +271,12 @@ while [ $# -gt 0 ]; do
       [ $# -ge 2 ] || usage
       watch_run_id="$2"
       WATCH=1
+      shift 2
+      ;;
+    --review)
+      [ $# -ge 2 ] || usage
+      REVIEW_MODE="$2"
+      case "$REVIEW_MODE" in accept-all | reject-first | revise-first) ;; *) die "--review expects accept-all, reject-first or revise-first, got '$REVIEW_MODE'" ;; esac
       shift 2
       ;;
     --kill-at)
@@ -261,6 +313,7 @@ case "$1" in
     [ "$(jq -r '.status' <<<"$view")" = "awaiting_answers" ] || die "Run $run_id is $(jq -r '.status' <<<"$view"), not awaiting_answers"
     send_answers "$run_id" "$view" "$3"
     final="$(follow_run "$run_id")"
+    maybe_review "$run_id"
     ;;
   -*) usage ;;
   *)
@@ -284,6 +337,7 @@ case "$1" in
     [ -n "$run_id" ] || die "POST /runs did not return a Run id"
     echo "Run id: $run_id" >&2
     settle "$run_id" "${3:-}"
+    maybe_review "$run_id"
     ;;
 esac
 

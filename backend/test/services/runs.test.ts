@@ -910,7 +910,7 @@ describe("RunsService.submitAnswers", () => {
   ];
   const snapshot = {
     jobProfile: null, cv: null, coverageBefore: null, coverage: null, changes: [], scoreBefore: null, scoreAfter: null,
-    pausedAt: "answers", rejections: [], questions, userEvidence: [], confirmedGaps: [], rounds: 0, exitReason: null,
+    position: "answers", rejections: [], questions, userEvidence: [], confirmedGaps: [], rounds: 0, exitReason: null,
   } as unknown as RunSnapshot;
 
   /** A store (extended with the atomic claim) holding a Run in `status`, and a runner whose `answer` is a spy. */
@@ -923,7 +923,7 @@ describe("RunsService.submitAnswers", () => {
     };
     store.rows.set(runId, { id: runId, status, createdAt: now(), expiresAt: new Date(now().getTime() + 1000), exportPath: null, error: null });
     const answer = vi.fn<GraphRunner["answer"]>(async () => snapshot);
-    const graphRunner: GraphRunner = { start: async () => snapshot, answer, recover: async () => snapshot, read: async () => snapshot };
+    const graphRunner: GraphRunner = { start: async () => snapshot, answer, review: async () => snapshot, recover: async () => snapshot, read: async () => snapshot, deleteThread: async () => {} };
     const tasks: (() => Promise<void>)[] = [];
     const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner, events: new InProcessRunEvents(), now, runInBackground: (t) => void tasks.push(t) });
     return { store, answer, tasks, service };
@@ -989,6 +989,25 @@ describe("RunsService.submitAnswers", () => {
     expect(tasks).toHaveLength(1);
   });
 
+  it("answers 404 when a simultaneous DELETE removed the Run before the claim, and 409 when it only moved on", async () => {
+    const gone = answerSetup();
+    gone.store.claimStatus = async (id) => {
+      gone.store.rows.delete(id);
+      return false;
+    };
+    const error = await rejection(gone.service.submitAnswers(runId, { answers: [] }));
+    expect([error.code, error.status]).toEqual(["RUN_NOT_FOUND", 404]);
+    expect(gone.tasks).toHaveLength(0);
+
+    const moved = answerSetup();
+    moved.store.claimStatus = async (id) => {
+      await moved.store.setStatus(id, "tailoring");
+      return false;
+    };
+    const conflict = await rejection(moved.service.submitAnswers(runId, { answers: [] }));
+    expect([conflict.code, conflict.status]).toEqual(["RUN_NOT_AWAITING_ANSWERS", 409]);
+  });
+
   it("records a failed resume as a failed Run with a code and message, and never throws", async () => {
     const { service, store, answer, tasks } = answerSetup();
     answer.mockRejectedValueOnce(new CoverageError("bad", []));
@@ -1006,5 +1025,99 @@ describe("RunsService.submitAnswers", () => {
     await service.submitAnswers(runId, { answers: [] });
     await tasks[0]!();
     expect(store.rows.get(runId)?.error?.code).toBe("INTERNAL");
+  });
+});
+
+describe("RunsService.submitReview when the claim is lost", () => {
+  const runId = "44444444-4444-4444-8444-444444444444" as RunId;
+  const now = () => new Date("2026-10-01T00:00:00Z");
+  const snapshot = { position: "review", cv: extractedCv, changes: [], userEvidence: [] } as unknown as RunSnapshot;
+
+  function reviewSetup(lose: (store: FakeStore, id: RunId) => Promise<void>) {
+    const store = new FakeStore() as FakeStore & { claimStatus(id: RunId, from: RunStatus, to: RunStatus): Promise<boolean> };
+    store.claimStatus = async (id) => {
+      await lose(store, id);
+      return false;
+    };
+    store.rows.set(runId, { id: runId, status: "awaiting_review", createdAt: now(), expiresAt: new Date(now().getTime() + 1000), exportPath: null, error: null });
+    const graphRunner: GraphRunner = { start: async () => snapshot, answer: async () => snapshot, review: async () => snapshot, recover: async () => snapshot, read: async () => snapshot, deleteThread: async () => {} };
+    const tasks: (() => Promise<void>)[] = [];
+    const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner, events: new InProcessRunEvents(), now, runInBackground: (t) => void tasks.push(t) });
+    return { tasks, service };
+  }
+  const rejection = async (promise: Promise<unknown>) => (await promise.then(() => null, (e) => e)) as ApiError;
+
+  it("answers 404 when a simultaneous DELETE removed the Run before the claim", async () => {
+    const { service, tasks } = reviewSetup(async (store, id) => void store.rows.delete(id));
+    const error = await rejection(service.submitReview(runId, { decisions: [] }));
+    expect([error.code, error.status]).toEqual(["RUN_NOT_FOUND", 404]);
+    expect(tasks).toHaveLength(0);
+  });
+
+  it("answers 409 when the Run only moved on", async () => {
+    const { service, tasks } = reviewSetup((store, id) => store.setStatus(id, "tailoring"));
+    const error = await rejection(service.submitReview(runId, { decisions: [] }));
+    expect([error.code, error.status]).toEqual(["RUN_NOT_AWAITING_REVIEW", 409]);
+    expect(tasks).toHaveLength(0);
+  });
+});
+
+describe("RunsService.deleteRun", () => {
+  const runId = "33333333-3333-4333-8333-333333333333" as RunId;
+  const now = () => new Date("2026-10-01T00:00:00Z");
+
+  /** A store holding one Run, with the conditional delete the real store does in SQL, and a runner whose `deleteThread` is a spy. */
+  function deleteSetup(deleteThread: GraphRunner["deleteThread"] = async () => {}) {
+    const store = new FakeStore() as FakeStore & { deleteIdleLive(id: RunId, busy: RunStatus[], liveAt: Date): Promise<boolean> };
+    store.rows.set(runId, { id: runId, status: "awaiting_review", createdAt: now(), expiresAt: new Date(now().getTime() + 1000), exportPath: null, error: null });
+    store.deleteIdleLive = async (id, busy, liveAt) => {
+      const row = store.rows.get(id);
+      if (!row || busy.includes(row.status) || row.expiresAt <= liveAt) return false;
+      store.rows.delete(id);
+      return true;
+    };
+    const spy = vi.fn(deleteThread);
+    const snapshot = null as unknown as RunSnapshot;
+    const graphRunner: GraphRunner = { start: async () => snapshot, answer: async () => snapshot, review: async () => snapshot, recover: async () => snapshot, read: async () => null, deleteThread: spy };
+    const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner, events: new InProcessRunEvents(), now });
+    return { store, spy, service };
+  }
+
+  it("deletes the row, then the checkpoints", async () => {
+    const { store, spy, service } = deleteSetup();
+    await service.deleteRun(runId);
+    expect(store.rows.has(runId)).toBe(false);
+    expect(spy).toHaveBeenCalledExactlyOnceWith(runId);
+  });
+
+  it("still resolves, and logs, when deleting the checkpoints fails after the row is gone", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { store, service } = deleteSetup(async () => {
+        throw new Error("connection lost");
+      });
+      await expect(service.deleteRun(runId)).resolves.toBeUndefined();
+      expect(store.rows.has(runId)).toBe(false);
+      expect(error).toHaveBeenCalledOnce();
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("deletes nothing and leaves the checkpoints alone while the Run is busy", async () => {
+    for (const status of ["parsing", "extracting", "tailoring"] as const) {
+      const { store, spy, service } = deleteSetup();
+      store.rows.set(runId, { ...store.rows.get(runId)!, status });
+      await expect(service.deleteRun(runId)).rejects.toMatchObject({ code: "RUN_BUSY", status: 409 });
+      expect(store.rows.has(runId)).toBe(true);
+      expect(spy).not.toHaveBeenCalled();
+    }
+  });
+
+  it("says 404 for an unknown or malformed ID", async () => {
+    const { spy, service } = deleteSetup();
+    await expect(service.deleteRun("44444444-4444-4444-8444-444444444444")).rejects.toMatchObject({ code: "RUN_NOT_FOUND" });
+    await expect(service.deleteRun("nope")).rejects.toMatchObject({ code: "RUN_NOT_FOUND" });
+    expect(spy).not.toHaveBeenCalled();
   });
 });

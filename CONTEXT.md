@@ -57,12 +57,16 @@ A Requirement the user has said they cannot satisfy. It is not asked about again
 _Avoid_: Skipped question, missing skill
 
 **Tailored CV**:
-A new CV generated from the candidate's CV, adjusted to fit one Job Description and rendered into a template, always on one page. It never invents facts. It is downloaded as DOCX or PDF, rendered on demand and never stored (ADR 0008).
+A new CV generated from the candidate's CV, adjusted to fit one Job Description and rendered into a template, always on one page (by Condensing when the layout cannot shrink enough). It never invents facts. It is downloaded as DOCX or PDF, rendered on demand and never stored (ADR 0008).
 _Avoid_: Improved CV, optimized CV, rewritten CV
 
 **Change**:
-One proposed modification to a single text Item of the CV (reword it, add a new Item, or reorder a list), linked to the Evidence that supports it. Its text may reword the Evidence and use the Job Description's wording, but states nothing the Evidence does not state: no new technologies, numbers, scope, roles or achievements. Dates, companies, titles and degrees are never changed. The user accepts, rejects, or revises each Change in the Review; a revised Change carries the user's own text, is trusted (not checked against Evidence), and goes into the Tailored CV exactly as written.
+One proposed modification to a single text Item of the CV (reword it, add a new Item, reorder a list, or remove a bullet), linked to the Evidence that supports it. A remove applies only to a bullet and only to fit one page (see Condensing); it has no Evidence. Its text may reword the Evidence and use the Job Description's wording, but states nothing the Evidence does not state: no new technologies, numbers, scope, roles or achievements. Dates, companies, titles and degrees are never changed. The user accepts, rejects, or revises each Change in the Review; a revised Change carries the user's own text, is trusted (not checked against Evidence), and goes into the Tailored CV exactly as written.
 _Avoid_: Suggestion, edit (edit means the user's own revision of a Change)
+
+**Condensing**:
+The step after tailoring that makes a CV too long for one page fit: it first rewords bullets and the summary shorter, then removes bullets that no met or partially met Requirement cites, never a job's last bullet. Nothing but bullets is ever removed. Its Changes are decided in the Review like any other, and the user may drop further bullets there.
+_Avoid_: Condense round (a round is a tailoring round), trimming
 
 **Evidence**:
 A piece of the CV, or a fact the user supplied during the session, that supports a Change or a Requirement Coverage verdict.

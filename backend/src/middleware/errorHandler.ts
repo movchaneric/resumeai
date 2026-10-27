@@ -9,7 +9,7 @@ export const errorHandler: ErrorRequestHandler = (error, _req, res, next) => {
   if (res.headersSent) return next(error);
   const apiError = toApiError(error);
   if (apiError.code === "INTERNAL") console.error(error);
-  res.status(apiError.status).json({ code: apiError.code, message: apiError.message });
+  res.status(apiError.status).json({ ...apiError.details, code: apiError.code, message: apiError.message });
 };
 
 function toApiError(error: unknown): ApiError {

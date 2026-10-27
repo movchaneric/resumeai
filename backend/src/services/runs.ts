@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   AnswerSchema,
   ReviewDecisionSchema,
+  ReviewSubmissionSchema,
   RunIdSchema,
   RunViewSchema,
   StepKeySchema,
@@ -10,9 +11,12 @@ import {
   type Coverage,
   type Cv,
   type ExitReason,
+  type ItemId,
   type JobProfile,
   type Question,
   type ReviewDecision,
+  type ReviewFit,
+  type ReviewSubmission,
   type RequirementId,
   type RunErrorCode,
   type RunId,
@@ -25,6 +29,7 @@ import { docxSizes, measureFit, renderDocx } from "@/export/index.js";
 import type { ExportFormat } from "@/export/index.js";
 import { applyChanges } from "@/tailoring/applyChanges.js";
 import { keptChanges, reviewProblem } from "@/tailoring/review.js";
+import { fitOfChanges, reviewFit } from "@/tailoring/reviewFit.js";
 import type { RecordedRejection } from "@/tailoring/validateChanges.js";
 import { MAX_ROUNDS } from "@/scoring/exitRouter.js";
 import { CoverageError } from "@/scoring/errors.js";
@@ -95,10 +100,10 @@ export interface GraphRunner {
    */
   recover(runId: RunId): Promise<RunSnapshot>;
   /**
-   * Resumes a Run paused for review with the decisions (already validated by the caller) and runs to the end, where the
-   * runner writes `completed`. The caller opens the root span for it. Rejects with the original error on failure.
+   * Resumes a Run paused for review with the decisions and the dropped bullets (already validated by the caller) and
+   * runs to the end, where the runner writes `completed`. The caller opens the root span for it. Rejects with the original error on failure.
    */
-  review(runId: RunId, decisions: ReviewDecision[]): Promise<RunSnapshot>;
+  review(runId: RunId, decisions: ReviewDecision[], drops?: ItemId[]): Promise<RunSnapshot>;
   /** The current state, or null when no checkpoint exists yet. */
   read(runId: RunId): Promise<RunSnapshot | null>;
   /** Removes every checkpoint stored for the Run. Only safe once nothing is running it. */
@@ -162,6 +167,9 @@ export const BUSY_STATUSES: RunStatus[] = ["parsing", "extracting", "tailoring"]
 
 /** What a client connection gives `openRunStream`: `send` writes one view, `close` ends the stream. */
 export type RunStreamSink = { send: (view: RunView) => void; close: () => void };
+
+/** The Pause a Review answers. */
+const REVIEW_PAUSE = { status: "awaiting_review", code: "RUN_NOT_AWAITING_REVIEW", message: "This Run is not waiting for review." } as const;
 
 /** The longest `has_experience` text, after trimming. */
 export const MAX_ANSWER_LENGTH = 1000;
@@ -258,16 +266,41 @@ export class RunsService {
 
   /**
    * Accepts the Review for a Run paused in `awaiting_review` and resumes it in the background (`resumeFromPause`):
-   * 404, 409, then 400 for decisions that do not fit the Run's Changes (`validateReview`, nothing is resumed), then the claim.
+   * 404, 409, then 400 for decisions or drops that do not fit the Run (`validateReview`, nothing is resumed), then 400
+   * `CV_TOO_LONG` when the result runs over one page although the shortest possible CV fits (`reviewFitOrThrow`), then the claim.
    */
   async submitReview(rawId: string, body: unknown): Promise<void> {
     const { graphRunner } = this.deps;
     await this.resumeFromPause(
       rawId,
-      { status: "awaiting_review", code: "RUN_NOT_AWAITING_REVIEW", message: "This Run is not waiting for review." },
-      async (id) => validateReview(body, await graphRunner.read(id)),
-      (id, decisions) => this.runReview(id, decisions),
+      REVIEW_PAUSE,
+      async (id) => {
+        const snapshot = await graphRunner.read(id);
+        const submission = validateReview(body, snapshot);
+        const fit = await reviewFit(snapshot!.cv!, snapshot!.changes, submission.decisions, submission.drops);
+        // A CV that cannot fit even at its shortest is accepted as submitted; the download's 409 is the last resort.
+        if (!fit.fits && fit.fittable) {
+          throw new ApiError("CV_TOO_LONG", `The CV runs about ${fit.overByLines} lines over one page. Drop or reject more, then submit again.`, {
+            status: 400,
+            details: { overByLines: fit.overByLines },
+          });
+        }
+        return submission;
+      },
+      (id, { decisions, drops }) => this.runReview(id, decisions, drops),
     );
+  }
+
+  /**
+   * The fit of a Review as it would be submitted, without submitting it: same 404 and 409 as `submitReview`, same 400s for
+   * the body, and nothing changes. The answer is the fit of the CV the submission would produce.
+   */
+  async previewReview(rawId: string, body: unknown): Promise<ReviewFit> {
+    const run = await this.findLiveRun(rawId);
+    if (run.status !== REVIEW_PAUSE.status) throw new ApiError(REVIEW_PAUSE.code, REVIEW_PAUSE.message);
+    const snapshot = await this.deps.graphRunner.read(run.id);
+    const { decisions, drops } = validateReview(body, snapshot);
+    return reviewFit(snapshot!.cv!, snapshot!.changes, decisions, drops);
   }
 
   /**
@@ -299,9 +332,9 @@ export class RunsService {
   }
 
   /** The background Review: the graph runs on from the decisions to the end, or the failure is recorded on the Run. Never throws. */
-  async runReview(id: RunId, decisions: ReviewDecision[]): Promise<void> {
+  async runReview(id: RunId, decisions: ReviewDecision[], drops: ItemId[] = []): Promise<void> {
     const { graphRunner } = this.deps;
-    await this.runAndRecord(id, "review", () => withSessionSpan("review", id, async (span) => setOutcomeAttributes(span, await graphRunner.review(id, decisions))));
+    await this.runAndRecord(id, "review", () => withSessionSpan("review", id, async (span) => setOutcomeAttributes(span, await graphRunner.review(id, decisions, drops))));
   }
 
   /** Logs a failed background step and marks the Run failed with the matching code and message. */
@@ -439,7 +472,10 @@ export class RunsService {
   async getRunView(rawId: string): Promise<RunView> {
     const run = await this.findLiveRun(rawId);
     // A Run with no checkpoint yet (the graph has not started) reads as null.
-    return toRunView(run, await this.deps.graphRunner.read(run.id));
+    const state = await this.deps.graphRunner.read(run.id);
+    // The fit of the CV as shown (every Change accepted, no drops), measured on read: up to 7 renders, 14 when it is over.
+    const fit = run.status === "awaiting_review" && state?.cv ? await fitOfChanges(state.cv, state.changes, state.changes) : undefined;
+    return toRunView(run, state, fit);
   }
 
   /**
@@ -537,10 +573,10 @@ function validateAnswers(body: unknown, questionIds: Set<string>): Answer[] {
 }
 
 /**
- * Checks the body of a review request against the Run's Changes and returns the decisions with `after` trimmed. The
- * rules are `reviewProblem`'s; the messages never echo the user's text.
+ * Checks the body of a review request against the Run's Changes and returns the decisions with `after` trimmed, and the
+ * drops (none when the body has none). The rules are `reviewProblem`'s; the messages never echo the user's text.
  */
-function validateReview(body: unknown, snapshot: RunSnapshot | null): ReviewDecision[] {
+function validateReview(body: unknown, snapshot: RunSnapshot | null): ReviewSubmission {
   const invalid = (message: string) => new ApiError("INVALID_REVIEW", message);
   const list = (body as { decisions?: unknown } | null | undefined)?.decisions;
   if (!Array.isArray(list)) throw invalid("Send `decisions` as a list.");
@@ -549,10 +585,12 @@ function validateReview(body: unknown, snapshot: RunSnapshot | null): ReviewDeci
     if (!parsed.success) throw invalid(`Decision ${i + 1} is not valid.`);
     return parsed.data.after === undefined ? parsed.data : { ...parsed.data, after: parsed.data.after.trim() };
   });
+  const parsedDrops = ReviewSubmissionSchema.shape.drops.safeParse((body as { drops?: unknown }).drops);
+  if (!parsedDrops.success) throw invalid("Send `drops` as a list of Item IDs.");
   if (!snapshot?.cv) throw invalid("This Run has nothing to review.");
-  const problem = reviewProblem(snapshot.cv, snapshot.changes, decisions, snapshot.userEvidence);
+  const problem = reviewProblem(snapshot.cv, snapshot.changes, decisions, snapshot.userEvidence, parsedDrops.data);
   if (problem !== null) throw invalid(problem);
-  return decisions;
+  return { decisions, drops: parsedDrops.data };
 }
 
 /** The Tailored CV: while the user is reviewing, the original plus every proposed Change; once completed, only the accepted and revised ones. */
@@ -565,7 +603,7 @@ function tailoredCv(status: RunStatus, cv: Cv, changes: Change[]): Cv {
  * A failed Run marks the step that broke as `failed`: `coverage` when the extraction results exist, otherwise
  * `extract`. Scores are rounded here for display. Validating against the schema keeps the response honest.
  */
-function toRunView(run: StoredRun, state: RunSnapshot | null): RunView {
+function toRunView(run: StoredRun, state: RunSnapshot | null, fit?: ReviewFit): RunView {
   const common = {
     id: run.id,
     createdAt: run.createdAt.toISOString(),
@@ -612,7 +650,7 @@ function toRunView(run: StoredRun, state: RunSnapshot | null): RunView {
       userEvidence: state.userEvidence,
       iterations: { used: state.rounds, max: MAX_ROUNDS },
       exitReason: state.exitReason,
-      ...(run.status === "completed" ? { download: { docx: `/runs/${run.id}/cv.docx`, pdf: `/runs/${run.id}/cv.pdf` } } : {}),
+      ...(run.status === "completed" ? { download: { docx: `/runs/${run.id}/cv.docx`, pdf: `/runs/${run.id}/cv.pdf` } } : { fit }),
     });
   }
   if (run.status === "awaiting_answers" && extracted && state) {

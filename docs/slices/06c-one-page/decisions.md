@@ -54,6 +54,21 @@ Settled in a grilling session (2026-10-27), building on the outline agreed in 6b
   - accept a Review with a user drop that fits;
   - produce a downloaded PDF that reads back as one page.
 
+## Settled during implementation
+- **Fit line numbering (#56):** "size step N of M" counts from 1 (N is `step + 1`, M is `FLOOR_STEP + 1`, so 7).
+- **The page check's cost (#56):** each tailoring round measures the draft twice, once for the prompt and once for the `add` check, and each measure renders up to 7 PDFs. Accepted for now; a follow-up if rounds get slow.
+- **The overflow measure was wrong in 6b (#57, found by the Condensing agent).** `renderPdf` reported the total content height, not the height past the first page, so `overBy` and `overByLines` were about one page too high (the long fixture went from 85 lines over to 26). It's fixed in `export/pdfRenderer.ts`, with a test that removing `ceil(overflow / item height)` items fits.
+- **Condensing in the graph (#57):**
+  - Nodes `condense_measure`, `condense_reword`, `condense_drop` (it loops, at most twice) and `condense_rejudge`.
+  - `condense_measure` writes no status and makes no model call. A CV that fits goes straight to `review`, so it never flashes `tailoring`. On the skip-tailoring path, only a CV that's too long moves to `tailoring`.
+  - The graph reaches `fitOf` only through `tailoring/condense.ts` (`measureCondense`).
+- **Condense Change IDs:** `cd1.cN` for the reword, `cd2.cN` and `cd3.cN` for the drops. A reword's Evidence is the Item itself plus whatever an earlier `replace` of it cited, and its rationale is fixed ("Shortened to fit one page.").
+- **What a failure leaves (#57):**
+  - A failed re-judge after condensing **keeps** the earlier verdicts rather than reverting them, because the claim check already vouched for each rewording.
+  - A failure measuring the CV skips condensing.
+  - Condense rejections aren't stored in `rejections`, because the tailor never runs again.
+- **The `fit` step in the view (#57):** `pending` until condensing starts, `running` while it runs (the status is `tailoring`), and `done` once condensing has finished or wasn't needed. An Interrupted Run cut off during condensing shows it `failed`.
+
 ## Tickets
 | Ticket | Scope | Depends on |
 |---|---|---|

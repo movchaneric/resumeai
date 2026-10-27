@@ -32,6 +32,14 @@ describe("minimalCv", () => {
     expect(minimal.skills.map((s) => s.id)).toEqual(["skill3", "skill2", "skill1"]);
   });
 
+  it("leaves out a replace that lengthens its bullet, and keeps one that shortens it", () => {
+    const longer = change({ id: "r1.c1", op: "replace", targetItemId: "exp1.b1", before: "x", after: `${cv.experience[0]!.bullets[0]!.text} and then some more words`, evidenceIds: ["exp1.b1"] });
+    const shorter = change({ id: "r1.c2", op: "replace", targetItemId: "exp2.b1", before: "x", after: "Built it.", evidenceIds: ["exp2.b1"] });
+    const minimal = minimalCv(assignCvIds({ ...longExtracted, experience: longExtracted.experience.map((e) => ({ ...e, bullets: e.bullets.slice(0, 1) })) }), [longer, shorter]);
+    expect(minimal.experience[0]!.bullets[0]!.text).toBe(longExtracted.experience[0]!.bullets[0]);
+    expect(minimal.experience[1]!.bullets[0]!.text).toBe("Built it.");
+  });
+
   it("leaves an entry that had no bullets without one", () => {
     expect(minimalCv(cv, []).education[0]!.bullets).toHaveLength(1);
     const bare = assignCvIds({ ...longExtracted, education: [{ ...longExtracted.education[0]!, bullets: [] }] });
@@ -60,6 +68,13 @@ describe("reviewFit", () => {
     expect(await reviewFit(cv, [remove], accept([remove]), [])).toMatchObject({ fits: false, fittable: true });
     // A rejected remove is not applied: dropping its bullet is a drop like any other.
     expect(await reviewFit(cv, [remove], [{ changeId: remove.id, decision: "reject" }], allButFirst as never)).toMatchObject({ fits: true });
+  });
+
+  it("is fittable when the minimal CV fits only without a lengthening replace the user could reject", async () => {
+    const base = assignCvIds({ ...longExtracted, experience: longExtracted.experience.map((e) => ({ ...e, bullets: e.bullets.slice(0, 1) })) });
+    const bloat = change({ id: "r1.c1", op: "replace", targetItemId: "exp1.b1", before: "x", after: `${base.experience[0]!.bullets[0]!.text} ${"More detail about the work. ".repeat(120)}`, evidenceIds: ["exp1.b1"] });
+    expect(await fitOf(applyChanges(base, [bloat]))).toMatchObject({ fits: false });
+    expect(await reviewFit(base, [bloat], accept([bloat]), [])).toMatchObject({ fits: false, fittable: true });
   });
 
   it("says fittable is false when even the minimal CV is too long", async () => {

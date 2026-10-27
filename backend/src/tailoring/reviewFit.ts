@@ -1,15 +1,19 @@
 import type { Change, Cv, ItemId, ReviewDecision, ReviewFit } from "@resume-ai/shared";
 import { fitOf } from "@/export/fit.js";
 import { applyChanges } from "@/tailoring/applyChanges.js";
+import { textItems } from "@/tailoring/cvItems.js";
 import { applyDecisions, keptChanges, userDrops } from "@/tailoring/review.js";
 
 /**
- * The shortest CV the user could submit: every `add` rejected, every other Change accepted, and every job, project and
+ * The shortest CV the user could submit: every `add` rejected, every `remove` accepted, a `replace` kept only when its text is
+ * shorter than the original (the user can reject one that lengthens), and every job, project and
  * education entry cut to one bullet, its shortest as it reads after the Changes. An entry with no bullets stays without.
  * Pure.
  */
 export function minimalCv(original: Cv, changes: Change[]): Cv {
-  const cv = applyChanges(original, changes.filter((c) => c.op !== "add"));
+  const originals = textItems(original);
+  const shortens = (c: Change) => c.op === "replace" && c.after.length < (originals.get(c.targetItemId)?.text.length ?? 0);
+  const cv = applyChanges(original, changes.filter((c) => c.op === "remove" || c.op === "reorder" || shortens(c)));
   for (const entry of [...cv.experience, ...cv.projects, ...cv.education]) {
     const shortest = entry.bullets.reduce<(typeof entry.bullets)[number] | undefined>((best, b) => (best === undefined || b.text.length < best.text.length ? b : best), undefined);
     entry.bullets = shortest === undefined ? [] : [shortest];

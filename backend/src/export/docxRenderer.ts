@@ -18,8 +18,8 @@ import type { Block, Run } from "@/export/layout.js";
 import type { Sizes } from "@/export/sizes.js";
 
 /*
- * The same blocks as the PDF, as Word paragraphs. Units: font sizes are half-points, spacing, indents,
- * margins and tab positions are twips (1/20 point), the page is A4 (210 x 297 mm).
+ * The same blocks as the PDF, as Word paragraphs. Units: font sizes are half-points (rounded down), spacing, indents,
+ * margins and tab positions are twips (1/20 point, rounded to nearest), the page is A4 (210 x 297 mm).
  */
 
 const GRAY_BAR = "e4e4e7";
@@ -37,7 +37,8 @@ type FontOptions = NonNullable<ConstructorParameters<typeof Document>[0]["fonts"
 const BULLET_REF = "cv-bullet";
 
 const twips = (points: number): number => Math.round(points * 20);
-const halfPoints = (points: number): number => Math.round(points * 2);
+/** Word sizes are whole half-points: round DOWN so the DOCX is never larger than its size step (10.25pt -> 10pt, not 10.5pt). */
+const halfPoints = (points: number): number => Math.floor(points * 2 + 1e-9);
 
 const fontCache = new Map<FontName, Buffer>();
 function fontBytes(name: FontName): Buffer {

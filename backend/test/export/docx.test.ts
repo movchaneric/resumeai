@@ -88,6 +88,25 @@ describe("renderDocx", () => {
     expect(document).toContain('w:fill="e4e4e7"'); // the heading bar
   });
 
+  it("never sets a font larger than its size step, rounding quarter-points down to the half-point", async () => {
+    for (let step = 0; step <= FLOOR_STEP; step++) {
+      const sizes = sizesForStep(step);
+      const files = unzip(await renderDocx(layoutCv(fixtureCv()), sizes));
+      const allowed = new Set([sizes.body, sizes.name, sizes.headline, sizes.heading].map((pt) => Math.floor(pt * 2 + 1e-9)));
+      for (const part of ["word/document.xml", "word/numbering.xml"]) {
+        const values = [...files.get(part)!.toString().matchAll(/<w:sz w:val="(\d+)"/g)].map((m) => Number(m[1]));
+        expect(values.length).toBeGreaterThan(0);
+        for (const value of values) {
+          expect(allowed.has(value), `step ${step} ${part} sz ${value}`).toBe(true);
+          expect(value).toBeLessThanOrEqual(Math.floor(sizes.name * 2 + 1e-9));
+        }
+      }
+      expect(files.get("word/document.xml")!.toString()).toContain(`<w:sz w:val="${Math.floor(sizes.body * 2 + 1e-9)}"/>`);
+    }
+    const step1 = unzip(await renderDocx(layoutCv(fixtureCv()), sizesForStep(1)));
+    expect(step1.get("word/document.xml")!.toString()).toContain('<w:sz w:val="20"/>');
+  });
+
   it("is not written to disk: it returns a Buffer", async () => {
     expect(Buffer.isBuffer(await renderDocx(layoutCv(longCv(1, 2)), sizesForStep(0)))).toBe(true);
   });

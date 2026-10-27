@@ -7,3 +7,4 @@ allowBuilds:
   esbuild: true
   prisma: true
   "@prisma/engines": true
+  msw: false

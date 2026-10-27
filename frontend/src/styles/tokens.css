@@ -1,0 +1,65 @@
+@import "tailwindcss";
+@import "@fontsource-variable/plus-jakarta-sans";
+
+/* Tokens from docs/slices/07b-frontend-core/design-system/MASTER.md. Light only. Components use these, never raw hex. */
+@theme {
+  --font-sans: "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, sans-serif;
+
+  --color-bg: #fafafa;
+  --color-surface: #ffffff;
+  --color-fg: #18181b;
+  --color-fg-2: #52525b;
+  --color-fg-3: #71717a;
+  --color-line: #e4e4e7;
+  --color-soft: #f4f4f5;
+  --color-accent: #4f46e5;
+  --color-accent-soft: #eef2ff;
+  --color-accent-fg: #3730a3;
+  --color-ok: #047857;
+  --color-ok-soft: #ecfdf5;
+  --color-del: #be123c;
+  --color-warn-soft: #fffbeb;
+  --color-warn-fg: #78350f;
+  --color-warn-line: #fcd34d;
+  --color-danger: #b91c1c;
+
+  /* Dark brand panel (auth pages): a surface, not a theme. */
+  --color-panel: #18181b;
+  --color-panel-raised: #27272a;
+  --color-panel-ring: #3f3f46;
+  --color-panel-fg: #fafafa;
+  --color-panel-fg-2: #d4d4d8;
+  --color-panel-muted: #a1a1aa;
+  --color-panel-added: #6ee7b7;
+  --color-panel-badge: #c7d2fe;
+  --color-panel-badge-bg: #312e81;
+
+  --radius-sm: 8px;
+  --radius-input: 10px;
+  --radius-btn: 12px;
+  --radius-tile: 14px;
+  --radius-hero: 16px;
+}
+
+@layer base {
+  html {
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 { font-weight: 700; letter-spacing: -0.02em; }
+  :focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+  button, a, label[for], summary { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

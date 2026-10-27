@@ -28,7 +28,7 @@ class FakeStore {
   /** Every status written, in order, per Run. */
   statusLog: RunStatus[] = [];
   async create(run: NewRun): Promise<StoredRun> {
-    const stored = { ...run, exportPath: null, error: null };
+    const stored = { ...run, error: null };
     this.rows.set(run.id, stored);
     return stored;
   }
@@ -921,7 +921,7 @@ describe("RunsService.submitAnswers", () => {
       await store.setStatus(id, to);
       return true;
     };
-    store.rows.set(runId, { id: runId, status, createdAt: now(), expiresAt: new Date(now().getTime() + 1000), exportPath: null, error: null });
+    store.rows.set(runId, { id: runId, status, createdAt: now(), expiresAt: new Date(now().getTime() + 1000), error: null });
     const answer = vi.fn<GraphRunner["answer"]>(async () => snapshot);
     const graphRunner: GraphRunner = { start: async () => snapshot, answer, review: async () => snapshot, recover: async () => snapshot, read: async () => snapshot, deleteThread: async () => {} };
     const tasks: (() => Promise<void>)[] = [];
@@ -1039,7 +1039,7 @@ describe("RunsService.submitReview when the claim is lost", () => {
       await lose(store, id);
       return false;
     };
-    store.rows.set(runId, { id: runId, status: "awaiting_review", createdAt: now(), expiresAt: new Date(now().getTime() + 1000), exportPath: null, error: null });
+    store.rows.set(runId, { id: runId, status: "awaiting_review", createdAt: now(), expiresAt: new Date(now().getTime() + 1000), error: null });
     const graphRunner: GraphRunner = { start: async () => snapshot, answer: async () => snapshot, review: async () => snapshot, recover: async () => snapshot, read: async () => snapshot, deleteThread: async () => {} };
     const tasks: (() => Promise<void>)[] = [];
     const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner, events: new InProcessRunEvents(), now, runInBackground: (t) => void tasks.push(t) });
@@ -1069,7 +1069,7 @@ describe("RunsService.deleteRun", () => {
   /** A store holding one Run, with the conditional delete the real store does in SQL, and a runner whose `deleteThread` is a spy. */
   function deleteSetup(deleteThread: GraphRunner["deleteThread"] = async () => {}) {
     const store = new FakeStore() as FakeStore & { deleteIdleLive(id: RunId, busy: RunStatus[], liveAt: Date): Promise<boolean> };
-    store.rows.set(runId, { id: runId, status: "awaiting_review", createdAt: now(), expiresAt: new Date(now().getTime() + 1000), exportPath: null, error: null });
+    store.rows.set(runId, { id: runId, status: "awaiting_review", createdAt: now(), expiresAt: new Date(now().getTime() + 1000), error: null });
     store.deleteIdleLive = async (id, busy, liveAt) => {
       const row = store.rows.get(id);
       if (!row || busy.includes(row.status) || row.expiresAt <= liveAt) return false;

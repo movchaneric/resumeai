@@ -19,7 +19,8 @@ function toSnapshot(state: GraphStateShape & { values: Partial<RunStateValues> }
   return {
     position: positionOf(state),
     jobProfile: values.jobProfile ?? null,
-    cv: values.cv ?? null,
+    // An older checkpoint's CV has no `headline`: it reads as null (ADR 0003, no migration).
+    cv: values.cv ? { ...values.cv, contact: { ...values.cv.contact, headline: values.cv.contact.headline ?? null } } : null,
     coverageBefore: values.coverageBefore ?? null,
     coverage: values.coverage ?? null,
     changes: values.changes ?? [],

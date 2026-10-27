@@ -13,6 +13,7 @@ import { onlyGapsLeft, routeAfterRound, shouldSkipTailoring } from "@/scoring/ex
 import { assessCoverage } from "@/scoring/assessCoverage.js";
 import { matchScore } from "@/scoring/matchScore.js";
 import { resolveJobProfile, type JobProfileCache } from "@/graph/jobProfileCache.js";
+import { STATUS_AT_POSITION } from "@/graph/position.js";
 import { RunState } from "@/graph/state.js";
 import type { RecordedRejection } from "@/tailoring/validateChanges.js";
 import { UserEvidenceIdSchema, type Answer, type Change, type Question, type RequirementId, type ReviewDecision, type UserEvidence } from "@resume-ai/shared";
@@ -21,12 +22,12 @@ import { UserEvidenceIdSchema, type Answer, type Change, type Question, type Req
 export const NODE_STATUS = {
   extract: "extracting",
   assess_coverage: "extracting",
-  collect_answers: "awaiting_answers",
+  collect_answers: STATUS_AT_POSITION.answers,
   begin_round: "tailoring",
   tailor: "tailoring",
   validate: "tailoring",
   rejudge: "tailoring",
-  review: "awaiting_review",
+  review: STATUS_AT_POSITION.review,
   final_rejudge: "tailoring",
 } as const;
 

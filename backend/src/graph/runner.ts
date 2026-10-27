@@ -7,7 +7,7 @@ import type { LlmClient } from "@/llm/llmClient.js";
 import { NODE_STATUS, buildRunGraph, type RoundSummary, type RunGraph } from "@/graph/runGraph.js";
 import type { JobProfileCache } from "@/graph/jobProfileCache.js";
 import type { RunStateValues } from "@/graph/state.js";
-import { positionOf, type GraphStateShape } from "@/graph/position.js";
+import { STATUS_AT_POSITION, positionOf, type GraphStateShape } from "@/graph/position.js";
 
 /** The part of the runs store the graph runner needs. */
 export interface StatusWriter {
@@ -116,9 +116,7 @@ export class LangGraphRunner implements GraphRunner {
       // the Run is `completed`.
       const state = await this.graph.getState(config);
       const snapshot = toSnapshot(state);
-      if (snapshot.position === "answers") await this.write(runId, "awaiting_answers");
-      else if (snapshot.position === "review") await this.write(runId, "awaiting_review");
-      else if (snapshot.position === "ended") await this.write(runId, "completed");
+      if (snapshot.position !== null) await this.write(runId, STATUS_AT_POSITION[snapshot.position]);
       this.events.publish(runId);
       return snapshot;
     } finally {

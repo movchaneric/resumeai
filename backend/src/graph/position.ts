@@ -1,3 +1,4 @@
+import type { RunStatus } from "@resume-ai/shared";
 import type { RunSnapshot } from "@/services/runs.js";
 
 /** The part of a LangGraph state snapshot the position needs: the nodes due to run and the tasks with their interrupts. */
@@ -18,3 +19,13 @@ export function positionOf(state: GraphStateShape): RunSnapshot["position"] {
   if (waiting("review")) return "review";
   return null;
 }
+
+/**
+ * The Run status for each position the graph can rest in, in one place: the runner writes it at a pause or the end,
+ * recovery restores it, and the nodes that wait use it as their `NODE_STATUS`.
+ */
+export const STATUS_AT_POSITION = {
+  answers: "awaiting_answers",
+  review: "awaiting_review",
+  ended: "completed",
+} as const satisfies Record<NonNullable<RunSnapshot["position"]>, RunStatus>;

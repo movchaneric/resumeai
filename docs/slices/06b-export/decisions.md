@@ -65,3 +65,10 @@ Agreed in the same session; the details (the condense round's limit, its place r
 - **Review:** every condense Change is decided like any other. The user may also drop bullets under the same rules. A Review whose result does not fit is a 400; `POST /runs/:id/review/preview` (no state change) returns the fit, the size used and how much is over, and the `awaiting_review` view shows the fit with every Change accepted.
 - **Score:** every dropped bullet re-judges the Requirements whose Evidence cites it (the ADR 0003 partial re-judge rule).
 - **ADR 0003 amended:** a `remove` Change applies only to a bullet, only to fit one page, never to Evidence a Requirement cites; nothing else is ever removed.
+
+## Proof
+One real Run (2026-10-27, `gemini-3.5-flash-lite`, the fixture CV `backend/test/fixtures/cv.docx` and a made-up job description), through `scripts/proof-run.sh --review accept-all` to `completed`, score 42 → 64, 4 Changes accepted.
+- Before `completed` (at `awaiting_answers`) both routes answered 409 `RUN_NOT_COMPLETED`, and the view had no `download`.
+- At `completed` the view held both links. `cv.pdf` and `cv.docx` answered 200 with the right `Content-Type`, `Content-Disposition: attachment; filename="tailored-cv.<ext>"` and `Cache-Control: no-store` (27 KB and 412 KB).
+- The PDF read back with `unpdf` is one page. The PDF and DOCX texts (unpdf, mammoth) hold the same sections in the same fixed order, with the accepted Changes applied.
+- Found on the way, not export bugs: round 3 hit a provider 429, so the Run exited with `exitReason: error` after two rounds (existing behaviour). The accepted summary `replace` began with the prompt's item tag ("[summary] Backend developer …"): the tailor copied it from the rendered CV and nothing strips or rejects it, so it reached the exported file.

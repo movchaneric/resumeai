@@ -100,4 +100,23 @@ describe("renderTailorInput with User Evidence and Confirmed Gaps", () => {
     expect(text).not.toContain("[req3]");
     expect(text).toContain("[req1]");
   });
+
+  it("tells the model the CV must fit one page and to prefer replace over add", () => {
+    const text = renderTailorInput({ cv: cv(), requirements, coverage, rejections: [], fit: { fits: true, step: 3, steps: 7 } });
+    expect(text).toContain("must fit one page");
+    expect(text).toContain("prefer \"replace\" over \"add\"");
+  });
+
+  it("states the fit status: the size step when it fits, the lines over when it does not", () => {
+    const fits = renderTailorInput({ cv: cv(), requirements, coverage, rejections: [], fit: { fits: true, step: 3, steps: 7 } });
+    expect(fits).toContain("The draft fits one page at size step 3 of 7.");
+    const over = renderTailorInput({ cv: cv(), requirements, coverage, rejections: [], fit: { fits: false, overByLines: 5 } });
+    expect(over).toContain("The draft is already over one page by 5 lines at the smallest size.");
+    expect(over).not.toContain("fits one page at");
+  });
+
+  it("leaves out the fit section when no fit is given", () => {
+    const text = renderTailorInput({ cv: cv(), requirements, coverage, rejections: [] });
+    expect(text).not.toContain("one page");
+  });
 });

@@ -21,6 +21,7 @@ export const STAGE1_REASONS = {
   noCoverage: "A remove cannot be checked without the Coverage verdicts.",
   lastBullet: "A job, project or education entry keeps at least one bullet; this is its last.",
   notShorter: "A condensing rewording must have fewer characters than the Item's current text.",
+  pastOnePage: "The Change would push the CV past one page.",
   numberAdded: "The new text contains a number or date that is in neither the original text nor the cited Evidence.",
 } as const;
 

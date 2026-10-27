@@ -47,6 +47,7 @@ The owner's own CV layout, rebuilt in code. The owner's file never enters the re
 ## Tests and proof
 - Tests use the made-up fixture CV only (never `local-cvs/`). The PDF is read back with `unpdf` (page count, text order); the DOCX with `mammoth` (text order). A long made-up CV proves shrink-to-fit and `CV_TOO_LONG`.
 - **Owner sign-off before the PR:** sample PDF and DOCX of the fixture CV, generated into the scratchpad (not committed), approved by the owner.
+  - **Approved 2026-10-27:** the PDF at step 0 and the DOCX at step 1 (10pt body: Word sizes are whole half-points, so the DOCX rounds sizes down and is never larger than its step). The DOCX's heading bars are square without the PDF's vertical padding; it embeds the fonts (about 400 KB). Word on the web and Google Docs may substitute the fonts.
 
 ## Tickets
 | Ticket | Scope | Depends on |

@@ -10,7 +10,7 @@ import { setActiveSpanAttribute } from "@/utils/spans.js";
 import { condenseDrop, condenseReword, measureCondense, type CondenseInput, type CondenseStepResult } from "@/tailoring/condense.js";
 import { removableBullets } from "@/tailoring/removable.js";
 import { mergeRoundIntoChanges } from "@/tailoring/mergeChanges.js";
-import { mergeCoverage, requirementsAffectedByReview, requirementsListedBy } from "@/tailoring/roundCoverage.js";
+import { mergeCoverage, requirementsAffectedByReview, requirementsCiting, requirementsListedBy } from "@/tailoring/roundCoverage.js";
 import { onlyGapsLeft, routeAfterRound, shouldSkipTailoring } from "@/scoring/exitRouter.js";
 import { assessCoverage } from "@/scoring/assessCoverage.js";
 import { matchScore } from "@/scoring/matchScore.js";
@@ -335,8 +335,7 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
     .addNode("condense_rejudge", async (state) => {
       await onEnter(state.runId, "condense_rejudge");
       const { requirements } = state.jobProfile!;
-      const touched = new Set(state.condense!.touched);
-      const affected = requirements.filter((r) => state.coverage!.some((c) => c.requirementId === r.id && c.evidenceIds.some((id) => touched.has(id))));
+      const affected = requirementsCiting(requirements, state.coverage!, state.condense!.touched);
       if (affected.length === 0) return { condensed: true };
       try {
         const condensed = applyChanges(state.cv!, state.changes);

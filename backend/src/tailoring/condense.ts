@@ -1,13 +1,14 @@
 import { z } from "zod";
 import { ChangeSchema } from "@resume-ai/shared";
 import type { Change, Coverage, Cv, Requirement, UserEvidence } from "@resume-ai/shared";
-import { fitOf, type FitResult } from "@/export/fit.js";
+import { fitOf, type FitResult } from "@/export/index.js";
 import type { LlmClient, LlmMessage } from "@/llm/llmClient.js";
 import { renderDropInput, renderRewordInput, type CondenseItem } from "@/prompts/renderCondense.js";
 import { applyChanges } from "@/tailoring/applyChanges.js";
 import { textItems } from "@/tailoring/cvItems.js";
 import { mergeRoundIntoChanges } from "@/tailoring/mergeChanges.js";
 import { removableBullets } from "@/tailoring/removable.js";
+import { touchedItemIds } from "@/tailoring/roundCoverage.js";
 import { validateChanges, type RecordedRejection } from "@/tailoring/validateChanges.js";
 import { withSpan, type Span } from "@/utils/spans.js";
 
@@ -49,7 +50,7 @@ export type CondenseInput = {
   changes: Change[];
   requirements: Requirement[];
   coverage: Coverage[];
-  userEvidence?: UserEvidence[];
+  userEvidence: UserEvidence[];
   /** How far over one page the draft is, in lines. */
   overByLines: number;
   /** 1-based number of the step: 1 is the reword, 2 and 3 are the drops. Used for Change IDs. */
@@ -83,7 +84,7 @@ async function finishStep(input: CondenseInput, valid: Change[], rejections: Rec
   span.setAttribute("condense.valid", valid.length);
   span.setAttribute("condense.rejected", rejections.length);
   span.setAttribute("condense.fit_after", overByLines);
-  return { changes, touched: valid.flatMap((c) => (c.op === "replace" || c.op === "remove" ? [c.targetItemId as string] : [])), overByLines, rejections };
+  return { changes, touched: touchedItemIds(valid), overByLines, rejections };
 }
 
 /** Runs `fn` in a span; a throw sets `condense.failed` on it (and the span ends in error, see `withSpan`). */

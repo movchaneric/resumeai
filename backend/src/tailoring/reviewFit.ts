@@ -1,7 +1,7 @@
 import type { Change, Cv, ItemId, ReviewDecision, ReviewFit } from "@resume-ai/shared";
-import { fitOf } from "@/export/fit.js";
+import { fitOf } from "@/export/index.js";
 import { applyChanges } from "@/tailoring/applyChanges.js";
-import { textItems } from "@/tailoring/cvItems.js";
+import { bulletParents, textItems } from "@/tailoring/cvItems.js";
 import { applyDecisions, keptChanges, userDrops } from "@/tailoring/review.js";
 
 /**
@@ -14,7 +14,7 @@ export function minimalCv(original: Cv, changes: Change[]): Cv {
   const originals = textItems(original);
   const shortens = (c: Change) => c.op === "replace" && c.after.length < (originals.get(c.targetItemId)?.text.length ?? 0);
   const cv = applyChanges(original, changes.filter((c) => c.op === "remove" || c.op === "reorder" || shortens(c)));
-  for (const entry of [...cv.experience, ...cv.projects, ...cv.education]) {
+  for (const entry of bulletParents(cv)) {
     const shortest = entry.bullets.reduce<(typeof entry.bullets)[number] | undefined>((best, b) => (best === undefined || b.text.length < best.text.length ? b : best), undefined);
     entry.bullets = shortest === undefined ? [] : [shortest];
   }
@@ -23,13 +23,13 @@ export function minimalCv(original: Cv, changes: Change[]): Cv {
 
 /**
  * Does the CV built from `kept` fit one page? When it does, `fittable` is true without a second measure. When it does not,
- * `fittable` says whether the minimal CV of `changes` fits. Each measure renders up to 7 PDFs, so the minimal CV is only
+ * `fittable` says whether the minimal CV of `proposed` fits. Each measure renders up to 7 PDFs, so the minimal CV is only
  * measured when it is needed.
  */
-export async function fitOfChanges(original: Cv, kept: Change[], changes: Change[]): Promise<ReviewFit> {
+export async function fitOfChanges(original: Cv, kept: Change[], proposed: Change[]): Promise<ReviewFit> {
   const fit = await fitOf(applyChanges(original, kept));
   if (fit.fits) return { fits: true, step: fit.step, fittable: true };
-  const floor = await fitOf(minimalCv(original, changes));
+  const floor = await fitOf(minimalCv(original, proposed));
   return { fits: false, overByLines: fit.overByLines, fittable: floor.fits };
 }
 

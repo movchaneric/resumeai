@@ -8,6 +8,16 @@ export const LIST_IDS = ["experience", "education", "skills", "projects", "certi
 /** The ID of an additional section: `sec1`, `sec2`. */
 export const SECTION_ID_PATTERN = /^sec[0-9]+$/;
 
+/** The jobs, projects and education entries: the only parents with bullets. */
+export function bulletParents(cv: Cv) {
+  return [...cv.experience, ...cv.projects, ...cv.education];
+}
+
+/** The IDs of every bullet of the jobs, projects and education entries. Pass the ORIGINAL CV: only original bullets count as staying, since the user can reject an `add` at Review. */
+export function originalBulletIds(cv: Cv): Set<string> {
+  return new Set(bulletParents(cv).flatMap((p) => p.bullets.map((b) => b.id)));
+}
+
 /** The ordered list of children under a parent: a top-level list, a job, project or education Item (its bullets) or an additional section (its items). */
 export function childLists(cv: Cv): Map<string, IdOnly[]> {
   const lists = new Map<string, IdOnly[]>([

@@ -50,7 +50,8 @@ export const RequirementCoverageSummarySchema = z.object({
 export type RequirementCoverageSummary = z.infer<typeof RequirementCoverageSummarySchema>;
 
 /**
- * Does the CV fit one A4 page, and could it? On a fit: the size step it fits at. Over: how many lines it is over at the
+ * Does the CV fit one A4 page, and could it? On a fit: the size step it fits at, counted from 0 (0 is the normal size, 6 the
+ * smallest); the tailor prompt's "step N of 7" line counts from 1. Over: how many lines it is over at the
  * smallest size (about 14 points each). `fittable` says whether the shortest CV the user could submit fits: when it does
  * not, a Review that runs over is still accepted.
  */

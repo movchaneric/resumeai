@@ -27,6 +27,7 @@ The owner's own CV layout, rebuilt in code. The owner's file never enters the re
 - **Dates:** "Jun 2017 – Feb 2020", "2024 – Present", a bare year as given; an open start shows the end alone.
 - **Page:** A4, justified bullets.
 - **Fonts:** Poppins (name and headings) and Figtree (body), bundled in `backend/assets/fonts/` with their SIL Open Font License files and embedded in both formats.
+- **Details settled on the first sample PDF (owner, 2026-10-27):** a project's dates sit on their own italic line under its name (the URL holds the right side); a job's location follows the company in regular weight ("**Title — Company**, Location"); a URL inside a bullet may break at "/" or "-" (contact lines and right-side URLs never break; no custom line breaking); headings are slightly letter-spaced on a `#e4e4e7` bar.
 - **Latin script only in v1.** A character the fonts lack renders blank or as a box; a Hebrew CV exports badly. Right-to-left is its own slice if needed.
 
 ## One page in 6b: shrink to fit

@@ -37,8 +37,24 @@ The Job Description in structured form: title, company, and its list of Requirem
 _Avoid_: Parsed job, job data
 
 **Run**:
-One end-to-end tailoring session for a single CV and Job Description, from upload to exported Tailored CV. A Run is anonymous, addressed by an unguessable ID, and deleted after its time-to-live or on demand.
+One end-to-end tailoring session for a single CV and Job Description, from upload to exported Tailored CV. A Run is either a Guest Run or an Owned Run, is addressed by an unguessable ID, and is deleted after its time-to-live or on demand.
 _Avoid_: Session, job, task, thread
+
+**Guest Run**:
+A Run with no Account. Anyone with its link can open it, and it is deleted after the short time-to-live.
+_Avoid_: Anonymous run, public run
+
+**Owned Run**:
+A Run that belongs to an Account: one started while signed in, or a Guest Run that the same browser started and handed over at sign-in. Only that Account, signed in, can open it; to anyone else it does not exist. It lives longer than a Guest Run, is listed in My Runs, and is deleted with its Account.
+_Avoid_: Saved run, private run
+
+**Account**:
+A person's sign-in identity: a name, an email, and one or more ways to sign in (a password, Google). Accounts are optional; a guest can do everything except keep a list of Runs.
+_Avoid_: User (the plain word for whoever uses the app), profile (clashes with Job Profile), member
+
+**My Runs**:
+The list of an Account's Owned Runs, newest first.
+_Avoid_: History, dashboard
 
 **Pause**:
 A point where a Run waits for the user: for Answers to its Questions, or for review of its Changes. A Pause is durable; it ends only when the user acts or the Run's time-to-live runs out.

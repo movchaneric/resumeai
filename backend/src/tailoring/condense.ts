@@ -1,11 +1,9 @@
 import { z } from "zod";
-import { ChangeSchema } from "@resume-ai/shared";
+import { ChangeSchema, applyChanges, textItems } from "@resume-ai/shared";
 import type { Change, Coverage, Cv, Requirement, UserEvidence } from "@resume-ai/shared";
 import { fitOf, type FitResult } from "@/export/index.js";
 import type { LlmClient, LlmMessage } from "@/llm/llmClient.js";
 import { renderDropInput, renderRewordInput, type CondenseItem } from "@/prompts/renderCondense.js";
-import { applyChanges } from "@/tailoring/applyChanges.js";
-import { textItems } from "@/tailoring/cvItems.js";
 import { mergeRoundIntoChanges } from "@/tailoring/mergeChanges.js";
 import { removableBullets } from "@/tailoring/removable.js";
 import { touchedItemIds } from "@/tailoring/roundCoverage.js";

@@ -1,6 +1,7 @@
-import { ItemIdSchema } from "@resume-ai/shared";
-import type { Change, Cv } from "@resume-ai/shared";
-import { SECTION_ID_PATTERN, allIds, bulletParents, childLists, textItems, textParentIds } from "@/tailoring/cvItems.js";
+import type { Change } from "./change.js";
+import { ItemIdSchema } from "./common.js";
+import type { Cv } from "./cv.js";
+import { SECTION_ID_PATTERN, allIds, bulletParents, childLists, textItems, textParentIds } from "./cvItems.js";
 
 /** ID prefix for a new Item under a parent: `skill`, `exp1.b`, `sec1.i`. Matches `assignCvIds`. */
 function newIdPrefix(parentId: string): string {

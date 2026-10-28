@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyChanges } from "@/tailoring/applyChanges.js";
+import { applyChanges } from "./applyChanges.js";
 import { change, testCv } from "./testCv.js";
 
 describe("applyChanges", () => {

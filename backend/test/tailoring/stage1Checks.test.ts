@@ -1,7 +1,6 @@
-import { CoverageSchema } from "@resume-ai/shared";
+import { CoverageSchema, applyChanges } from "@resume-ai/shared";
 import type { Coverage } from "@resume-ai/shared";
 import { describe, expect, it } from "vitest";
-import { applyChanges } from "@/tailoring/applyChanges.js";
 import { STAGE1_REASONS, stage1Checks } from "@/tailoring/stage1Checks.js";
 import { change, testCv } from "./testCv.js";
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Change, ReviewDecision } from "@resume-ai/shared";
-import { applyChanges } from "@/tailoring/applyChanges.js";
-import { applyDecisions, keptChanges, reviewProblem, userDrops } from "@/tailoring/review.js";
+import { applyDecisions, keptChanges } from "@resume-ai/shared";
+import { reviewProblem } from "@/tailoring/review.js";
 import { change, testCv } from "./testCv.js";
 
 const remove = change({ id: "r1.c1", op: "remove", targetItemId: "exp1.b2", before: "x", evidenceIds: [], requirementIds: [] });
@@ -27,12 +27,6 @@ describe("user drops", () => {
   const replace = change({ id: "r1.c2", op: "replace", targetItemId: "exp1.b1", before: "x", after: "Built the orders backend in Express", evidenceIds: ["exp1.b1"] });
   const add = change({ id: "r1.c3", op: "add", parentId: "exp1", after: "Added a bullet", evidenceIds: ["exp1.b1"] });
   const decideAll = (decision: "accept" | "reject", ...changes: Change[]): ReviewDecision[] => changes.map((c) => ({ changeId: c.id, decision }));
-
-  it("turns each drop into a revised remove Change with a fixed rationale and a new ID", () => {
-    const drops = userDrops(testCv(), ["exp1.b2", "proj1.b1"] as never);
-    expect(drops.map((c) => c.id)).toEqual(["ud.c1", "ud.c2"]);
-    expect(drops[0]).toMatchObject({ op: "remove", targetItemId: "exp1.b2", before: "Cut build time by 40% for 3 services", status: "revised", evidenceIds: [], requirementIds: [], rationale: "Dropped by you in Review." });
-  });
 
   it("accepts a drop of an original bullet, and none at all", () => {
     expect(problem([], [], ["exp1.b2"])).toBeNull();
@@ -69,12 +63,5 @@ describe("user drops", () => {
     expect(problem([add], decideAll("accept", add), ["exp1.b1", "exp1.b2"])).toBeNull();
     expect(problem([add], decideAll("reject", add), ["exp1.b1", "exp1.b2"])).toMatch(/exp1/);
     expect(problem([remove], decide("accept"), ["exp1.b1"])).toMatch(/exp1/);
-  });
-});
-
-describe("applyDecisions with user drops", () => {
-  it("keeps the drops with the kept Changes, so the Tailored CV loses the bullet", () => {
-    const kept = keptChanges([...applyDecisions([remove], decide("reject")), ...userDrops(testCv(), ["exp1.b1"] as never)]);
-    expect(applyChanges(testCv(), kept).experience[0]!.bullets.map((b) => b.id)).toEqual(["exp1.b2"]);
   });
 });

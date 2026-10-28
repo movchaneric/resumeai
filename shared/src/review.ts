@@ -1,0 +1,86 @@
+import { ChangeSchema } from "./change.js";
+import type { Change, ReviewDecision } from "./change.js";
+import { applyChanges } from "./applyChanges.js";
+import type { ItemId } from "./common.js";
+import type { Cv } from "./cv.js";
+import { bulletParents, originalBulletIds, textItems } from "./cvItems.js";
+
+/** The Change with the user's version in place of the proposal: `revised`, with their `after` or `orderedItemIds`. */
+export function reviseChange(change: Change, decision: ReviewDecision): Change {
+  if (change.op === "remove") throw new Error("A remove cannot be revised");
+  if (change.op === "reorder") return { ...change, status: "revised", orderedItemIds: decision.orderedItemIds ?? change.orderedItemIds };
+  return { ...change, status: "revised", after: decision.after ?? change.after };
+}
+
+/**
+ * The Changes with the decisions applied: each gets its final status, and a revised one carries the user's text or order.
+ * Pure; a Change without a decision is left as it is (the service checks the decisions cover them all).
+ */
+export function applyDecisions(changes: Change[], decisions: ReviewDecision[]): Change[] {
+  const byChange = new Map(decisions.map((d) => [d.changeId as string, d]));
+  return changes.map((change) => {
+    const decision = byChange.get(change.id);
+    if (decision === undefined) return change;
+    if (decision.decision === "revise") return reviseChange(change, decision);
+    return { ...change, status: decision.decision === "accept" ? "accepted" : "rejected" };
+  });
+}
+
+/**
+ * The Changes for the bullets the user drops at Review: a `remove` each, already `revised` (their own call, so trusted and
+ * never claim-checked), with the bullet's original text in `before` and IDs `ud.c1`, `ud.c2`, ... in the order given.
+ * Pure. Pass only drops that `reviewProblem` accepted.
+ */
+export function userDrops(original: Cv, drops: ItemId[]): Change[] {
+  const texts = textItems(original);
+  return drops.map((targetItemId, i) =>
+    ChangeSchema.parse({
+      id: `ud.c${i + 1}`,
+      op: "remove",
+      targetItemId,
+      before: texts.get(targetItemId)?.text ?? "",
+      evidenceIds: [],
+      requirementIds: [],
+      rationale: "Dropped by you in Review.",
+      status: "revised",
+    }),
+  );
+}
+
+/** The Changes the Tailored CV is built from: accepted and revised ones. */
+export const keptChanges = (changes: Change[]): Change[] => changes.filter((c) => c.status === "accepted" || c.status === "revised");
+
+/**
+ * The first thing wrong with the drops, as a message naming the Item, or null. `decided` is the Changes with the decisions
+ * applied. A drop must be a bullet of a job, project or education entry in the ORIGINAL CV, once; it can be a bullet a
+ * condensing Change already removes only if the user rejected that Change; a bullet with a `replace` needs that
+ * Change rejected (one kept Change per Item); and in the CV the decisions and drops produce, every entry that had bullets keeps
+ * one. A cited bullet may be dropped: the never-drop-cited rule binds the model, not the user.
+ */
+export function dropProblem(original: Cv, changes: Change[], decided: Change[], drops: ItemId[]): string | null {
+  if (drops.length === 0) return null;
+  const originalBullets = originalBulletIds(original);
+  const withAdds = originalBulletIds(applyChanges(original, changes));
+  const seen = new Set<string>();
+  for (const id of drops) {
+    if (seen.has(id)) return `Drop ${id} appears more than once.`;
+    seen.add(id);
+    if (!originalBullets.has(id)) {
+      return withAdds.has(id)
+        ? `Drop ${id}: the tailor added this bullet; reject its Change instead.`
+        : `Drop ${id}: not a bullet of a job, project or education entry in your CV.`;
+    }
+    const removing = decided.find((c) => c.op === "remove" && c.targetItemId === id && c.status === "accepted");
+    if (removing) return `Drop ${id}: Change ${removing.id} already removes it.`;
+    const rewriting = decided.find((c) => c.op === "replace" && c.targetItemId === id && c.status !== "rejected");
+    if (rewriting) return `Drop ${id}: reject its Change ${rewriting.id} to drop it.`;
+  }
+
+  const result = applyChanges(original, keptChanges([...decided, ...userDrops(original, drops)]));
+  const left = new Map(bulletParents(result).map((p) => [p.id as string, p.bullets.length]));
+  for (const parent of bulletParents(original)) {
+    const dropped = parent.bullets.find((b) => seen.has(b.id));
+    if (dropped && left.get(parent.id) === 0) return `Drop ${dropped.id}: ${parent.id} would be left with no bullet; keep at least one.`;
+  }
+  return null;
+}

@@ -1,8 +1,6 @@
 import type { Change, Cv, ItemId, ReviewDecision, ReviewFit } from "@resume-ai/shared";
 import { fitOf } from "@/export/index.js";
-import { applyChanges } from "@/tailoring/applyChanges.js";
-import { bulletParents, textItems } from "@/tailoring/cvItems.js";
-import { applyDecisions, keptChanges, userDrops } from "@/tailoring/review.js";
+import { applyChanges, applyDecisions, bulletParents, keptChanges, textItems, userDrops } from "@resume-ai/shared";
 
 /**
  * The shortest CV the user could submit: every `add` rejected, every `remove` accepted, a `replace` kept only when its text is

@@ -1,4 +1,4 @@
-import type { Cv } from "@resume-ai/shared";
+import type { Cv } from "./cv.js";
 
 type IdOnly = { id: string };
 

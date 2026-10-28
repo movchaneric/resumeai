@@ -66,6 +66,8 @@ const reviewSummaryFields = {
   score: beforeAfter(ScoreSchema),
   requirements: z.array(RequirementCoverageSummarySchema),
   cv: CvSchema,
+  /** The CV as extracted, with no Change applied: the client lays the Changes over it (removed Items and the original order live here only). */
+  originalCv: CvSchema,
   changes: z.array(ChangeSchema),
   userEvidence: z.array(UserEvidenceSchema),
   iterations: IterationsSchema,

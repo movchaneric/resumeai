@@ -216,6 +216,25 @@ describe("POST /runs/:id/review fit", () => {
   });
 });
 
+describe("the view's originalCv", () => {
+  const bulletIds = (v: { experience: { bullets: { id: string }[] }[] }) => v.experience.flatMap((e) => e.bullets.map((b) => b.id));
+
+  it("keeps the bullet a remove Change drops from cv, at awaiting_review and at completed", async () => {
+    const review = RunViewSchema.parse(await view());
+    if (review.status !== "awaiting_review") throw new Error("expected awaiting_review");
+    expect(bulletIds(review.originalCv)).toContain("exp3.b2");
+    expect(bulletIds(review.cv)).not.toContain("exp3.b2");
+    expect(review.originalCv.experience[1]!.bullets[0]!.text).toBe(cv.experience[1]!.bullets[0]!.text);
+
+    await post("/review", { ...accepted, drops: fittingDrops() });
+    await p.settle();
+    const done = RunViewSchema.parse(await view());
+    if (done.status !== "completed") throw new Error("expected completed");
+    expect(bulletIds(done.originalCv)).toEqual(bulletIds(review.originalCv));
+    expect(bulletIds(done.cv)).not.toContain("exp3.b2");
+  });
+});
+
 describe("the view's fit", () => {
   it("is in awaiting_review, with every Change accepted and no drops", async () => {
     const v = await view();

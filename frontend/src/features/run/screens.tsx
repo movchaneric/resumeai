@@ -19,11 +19,6 @@ export function Screen({ title, lead, status, children }: { title: string; lead?
   );
 }
 
-export function QuestionsScreen({ run, notice }: { run: Of<"awaiting_answers">; notice: string }) {
-  const n = run.questions.length;
-  return <Screen title="A few questions" lead="Questions screen coming soon." status={notice || `${n} ${n === 1 ? "Question" : "Questions"} to answer.`} />;
-}
-
 /** Placeholder until the Review screen (slice 7c): the score and the number of Changes. */
 export function ReviewPlaceholder({ run, notice }: { run: Of<"awaiting_review">; notice: string }) {
   const n = run.changes.length;

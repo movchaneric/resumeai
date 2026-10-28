@@ -14,7 +14,7 @@ describe("/runs/:id status switch", () => {
   it.each([
     ["parsing", "Reading your CV…"],
     ["extracting", "Tailoring your CV"],
-    ["awaiting_answers", "A few questions"],
+    ["awaiting_answers", "Have you used Node.js?"],
     ["tailoring", "Tailoring your CV"],
     ["awaiting_review", "Review your Changes"],
     ["completed", "Your Tailored CV is ready"],

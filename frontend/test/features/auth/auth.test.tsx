@@ -58,7 +58,7 @@ describe("Sign in", () => {
     const user = userEvent.setup();
     renderApp("/sign-in");
     await user.click(await screen.findByRole("link", { name: "Enter as a guest →" }));
-    expect(await screen.findByRole("heading", { name: "Tailor your CV to a job" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Tailor your CV to the job you want" })).toBeInTheDocument();
   });
 });
 

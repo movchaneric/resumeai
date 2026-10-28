@@ -10,7 +10,10 @@ function jobLine(job: { title: string | null; company: string | null } | null | 
 /** The header on every page, and the page below it. */
 export function AppShell() {
   const runId = useMatch("/runs/:id")?.params.id;
-  const job = jobLine(useCachedRun(runId)?.job);
+  const run = useCachedRun(runId);
+  // The Review screen has its own top bar with the job line and the Run actions.
+  const inReview = run?.status === "awaiting_review";
+  const job = inReview ? null : jobLine(run?.job);
   return (
     <div className="min-h-screen bg-bg">
       <header className="sticky top-0 z-30 border-b border-line bg-surface/90 backdrop-blur-sm">
@@ -23,7 +26,7 @@ export function AppShell() {
           </Link>
           {job && <span className="hidden min-w-0 truncate text-sm text-fg-2 sm:block">{job}</span>}
           <div className="ml-auto flex items-center gap-2">
-            {runId && <RunActions runId={runId} />}
+            {runId && !inReview && <RunActions runId={runId} />}
             <Link to="/sign-in" className="shrink-0 whitespace-nowrap rounded-sm px-2 py-2 text-sm font-semibold text-accent hover:bg-accent-soft">
               Sign in
             </Link>

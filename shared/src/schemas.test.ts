@@ -311,7 +311,7 @@ describe("run view", () => {
   });
   it("requires the fit in awaiting_review, and leaves it out of completed", () => {
     expect(RunViewSchema.safeParse({ ...base, status: "awaiting_review", ...review }).success).toBe(false);
-    const completed = { ...base, status: "completed", ...review, download: { docx: "/runs/x/cv.docx", pdf: "/runs/x/cv.pdf" } };
+    const completed = { ...base, status: "completed", ...review, onePage: true, download: { docx: "/runs/x/cv.docx", pdf: "/runs/x/cv.pdf" } };
     expect(RunViewSchema.parse(completed)).not.toHaveProperty("fit");
     expect(RunViewSchema.parse({ ...completed, fit: { fits: true, step: 0, fittable: true } })).not.toHaveProperty("fit");
   });
@@ -320,12 +320,17 @@ describe("run view", () => {
     const fit = { fits: true, step: 0, fittable: true };
     expect(RunViewSchema.safeParse({ ...base, status: "awaiting_review", ...withoutOriginal, fit }).success).toBe(false);
     const download = { docx: "/runs/x/cv.docx", pdf: "/runs/x/cv.pdf" };
-    expect(RunViewSchema.safeParse({ ...base, status: "completed", ...withoutOriginal, download }).success).toBe(false);
-    expect(RunViewSchema.safeParse({ ...base, status: "completed", ...review, originalCv: { ...cv, skills: [] }, download }).success).toBe(true);
+    expect(RunViewSchema.safeParse({ ...base, status: "completed", ...withoutOriginal, onePage: true, download }).success).toBe(false);
+    expect(RunViewSchema.safeParse({ ...base, status: "completed", ...review, originalCv: { ...cv, skills: [] }, onePage: true, download }).success).toBe(true);
   });
   it("parses completed with download links", () => {
-    const completed = { ...base, status: "completed", ...review, download: { docx: "/runs/x/cv.docx", pdf: "/runs/x/cv.pdf" } };
+    const completed = { ...base, status: "completed", ...review, onePage: true, download: { docx: "/runs/x/cv.docx", pdf: "/runs/x/cv.pdf" } };
     expect(RunViewSchema.safeParse(completed).success).toBe(true);
+  });
+  it("requires onePage on completed", () => {
+    const completed = { ...base, status: "completed", ...review, download: { docx: "/runs/x/cv.docx", pdf: "/runs/x/cv.pdf" } };
+    expect(RunViewSchema.safeParse(completed).success).toBe(false);
+    expect(RunViewSchema.safeParse({ ...completed, onePage: false }).success).toBe(true);
   });
   it("no longer parses the retired scored status", () => {
     expect(RunViewSchema.safeParse({ ...base, status: "scored", score: 64, requirements: [] }).success).toBe(false);

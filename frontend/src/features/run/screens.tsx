@@ -1,8 +1,5 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
-import type { RunView } from "@resume-ai/shared";
-
-type Of<S extends RunView["status"]> = Extract<RunView, { status: S }>;
 
 /** One screen: a title, a lead, and the single `role="status"` region that announces a sentence. */
 export function Screen({ title, lead, status, children }: { title: string; lead?: string; status: string; children?: ReactNode }) {
@@ -15,27 +12,6 @@ export function Screen({ title, lead, status, children }: { title: string; lead?
       </p>
       {children}
     </section>
-  );
-}
-
-/** Placeholder until the Review screen (slice 7c): the score and the number of Changes. */
-export function ReviewPlaceholder({ run, notice }: { run: Of<"awaiting_review">; notice: string }) {
-  const n = run.changes.length;
-  return (
-    <Screen title="Review your Changes" lead="The Review screen is coming soon." status={notice || `Ready for your Review: ${n} ${n === 1 ? "Change" : "Changes"}.`}>
-      <dl className="grid grid-cols-2 gap-3 rounded-hero bg-surface p-5 ring-1 ring-line">
-        <div>
-          <dt className="text-sm font-semibold text-fg-3">Match Score</dt>
-          <dd className="text-2xl font-bold tabular-nums">
-            {Math.round(run.score.before)} → {Math.round(run.score.after)}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-sm font-semibold text-fg-3">Changes</dt>
-          <dd className="text-2xl font-bold tabular-nums">{n}</dd>
-        </div>
-      </dl>
-    </Screen>
   );
 }
 

@@ -12,7 +12,7 @@ const PATH = `/runs/${RUN_ID}`;
 describe("Run actions in the header", () => {
   it("'Copy link to this Run' copies the URL and says 'Link copied'", async () => {
     const user = userEvent.setup();
-    serveRun(RUN_ID, runView("awaiting_review"));
+    serveRun(RUN_ID, runView("completed"));
     renderApp(PATH);
     await user.click(await screen.findByRole("button", { name: "Copy link to this Run" }));
     expect(await screen.findByText("Link copied")).toBeInTheDocument();
@@ -21,7 +21,7 @@ describe("Run actions in the header", () => {
 
   it("the ⋯ menu offers Copy link and Delete Run", async () => {
     const user = userEvent.setup();
-    serveRun(RUN_ID, runView("awaiting_review"));
+    serveRun(RUN_ID, runView("completed"));
     renderApp(PATH);
     await user.click(await screen.findByRole("button", { name: "Run options" }));
     expect(await screen.findByRole("menuitem", { name: "Copy link" })).toBeInTheDocument();
@@ -30,7 +30,7 @@ describe("Run actions in the header", () => {
 
   it("Delete Run confirms in a dialog, calls DELETE, then goes to Upload", async () => {
     const user = userEvent.setup();
-    serveRun(RUN_ID, runView("awaiting_review"));
+    serveRun(RUN_ID, runView("completed"));
     let deleted = 0;
     server.use(
       http.delete(`/api/runs/${RUN_ID}`, () => {
@@ -55,7 +55,7 @@ describe("Run actions in the header", () => {
 
   it("Cancel closes the dialog without deleting", async () => {
     const user = userEvent.setup();
-    serveRun(RUN_ID, runView("awaiting_review"));
+    serveRun(RUN_ID, runView("completed"));
     let deleted = 0;
     server.use(http.delete(`/api/runs/${RUN_ID}`, () => { deleted += 1; return new HttpResponse(null, { status: 204 }); }));
     renderApp(PATH);
@@ -64,12 +64,12 @@ describe("Run actions in the header", () => {
     await user.click(await screen.findByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(deleted).toBe(0);
-    expect(screen.getByRole("heading", { name: "Review your Changes" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Your tailored CV is ready" })).toBeInTheDocument();
   });
 
   it("a failed delete keeps the dialog open with a message", async () => {
     const user = userEvent.setup();
-    serveRun(RUN_ID, runView("awaiting_review"));
+    serveRun(RUN_ID, runView("completed"));
     server.use(http.delete(`/api/runs/${RUN_ID}`, () => HttpResponse.json({ code: "INTERNAL", message: "Something went wrong." }, { status: 500 })));
     renderApp(PATH);
     await user.click(await screen.findByRole("button", { name: "Run options" }));
@@ -77,5 +77,27 @@ describe("Run actions in the header", () => {
     await user.click(await screen.findByRole("button", { name: "Delete Run" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't delete the Run. Try again.");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+});
+
+describe("Run actions on the Review screen", () => {
+  it.each([
+    ["desktop", true],
+    ["focus mode", false],
+  ])("%s has one Copy link control and one Run options menu, in the Review top bar", async (_name, desktop) => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({ matches: desktop && query.includes("min-width"), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, onchange: null, dispatchEvent: () => false })) as unknown as typeof window.matchMedia;
+    try {
+      serveRun(RUN_ID, runView("awaiting_review"));
+      renderApp(PATH);
+      await screen.findByRole("heading", { level: 1, name: "Review" });
+      expect(screen.getAllByRole("button", { name: "Run options" })).toHaveLength(1);
+      expect(screen.queryByRole("button", { name: "Copy link to this Run" })).toBeNull();
+      expect(screen.getByRole("link", { name: "Sign in" })).toBeInTheDocument();
+      expect(screen.getAllByText("Senior Backend Engineer at Northwind Labs").length).toBeLessThanOrEqual(1);
+      expect(screen.queryByText("Senior Backend Engineer · Northwind Labs")).toBeNull();
+    } finally {
+      window.matchMedia = original;
+    }
   });
 });

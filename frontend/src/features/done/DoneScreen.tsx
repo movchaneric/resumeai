@@ -5,6 +5,7 @@ import type { RunView } from "@resume-ai/shared";
 import { ApiError } from "@/api";
 import { Button } from "@/ui/Button";
 import { Chip } from "@/ui/Chip";
+import { CvPage } from "@/features/review";
 import { DeleteRunDialog } from "@/features/run/DeleteRunDialog";
 import { DownloadLink } from "@/features/done/DownloadLink";
 import { doneStats, formatExpiry } from "@/features/done/stats";
@@ -28,6 +29,7 @@ function jobLine(job: Completed["job"]): string {
 
 export function DoneScreen({ run, notice }: { run: Completed; notice: string }) {
   const [deleting, setDeleting] = useState(false);
+  const [showChanges, setShowChanges] = useState(false);
   const [downloadError, setDownloadError] = useState<unknown>(null);
   const before = Math.round(run.score.before);
   const after = Math.round(run.score.after);
@@ -43,7 +45,7 @@ export function DoneScreen({ run, notice }: { run: Completed; notice: string }) 
       <div className="flex flex-col gap-1">
         <h1 className="text-[28px] leading-tight">Your tailored CV is ready</h1>
         <p className="text-[15px] text-fg-2">
-          {[jobLine(run.job), "one page"].filter(Boolean).join(" · ")}
+          {[jobLine(run.job), run.onePage ? "one page" : ""].filter(Boolean).join(" · ")}
         </p>
       </div>
       <p role="status" className="sr-only">
@@ -68,10 +70,25 @@ export function DoneScreen({ run, notice }: { run: Completed; notice: string }) 
       </div>
 
       <div className="flex w-full flex-col gap-3 sm:flex-row">
-        <DownloadLink runId={run.id} format="pdf" variant="primary" label="Download PDF" onError={setDownloadError} />
-        <DownloadLink runId={run.id} format="docx" variant="secondary" label="Download Word" onError={setDownloadError} />
+        {run.onePage ? (
+          <>
+            <DownloadLink runId={run.id} format="pdf" variant="primary" label="Download PDF" onError={setDownloadError} />
+            <DownloadLink runId={run.id} format="docx" variant="secondary" label="Download Word" onError={setDownloadError} />
+          </>
+        ) : (
+          <>
+            <DownloadLink runId={run.id} format="docx" variant="primary" label="Download Word" onError={setDownloadError} />
+            <DownloadLink runId={run.id} format="pdf" variant="secondary" label="Download PDF" onError={setDownloadError} />
+          </>
+        )}
       </div>
-      {downloadError !== null && (
+      {!run.onePage && (
+        <div role="note" className="rounded-hero bg-warn-soft p-4 text-left text-[15px] text-warn-fg ring-1 ring-warn-line">
+          <p className="font-semibold">This CV can't fit on one page with your choices.</p>
+          <p>Download it anyway as Word, or start a new Run with a shorter CV.</p>
+        </div>
+      )}
+      {run.onePage && downloadError !== null && (
         <div role="alert" className="rounded-hero bg-warn-soft p-4 text-left text-[15px] text-warn-fg ring-1 ring-warn-line">
           {tooLong ? (
             <>
@@ -91,9 +108,9 @@ export function DoneScreen({ run, notice }: { run: Completed; notice: string }) 
       </dl>
 
       <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-1">
-        <span aria-disabled="true" className="font-semibold text-fg-3">
-          See what changed (coming soon)
-        </span>
+        <button type="button" aria-expanded={showChanges} aria-controls="what-changed" onClick={() => setShowChanges((open) => !open)} className="font-semibold text-accent underline">
+          {showChanges ? "Hide what changed" : "See what changed"}
+        </button>
         <Link to="/" className="font-semibold text-accent underline">
           Tailor for another job
         </Link>
@@ -101,6 +118,11 @@ export function DoneScreen({ run, notice }: { run: Completed; notice: string }) 
           Delete this Run now
         </Button>
       </div>
+      {showChanges && (
+        <div id="what-changed" className="w-full text-left">
+          <CvPage cv={run.originalCv} changes={run.changes} readOnly />
+        </div>
+      )}
       <DeleteRunDialog runId={run.id} open={deleting} onOpenChange={setDeleting} />
 
       <p className="text-sm text-fg-3">Deleted automatically on {formatExpiry(run.expiresAt)}.</p>

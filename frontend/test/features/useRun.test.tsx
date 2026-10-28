@@ -50,8 +50,8 @@ describe("useRun: live updates", () => {
     expect(screen.getByText("Round 1 of 3")).toBeInTheDocument();
 
     reachedTailoring.open();
-    expect(await screen.findByRole("heading", { name: "Review your Changes" })).toBeInTheDocument();
-    expect(screen.getByText("54 → 72")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Review" })).toBeInTheDocument();
+    expect(screen.getByText("0 of 3 reviewed")).toBeInTheDocument();
   });
 
   it("does not open a stream for a Run that is not working", async () => {
@@ -63,7 +63,7 @@ describe("useRun: live updates", () => {
       }),
     );
     renderApp(PATH);
-    await screen.findByRole("heading", { name: "Review your Changes" });
+    await screen.findByRole("heading", { level: 1, name: "Review" });
     expect(opened).toBe(0);
   });
 
@@ -104,7 +104,7 @@ describe("useRun: polling fallback", () => {
     expect(gets).toBe(2); // not yet
 
     await act(() => vi.advanceTimersByTimeAsync(1000));
-    expect(await screen.findByRole("heading", { name: "Review your Changes" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Review" })).toBeInTheDocument();
     expect(gets).toBe(3);
 
     // The Run is now waiting for the user: polling stops.

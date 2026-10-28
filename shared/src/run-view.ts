@@ -90,6 +90,8 @@ export const RunViewSchema = z.discriminatedUnion("status", [
     ...runViewCommon,
     status: z.literal("completed"),
     ...reviewSummaryFields,
+    /** The Tailored CV fits one A4 page at some size. When false, only the Word download works (the PDF is a 409 `CV_TOO_LONG`). */
+    onePage: z.boolean(),
     download: z.object({ docx: z.string(), pdf: z.string() }),
   }),
   z.object({

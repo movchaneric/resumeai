@@ -62,15 +62,56 @@ describe("Done screen", () => {
     expect(within(await tile("must-haves met")).getByText("1/1")).toBeInTheDocument();
   });
 
-  it("links the downloads to the API, disables 'See what changed' and shows the expiry date", async () => {
+  it("links the downloads to the API, has a 'See what changed' button and shows the expiry date", async () => {
     serveRun(RUN_ID, runView("completed"));
     renderApp(PATH);
     expect(await screen.findByRole("link", { name: "Download PDF" })).toHaveAttribute("href", `/api/runs/${RUN_ID}/cv.pdf`);
     expect(screen.getByRole("link", { name: "Download PDF" })).toHaveAttribute("download");
     expect(screen.getByRole("link", { name: "Download Word" })).toHaveAttribute("href", `/api/runs/${RUN_ID}/cv.docx`);
-    expect(screen.getByText("See what changed (coming soon)")).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "See what changed" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByRole("link", { name: "Tailor for another job" })).toHaveAttribute("href", "/");
     expect(screen.getByText(/^Deleted automatically on .+\.$/)).toBeInTheDocument();
+  });
+
+  it("shows the CV with only the kept Changes' marks, read-only, and goes back to Done", async () => {
+    const user = userEvent.setup();
+    const base = { rationale: "r", evidenceIds: ["b1"], requirementIds: ["r1"] };
+    serveRun(
+      RUN_ID,
+      runView("completed", {
+        changes: [
+          { ...base, id: "c1", op: "replace", targetItemId: "b1", before: "Built an internal tool.", after: "Built an internal tool used by 40 engineers.", status: "accepted" },
+          { ...base, id: "c2", op: "replace", targetItemId: "b2", before: "Wrote reports for the team.", after: "Wrote weekly reports for 12 people.", status: "rejected" },
+        ],
+      }),
+    );
+    const { container } = renderApp(PATH);
+    await user.click(await screen.findByRole("button", { name: "See what changed" }));
+    const page = await screen.findByRole("article", { name: "Your CV" });
+    expect(page.querySelector('[data-item-id="b1"] ins')).toHaveTextContent("Built an internal tool used by 40 engineers.");
+    expect(page.querySelector('[data-item-id="b1"] del')).toHaveTextContent("Built an internal tool.");
+    expect(page.querySelector('[data-item-id="b2"] ins, [data-item-id="b2"] del')).toBeNull();
+    expect(within(page).queryByRole("button")).toBeNull();
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    await expectNoSeriousViolations(container);
+    await user.click(screen.getByRole("button", { name: "Hide what changed" }));
+    expect(screen.queryByRole("article", { name: "Your CV" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Your tailored CV is ready" })).toBeInTheDocument();
+  });
+
+  it("for a CV that does not fit one page: no 'one page', the notice up front, Word first", async () => {
+    serveRun(RUN_ID, runView("completed", { onePage: false }));
+    const { container } = renderApp(PATH);
+    expect(await screen.findByText("Senior Backend Engineer at Northwind Labs")).toBeInTheDocument();
+    expect(screen.queryByText(/one page$/)).toBeNull();
+    const note = screen.getByRole("note");
+    expect(note).toHaveTextContent("This CV can't fit on one page with your choices.");
+    expect(note).toHaveTextContent("Download it anyway as Word, or start a new Run with a shorter CV.");
+    const [first, second] = screen.getAllByRole("link", { name: /^Download / });
+    expect(first).toHaveTextContent("Download Word");
+    expect(second).toHaveTextContent("Download PDF");
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    await expectNoSeriousViolations(container);
   });
 
   it("downloads the file through the API and shows no error", async () => {

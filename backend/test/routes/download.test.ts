@@ -76,17 +76,21 @@ describe("GET /runs/:id/cv.(pdf|docx)", () => {
     expect(res.body.code).toBe("RUN_NOT_COMPLETED");
   });
 
-  it.each(FORMATS)("answers 409 CV_TOO_LONG when the CV does not fit one page at the smallest size ($format)", async ({ format }) => {
+  it("for a CV that does not fit one page at the smallest size: the PDF is a 409 CV_TOO_LONG, the Word file is still sent", async () => {
     await complete();
     const real = p.runner.read.bind(p.runner);
     vi.spyOn(p.runner, "read").mockImplementation(async (runId) => {
       const state = await real(runId);
       return state && { ...state, cv: longCv(4, 6), changes: [] };
     });
-    const res = await request(p.app).get(`/runs/${id}/cv.${format}`);
-    expect(res.status).toBe(409);
-    expect(res.body.code).toBe("CV_TOO_LONG");
-    expect(res.body.message).not.toContain("Nora");
+    const pdf = await request(p.app).get(`/runs/${id}/cv.pdf`);
+    expect(pdf.status).toBe(409);
+    expect(pdf.body.code).toBe("CV_TOO_LONG");
+    expect(pdf.body.message).not.toContain("Nora");
+    const docx = await get(id, "docx");
+    expect(docx.status).toBe(200);
+    expect(docx.headers["content-type"]).toBe(DOCX_TYPE);
+    expect((docx.body as Buffer).subarray(0, 2).toString("latin1")).toBe("PK");
   });
 });
 
@@ -101,9 +105,15 @@ describe("the download links in GET /runs/:id", () => {
     const view = (await request(p.app).get(`/runs/${id}`)).body;
     expect(view.status).toBe("completed");
     expect(view.download).toEqual({ docx: `/runs/${id}/cv.docx`, pdf: `/runs/${id}/cv.pdf` });
+    expect(view.onePage).toBe(false);
     const pdf = await request(p.app).get(`/runs/${id}/cv.pdf`);
     expect(pdf.status).toBe(409);
     expect(pdf.body.code).toBe("CV_TOO_LONG");
+  });
+
+  it("says onePage when the completed CV fits", async () => {
+    await complete();
+    expect((await request(p.app).get(`/runs/${id}`)).body.onePage).toBe(true);
   });
 
   it("is absent for the other statuses", async () => {

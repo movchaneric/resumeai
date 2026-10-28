@@ -27,7 +27,7 @@ import {
   type UserEvidence,
   type RunView,
 } from "@resume-ai/shared";
-import { docxSizes, measureFit, renderDocx } from "@/export/index.js";
+import { docxSizes, FLOOR_STEP, fitOf, layoutCv, measureFit, renderDocx } from "@/export/index.js";
 import type { ExportFormat } from "@/export/index.js";
 import { reviewProblem } from "@/tailoring/review.js";
 import { fitOfChanges, reviewFit } from "@/tailoring/reviewFit.js";
@@ -476,12 +476,15 @@ export class RunsService {
     const state = await this.deps.graphRunner.read(run.id);
     // The fit of the CV as shown (every Change accepted, no drops), measured on read: up to 7 renders, 14 when it is over.
     const fit = run.status === "awaiting_review" && state?.cv ? await fitOfChanges(state.cv, state.changes, state.changes) : undefined;
-    return toRunView(run, state, fit);
+    // Completed: does the Tailored CV fit one page? One render when it does (a Done page is not polled).
+    const onePage = run.status === "completed" && state?.cv ? (await fitOf(tailoredCv(run.status, state.cv, state.changes))).fits : undefined;
+    return toRunView(run, state, fit, onePage);
   }
 
   /**
    * Renders the completed Run's Tailored CV (the one its `completed` view shows) as a file, in memory (ADR 0008).
-   * Same 404 as `getRunView`; 409 `RUN_NOT_COMPLETED` for any other status; 409 `CV_TOO_LONG` when it does not fit one page at the smallest size.
+   * Same 404 as `getRunView`; 409 `RUN_NOT_COMPLETED` for any other status. A CV that does not fit one page at the smallest size
+   * is a 409 `CV_TOO_LONG` for the PDF only; the DOCX is rendered anyway, at the smallest size, so the user always has a file.
    */
   async exportCv(rawId: string, format: ExportFormat): Promise<Buffer> {
     const run = await this.findLiveRun(rawId);
@@ -490,7 +493,10 @@ export class RunsService {
     if (!state?.cv) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
     const cv = tailoredCv(run.status, state.cv, state.changes);
     const fit = await measureFit(cv);
-    if (!fit.fits) throw new ApiError("CV_TOO_LONG", "The CV does not fit one page at the smallest size, so it cannot be exported yet.");
+    if (!fit.fits) {
+      if (format === "pdf") throw new ApiError("CV_TOO_LONG", "The CV does not fit one page at the smallest size, so the PDF cannot be exported. Download the Word file instead.");
+      return renderDocx(layoutCv(cv), docxSizes(FLOOR_STEP));
+    }
     if (format === "pdf") return fit.pdf.buffer;
     return renderDocx(fit.blocks, docxSizes(fit.step));
   }
@@ -604,7 +610,7 @@ function tailoredCv(status: RunStatus, cv: Cv, changes: Change[]): Cv {
  * A failed Run marks the step that broke as `failed`: `coverage` when the extraction results exist, otherwise
  * `extract`. Scores are rounded here for display. Validating against the schema keeps the response honest.
  */
-function toRunView(run: StoredRun, state: RunSnapshot | null, fit: ReviewFit | undefined): RunView {
+function toRunView(run: StoredRun, state: RunSnapshot | null, fit: ReviewFit | undefined, onePage?: boolean): RunView {
   const common = {
     id: run.id,
     createdAt: run.createdAt.toISOString(),
@@ -652,7 +658,7 @@ function toRunView(run: StoredRun, state: RunSnapshot | null, fit: ReviewFit | u
       userEvidence: state.userEvidence,
       iterations: { used: state.rounds, max: MAX_ROUNDS },
       exitReason: state.exitReason,
-      ...(run.status === "completed" ? { download: { docx: `/runs/${run.id}/cv.docx`, pdf: `/runs/${run.id}/cv.pdf` } } : { fit }),
+      ...(run.status === "completed" ? { onePage: onePage ?? true, download: { docx: `/runs/${run.id}/cv.docx`, pdf: `/runs/${run.id}/cv.pdf` } } : { fit }),
     });
   }
   if (run.status === "awaiting_answers" && extracted && state) {

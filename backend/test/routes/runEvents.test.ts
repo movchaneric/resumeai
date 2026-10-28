@@ -269,7 +269,7 @@ describe("GET /runs/:id/events", () => {
     const real = RunViewSchema.parse((await request(server).get(`/runs/${id}`)).body);
     const resting = RunViewSchema.parse(
       status === "completed"
-        ? { ...real, status, download: { docx: `/runs/${real.id}/cv.docx`, pdf: `/runs/${real.id}/cv.pdf` } }
+        ? { ...real, status, onePage: true, download: { docx: `/runs/${real.id}/cv.docx`, pdf: `/runs/${real.id}/cv.pdf` } }
         : { id: real.id, createdAt: real.createdAt, expiresAt: real.expiresAt, job: real.job, steps: real.steps, status },
     );
     const spy = vi.spyOn(RunsService.prototype, "getRunView").mockResolvedValue(resting);

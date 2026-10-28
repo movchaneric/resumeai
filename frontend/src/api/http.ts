@@ -37,6 +37,11 @@ export async function requestVoid(path: string, init?: RequestInit): Promise<voi
   await send(path, init);
 }
 
+/** A request whose response is a file. */
+export async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
+  return (await send(path, init)).blob();
+}
+
 export function jsonBody(value: unknown): RequestInit {
   return { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) };
 }

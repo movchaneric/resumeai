@@ -17,7 +17,7 @@ describe("/runs/:id status switch", () => {
     ["awaiting_answers", "Have you used Node.js?"],
     ["tailoring", "Tailoring your CV"],
     ["awaiting_review", "Review your Changes"],
-    ["completed", "Your Tailored CV is ready"],
+    ["completed", "Your tailored CV is ready"],
     ["failed", "This Run didn't finish"],
     ["interrupted", "This Run was cut off"],
   ] as const)("renders the %s screen with one status region and no serious axe violations", async (status, title) => {
@@ -61,14 +61,6 @@ describe("/runs/:id status switch", () => {
     expect(within(changes).getByText("3")).toBeInTheDocument();
     expect(screen.getByText("54 → 72")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Ready for your Review: 3 Changes.");
-  });
-
-  it("Done links the Tailored CV files and disables 'See what changed'", async () => {
-    serveRun(RUN_ID, runView("completed"));
-    renderApp(PATH);
-    expect(await screen.findByRole("link", { name: "Download PDF" })).toHaveAttribute("href", `/api/runs/${RUN_ID}/cv.pdf`);
-    expect(screen.getByRole("link", { name: "Download DOCX" })).toHaveAttribute("href", `/api/runs/${RUN_ID}/cv.docx`);
-    expect(screen.getByText("See what changed (coming soon)")).toHaveAttribute("aria-disabled", "true");
   });
 
   it("a failed Run shows the message for its error code and a way to start a new Run", async () => {

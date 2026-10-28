@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import type { RunView } from "@resume-ai/shared";
-import { downloadUrl } from "@/api";
 
 type Of<S extends RunView["status"]> = Extract<RunView, { status: S }>;
 
@@ -36,24 +35,6 @@ export function ReviewPlaceholder({ run, notice }: { run: Of<"awaiting_review">;
           <dd className="text-2xl font-bold tabular-nums">{n}</dd>
         </div>
       </dl>
-    </Screen>
-  );
-}
-
-export function DoneScreen({ run, notice }: { run: Of<"completed">; notice: string }) {
-  return (
-    <Screen title="Your Tailored CV is ready" status={notice || "Your Tailored CV is ready to download."}>
-      <div className="flex flex-wrap gap-3">
-        <a href={downloadUrl(run.id, "pdf")} className="font-semibold text-accent underline">
-          Download PDF
-        </a>
-        <a href={downloadUrl(run.id, "docx")} className="font-semibold text-accent underline">
-          Download DOCX
-        </a>
-        <span aria-disabled="true" className="text-fg-3">
-          See what changed (coming soon)
-        </span>
-      </div>
     </Screen>
   );
 }

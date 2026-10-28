@@ -1,7 +1,7 @@
 import type { RunView } from "@resume-ai/shared";
+import { DoneScreen } from "@/features/done/DoneScreen";
 import { QuestionsScreen } from "@/features/questions/QuestionsScreen";
 import {
-  DoneScreen,
   ReviewPlaceholder,
 } from "@/features/run/screens";
 import { FailedScreen, InterruptedScreen, ProgressScreen } from "@/features/progress/ProgressScreen";

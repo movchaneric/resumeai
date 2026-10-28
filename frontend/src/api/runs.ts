@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { RunIdSchema, ReviewFitSchema, RunViewSchema, type Answer, type ReviewSubmission, type RunView } from "@resume-ai/shared";
 import { apiUrl } from "@/api/config";
-import { jsonBody, requestJson, requestVoid } from "@/api/http";
+import { jsonBody, requestBlob, requestJson, requestVoid } from "@/api/http";
 
 const RunRefSchema = z.object({ id: RunIdSchema });
 
@@ -44,4 +44,9 @@ export function deleteRun(id: string): Promise<void> {
 /** A link for the browser to follow: the Tailored CV as a file. */
 export function downloadUrl(id: string, format: "pdf" | "docx"): string {
   return apiUrl(`/runs/${encodeURIComponent(id)}/cv.${format}`);
+}
+
+/** The Tailored CV as a file, fetched so a failure (409 `CV_TOO_LONG`) arrives as an `ApiError` a link could not show. */
+export function downloadCv(id: string, format: "pdf" | "docx"): Promise<Blob> {
+  return requestBlob(`/runs/${encodeURIComponent(id)}/cv.${format}`);
 }

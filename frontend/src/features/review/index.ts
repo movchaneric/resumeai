@@ -18,5 +18,3 @@ export { CvPage, type CvPageProps } from "@/features/review/CvPage";
 export { buildCvMarks, type CvMarks, type ItemMark, type ListMarks, type MarkKind } from "@/features/review/cvMarks";
 /** Maps the shared `dropProblem` message (`canDrop(...).reason`) to review.md's words. */
 export { explainDrop, type DropRefusal } from "@/features/review/dropCopy";
-/** The event the rail's "Open checklist" dispatches on `window`; the checklist drawer listens for it. */
-export { OPEN_CHECKLIST_EVENT } from "@/features/review/Rail";

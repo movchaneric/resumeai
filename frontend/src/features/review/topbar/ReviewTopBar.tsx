@@ -20,6 +20,9 @@ export interface ReviewTopBarProps {
   review: UseReview;
   /** Highlight the Changes citing a Requirement while it is hovered or focused in the checklist drawer; [] clears it. */
   onHighlightChanges: (changeIds: string[]) => void;
+  /** When given, the checklist drawer is controlled by the screen (so the rail can open it). */
+  checklistOpen?: boolean;
+  onChecklistOpenChange?: (open: boolean) => void;
 }
 
 function jobLine(job: ReviewRun["job"]): string {
@@ -48,14 +51,17 @@ function nextUnreviewed(review: UseReview): string | null {
  * `INVALID_REVIEW` closes the dialog, selects the named Change and shows the message in an alert under the bar (the dialog
  * would cover the card, and the card is the page's).
  */
-export function ReviewTopBar({ run, review, onHighlightChanges }: ReviewTopBarProps) {
+export function ReviewTopBar({ run, review, onHighlightChanges, checklistOpen: controlledOpen, onChecklistOpenChange }: ReviewTopBarProps) {
   const client = useQueryClient();
   const toast = useToast();
   const [submitOpen, setSubmitOpen] = useState(false);
-  const [checklistOpen, setChecklistOpen] = useState(false);
+  const [ownChecklistOpen, setOwnChecklistOpen] = useState(false);
+  const checklistOpen = controlledOpen ?? ownChecklistOpen;
+  const setChecklistOpen = onChecklistOpenChange ?? setOwnChecklistOpen;
   const [fitOpen, setFitOpen] = useState(false);
   const [fitNotice, setFitNotice] = useState<string | null>(null);
   const [openFitAfterDialog, setOpenFitAfterDialog] = useState(false);
+  const [selectAfterDialog, setSelectAfterDialog] = useState<string | null>(null);
   const [invalidMessage, setInvalidMessage] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -75,7 +81,7 @@ export function ReviewTopBar({ run, review, onHighlightChanges }: ReviewTopBarPr
         setSubmitOpen(false);
       } else if (error instanceof ApiError && error.status === 400 && error.code === "INVALID_REVIEW") {
         const { changeId } = invalidReviewTarget(error.message, run, review.toSubmission());
-        if (changeId !== null) review.dispatch({ type: "select", changeId });
+        if (changeId !== null) setSelectAfterDialog(changeId);
         setInvalidMessage(error.message);
         setSubmitOpen(false);
       } else {
@@ -84,13 +90,21 @@ export function ReviewTopBar({ run, review, onHighlightChanges }: ReviewTopBarPr
     },
   });
 
-  // The popover opens after the dialog has closed, so the dialog's focus restore doesn't take focus back.
+  // The popover opens and the named Change is selected after the dialog has closed, so the dialog's focus restore doesn't
+  // take focus back from the popover or the card.
+  const { dispatch } = review;
   useEffect(() => {
-    if (!submitOpen && openFitAfterDialog) {
+    if (submitOpen) return;
+    if (openFitAfterDialog) {
       setOpenFitAfterDialog(false);
       setFitOpen(true);
     }
-  }, [submitOpen, openFitAfterDialog]);
+    if (selectAfterDialog !== null) {
+      const changeId = selectAfterDialog;
+      setSelectAfterDialog(null);
+      dispatch({ type: "select", changeId });
+    }
+  }, [submitOpen, openFitAfterDialog, selectAfterDialog, dispatch]);
 
   const copyLink = async () => {
     try {

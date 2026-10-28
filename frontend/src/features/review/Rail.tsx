@@ -5,9 +5,6 @@ import { ShortcutsToggle } from "@/features/shortcuts/ShortcutsToggle";
 import { FILTERS, type ReviewFilter } from "@/features/review/cards";
 import type { ReviewRun } from "@/features/review/types";
 
-/** The top bar's checklist drawer listens for this on `window`; the rail's "Open checklist" dispatches it. */
-export const OPEN_CHECKLIST_EVENT = "review:open-checklist";
-
 export interface RailProps {
   filter: ReviewFilter;
   onFilter: (filter: ReviewFilter) => void;
@@ -16,6 +13,8 @@ export interface RailProps {
   /** How many Changes the current filter shows (what a bulk action applies to). */
   visibleCount: number;
   onBulk: (decision: "accept" | "reject") => void;
+  /** Opens the checklist drawer, which the screen owns. */
+  onOpenChecklist: () => void;
 }
 
 function Eyebrow({ children }: { children: string }) {
@@ -32,7 +31,7 @@ const LEGEND: [keys: string[], text: string][] = [
 ];
 
 /** The left rail: the "Show" filter list with bulk actions, the Requirements summary and the keyboard legend. */
-export function Rail({ filter, onFilter, counts, requirements, visibleCount, onBulk }: RailProps) {
+export function Rail({ filter, onFilter, counts, requirements, visibleCount, onBulk, onOpenChecklist }: RailProps) {
   const mustHaves = requirements.filter((r) => r.importance === "must_have");
   const met = mustHaves.filter((r) => r.after.verdict === "met").length;
   return (
@@ -75,7 +74,7 @@ export function Rail({ filter, onFilter, counts, requirements, visibleCount, onB
             <span key={r.id} className={cx("h-full flex-1 rounded-full", r.after.verdict === "met" ? "bg-ok" : r.after.verdict === "partially_met" ? "bg-warn-line" : "bg-del")} />
           ))}
         </div>
-        <button type="button" onClick={() => window.dispatchEvent(new CustomEvent(OPEN_CHECKLIST_EVENT))} className="font-semibold text-accent underline">
+        <button type="button" onClick={onOpenChecklist} className="font-semibold text-accent underline">
           Open checklist
         </button>
       </section>

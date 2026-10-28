@@ -32,6 +32,7 @@ export function ReviewScreen({ run, notice = "" }: { run: ReviewRun; notice?: st
   const toast = useToast();
 
   const [filter, setFilter] = useState<ReviewFilter>("all");
+  const [checklistOpen, setChecklistOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pickedItem, setPickedItem] = useState<string | null>(null);
   const [highlighted, setHighlighted] = useState<string[]>([]);
@@ -166,11 +167,11 @@ export function ReviewScreen({ run, notice = "" }: { run: ReviewRun; notice?: st
 
   return (
     <div>
-      <ReviewTopBar run={run} review={review} onHighlightChanges={setHighlighted} />
+      <ReviewTopBar run={run} review={review} onHighlightChanges={setHighlighted} checklistOpen={checklistOpen} onChecklistOpenChange={setChecklistOpen} />
       {notice && <p className="mx-auto max-w-[1400px] px-6 pt-3 text-sm font-semibold text-fg-2">{notice}</p>}
       <div className="mx-auto grid max-w-[1400px] grid-cols-[220px_minmax(0,1fr)_340px] items-start gap-6 px-6 py-6">
         <div className="sticky top-32">
-          <Rail filter={filter} onFilter={setFilter} counts={countFilters(run, state)} requirements={run.requirements} visibleCount={visible.length} onBulk={bulk} />
+          <Rail filter={filter} onFilter={setFilter} counts={countFilters(run, state)} requirements={run.requirements} visibleCount={visible.length} onBulk={bulk} onOpenChecklist={() => setChecklistOpen(true)} />
         </div>
 
         <CvPage

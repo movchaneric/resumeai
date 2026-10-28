@@ -4,6 +4,8 @@ import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ReviewScreen, reviewStorageKey } from "@/features/review";
 import { SHORTCUTS_KEY } from "@/features/shortcuts/useShortcuts";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router";
 import { ToastProvider } from "@/ui/Toast";
 import { reviewRunView } from "../../fixtures/runViews";
 import { expectNoSeriousViolations } from "../../helpers/axe";
@@ -22,9 +24,13 @@ afterEach(() => window.localStorage.clear());
 function setup(view = run) {
   const user = userEvent.setup();
   const utils = render(
-    <ToastProvider>
-      <ReviewScreen run={view} />
-    </ToastProvider>,
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <ToastProvider>
+        <MemoryRouter>
+          <ReviewScreen run={view} />
+        </MemoryRouter>
+      </ToastProvider>
+    </QueryClientProvider>,
   );
   const item = (id: string) => utils.container.querySelector<HTMLElement>(`[data-item-id="${id}"]`)!;
   return { user, item, ...utils };

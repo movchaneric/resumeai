@@ -59,6 +59,7 @@ const reviewFields = {
     },
   ],
   cv,
+  originalCv: cv,
   changes: [change("c1"), change("c2"), change("c3")],
   userEvidence: [],
   iterations: { used: 2, max: 3 },

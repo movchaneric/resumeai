@@ -31,7 +31,7 @@ describe("/runs/:id status switch", () => {
   });
 
   it("shows the job in the header once the Run is known", async () => {
-    serveRun(RUN_ID, runView("awaiting_review"));
+    serveRun(RUN_ID, runView("completed"));
     renderApp(PATH);
     expect(await screen.findByText("Senior Backend Engineer · Northwind Labs")).toBeInTheDocument();
   });

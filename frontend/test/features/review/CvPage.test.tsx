@@ -38,3 +38,19 @@ describe("CvPage readOnly", () => {
     expect(screen.queryByText(/Original order/)).toBeNull();
   });
 });
+
+describe("CvPage bullets", () => {
+  it("puts the marker in a row of its own before the text, so it stays on the first line", () => {
+    const { container } = render(<CvPage cv={run.originalCv} changes={changes} drops={["b2" as never]} />);
+    for (const id of ["b1", "b2", "b4"]) {
+      const li = container.querySelector<HTMLElement>(`[data-item-id="${id}"]`)!;
+      // not a native list marker, which sits on the baseline of the last line of an inline-block child
+      expect(li.className).not.toMatch(/list-disc|list-item/);
+      const row = li.querySelector<HTMLElement>("[data-bullet-row]")!;
+      expect(row.className).toMatch(/\bflex\b/);
+      expect(row.className).toMatch(/items-start/);
+      expect(row.className).toContain("before:content-['•']");
+      expect(li.firstElementChild).toBe(row);
+    }
+  });
+});

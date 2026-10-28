@@ -107,19 +107,24 @@ function Row({ mark, ctx, bullet }: { mark: ItemMark; ctx: Ctx; bullet?: boolean
       data-change-id={changeId}
       className={cx(
         "rounded-sm transition-opacity duration-150",
-        bullet && "ml-5 list-disc",
+        bullet && "ml-5",
         selected && "bg-accent-soft",
         highlighted && "ring-2 ring-accent",
         dimmed && "opacity-40",
       )}
     >
+      <div
+        data-bullet-row={bullet ? "" : undefined}
+        className={cx(bullet && "flex items-start gap-2 before:mt-0.5 before:shrink-0 before:px-0 before:py-0.5 before:leading-relaxed before:text-fg-2 before:content-['•']")}
+      >
       {selectable ? (
-        <button type="button" onClick={select} onFocus={() => (changeId === undefined ? ctx.onSelectItem?.(mark.id) : undefined)} aria-current={selected || undefined} className="w-full rounded-sm px-1 py-0.5 text-left">
+        <button type="button" onClick={select} onFocus={() => (changeId === undefined ? ctx.onSelectItem?.(mark.id) : undefined)} aria-current={selected || undefined} className="min-w-0 flex-1 rounded-sm px-1 py-0.5 text-left">
           {content}
         </button>
       ) : (
-        <span className="block px-1 py-0.5">{content}</span>
+        <span className="block min-w-0 flex-1 px-1 py-0.5">{content}</span>
       )}
+      </div>
       {selected && ctx.itemControls?.(mark.id)}
     </li>
   );

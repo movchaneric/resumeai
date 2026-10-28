@@ -31,5 +31,7 @@ Every decision record, handoff, review or note belongs to the slice being worked
 | [`05b-live-updates`](./slices/05b-live-updates) | 5b: SSE live updates, crash resume (`interrupted`) | Done |
 | [`06a-review-cleanup`](./slices/06a-review-cleanup) | 6a: Review (one final decision per Change), P6 fix, `DELETE /runs/:id`, TTL sweep | Done |
 | [`06b-export`](./slices/06b-export) | 6b: DOCX/PDF export of the Tailored CV, rendered on demand, the owner's template, shrink to one page, Headline | Done |
-| `06c-one-page` | 6c: every Tailored CV fits one page: page-aware tailoring, condense round, bullet `remove` Change, fit check at Review | Planned |
-| `07-frontend` | Vite SPA, starting with a Claude Design pass (owner's request) | Planned |
+| [`06c-one-page`](./slices/06c-one-page) | 6c: every Tailored CV fits one page: page-aware tailoring, condense round, bullet `remove` Change, fit check at Review | Done |
+| [`07a-review-data`](./slices/07a-review-data) | 7a: `originalCv` in the view, faster `measureFit`, drop rules in shared | Done |
+| [`07b-frontend-core`](./slices/07b-frontend-core) | 7b: design system and page specs; Vite SPA, API layer, live updates, Upload, Questions, Progress, Done, Sign in and Sign up (UI only) | Done |
+| [`07c-review`](./slices/07c-review) | 7c: Review (suggesting mode, top bar, phone focus mode), Word download for a CV that can't fit; slice 7 handoff and retrospective | Done |

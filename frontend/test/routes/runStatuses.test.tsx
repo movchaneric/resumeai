@@ -48,9 +48,9 @@ describe("/runs/:id status switch", () => {
     serveIdleStream(RUN_ID);
     renderApp(PATH);
     await screen.findByRole("heading", { name: "Tailoring your CV" });
-    expect(screen.getByText("Round 2 of 3")).toBeInTheDocument();
+    expect(screen.getByText("Round 1 of 3")).toBeInTheDocument();
     expect(screen.getByText("—")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Tailoring, round 2 of 3.");
+    expect(screen.getByRole("status")).toHaveTextContent("Tailoring, round 1 of 3.");
   });
 
   it("the Review placeholder shows the score and the number of Changes", async () => {

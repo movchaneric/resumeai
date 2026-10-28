@@ -47,7 +47,7 @@ describe("useRun: live updates", () => {
     expect(await screen.findByRole("heading", { name: "Reading your CV…" })).toBeInTheDocument();
     sawParsing.open();
     expect(await screen.findByRole("heading", { name: "Tailoring your CV" })).toBeInTheDocument();
-    expect(screen.getByText("Round 2 of 3")).toBeInTheDocument();
+    expect(screen.getByText("Round 1 of 3")).toBeInTheDocument();
 
     reachedTailoring.open();
     expect(await screen.findByRole("heading", { name: "Review your Changes" })).toBeInTheDocument();

@@ -12,7 +12,7 @@ type Working = Of<"parsing"> | Of<"extracting"> | Of<"tailoring">;
 
 const LEAD = "You can leave this page. Your Run keeps going, and the link above brings you back to it for 7 days.";
 
-const roundOf = (run: Of<"tailoring">) => `Round ${Math.min(run.iterations.used + 1, run.iterations.max)} of ${run.iterations.max}`;
+const roundOf = (run: Of<"tailoring">) => `Round ${Math.max(run.iterations.used, 1)} of ${run.iterations.max}`;
 
 /** What the status region says while the Run works: the running step, with its round while tailoring. */
 function stepAnnouncement(run: Working): string {
@@ -22,7 +22,7 @@ function stepAnnouncement(run: Working): string {
 }
 
 /**
- * The status region announces a step change at once, and the score only when a round ends (`iterations.used` goes up),
+ * The status region announces a step change at once, and the score only when a round ends (`iterations.used` goes up: a new round started, so the one before it finished),
  * never on every update.
  */
 function useAnnouncement(run: Working): string {
@@ -33,8 +33,8 @@ function useAnnouncement(run: Working): string {
   const [roundEnd, setRoundEnd] = useState<{ step: string; text: string } | null>(null);
   const lastUsed = useRef(used);
   useEffect(() => {
-    if (used !== null && lastUsed.current !== null && used > lastUsed.current && before !== null && after !== null) {
-      setRoundEnd({ step, text: `Round ${used} finished. Match Score ${Math.round(before)} to ${Math.round(after)}.` });
+    if (used !== null && lastUsed.current !== null && lastUsed.current >= 1 && used > lastUsed.current && before !== null && after !== null) {
+      setRoundEnd({ step, text: `Round ${lastUsed.current} finished. Match Score ${Math.round(before)} to ${Math.round(after)}.` });
     }
     lastUsed.current = used;
   }, [used, before, after, step]);

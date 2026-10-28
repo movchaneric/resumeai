@@ -41,7 +41,7 @@ describe("progress screen", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(6);
     expect(within(row("Read your CV and the job")).getByText("Done")).toBeInTheDocument();
     expect(within(row("Tailoring")).getByText("In progress")).toBeInTheDocument();
-    expect(screen.getByText("Round 2 of 3")).toBeInTheDocument();
+    expect(screen.getByText("Round 1 of 3")).toBeInTheDocument();
     expect(within(row("Tailoring")).getByText(/Rewording bullets toward the Requirements/)).toBeInTheDocument();
     expect(within(row("Fit it on one page")).getByText("Not started")).toBeInTheDocument();
     expect(within(row("Fit it on one page")).queryByText(/Rewording shorter/)).toBeNull();
@@ -103,30 +103,36 @@ describe("progress screen", () => {
       await stream.ready;
 
       act(() => stream.push(runView("tailoring", { steps: TAILORING_STEPS })));
-      await vi.waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Tailoring, round 2 of 3."));
+      await vi.waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Tailoring, round 1 of 3."));
       expect(screen.getAllByRole("status")).toHaveLength(1);
+    });
+
+    it("shows Round 1 of 3 while the first round runs (used: 1)", async () => {
+      serveRun(RUN_ID, runView("tailoring", { steps: TAILORING_STEPS, iterations: { used: 1, max: 3 } }));
+      renderApp(PATH);
+      expect(await screen.findByText("Round 1 of 3")).toBeInTheDocument();
     });
 
     it("announces the score when a round ends, not on every update", async () => {
       const stream = controlledStream();
-      serveRun(RUN_ID, runView("tailoring", { steps: TAILORING_STEPS, iterations: { used: 0, max: 3 } }));
+      serveRun(RUN_ID, runView("tailoring", { steps: TAILORING_STEPS, iterations: { used: 1, max: 3 } }));
       renderApp(PATH);
       await screen.findByRole("heading", { name: "Tailoring your CV" });
       expect(screen.getByRole("status")).toHaveTextContent("Tailoring, round 1 of 3.");
       await stream.ready;
 
       // The score moves inside the round: the region stays as it was.
-      act(() => stream.push(runView("tailoring", { steps: TAILORING_STEPS, iterations: { used: 0, max: 3 }, score: { before: 54, after: 60 } })));
+      act(() => stream.push(runView("tailoring", { steps: TAILORING_STEPS, iterations: { used: 1, max: 3 }, score: { before: 54, after: 60 } })));
       await screen.findByText("+6");
       expect(screen.getByRole("status")).toHaveTextContent("Tailoring, round 1 of 3.");
       expect(screen.getByRole("status")).not.toHaveTextContent(/Match Score/);
 
-      // The round ends.
-      act(() => stream.push(runView("tailoring", { steps: TAILORING_STEPS, iterations: { used: 1, max: 3 }, score: { before: 54, after: 66 } })));
+      // Round 2 starts, so round 1 ended.
+      act(() => stream.push(runView("tailoring", { steps: TAILORING_STEPS, iterations: { used: 2, max: 3 }, score: { before: 54, after: 66 } })));
       await vi.waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Round 1 finished. Match Score 54 to 66."));
 
       // A further update inside the next round does not replace it.
-      act(() => stream.push(runView("tailoring", { steps: TAILORING_STEPS, iterations: { used: 1, max: 3 }, score: { before: 54, after: 68 } })));
+      act(() => stream.push(runView("tailoring", { steps: TAILORING_STEPS, iterations: { used: 2, max: 3 }, score: { before: 54, after: 68 } })));
       await screen.findByText("+14");
       expect(screen.getByRole("status")).toHaveTextContent("Round 1 finished. Match Score 54 to 66.");
     });

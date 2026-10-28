@@ -21,9 +21,9 @@ export function RunActions({ runId }: { runId: string }) {
 
   return (
     <>
-      <Button variant="secondary" size="compact" onClick={copyLink} className="hidden sm:inline-flex">
+      <Button variant="secondary" size="compact" onClick={copyLink} className="shrink-0 whitespace-nowrap max-sm:px-3">
         <Link2 aria-hidden="true" size={16} strokeWidth={2} />
-        Copy link to this Run
+        <span className="sr-only sm:not-sr-only">Copy link to this Run</span>
       </Button>
       <Menu
         label="Run options"

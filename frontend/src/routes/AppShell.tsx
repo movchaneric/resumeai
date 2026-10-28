@@ -24,7 +24,7 @@ export function AppShell() {
           {job && <span className="hidden min-w-0 truncate text-sm text-fg-2 sm:block">{job}</span>}
           <div className="ml-auto flex items-center gap-2">
             {runId && <RunActions runId={runId} />}
-            <Link to="/sign-in" className="rounded-sm px-2 py-2 text-sm font-semibold text-accent hover:bg-accent-soft">
+            <Link to="/sign-in" className="shrink-0 whitespace-nowrap rounded-sm px-2 py-2 text-sm font-semibold text-accent hover:bg-accent-soft">
               Sign in
             </Link>
           </div>

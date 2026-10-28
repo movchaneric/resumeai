@@ -9,3 +9,14 @@ export { createReviewReducer, initialReviewState, loadReviewState, saveReviewSta
 /** Pure rules: the submission body, the drop check, the "may change" set, the confirm totals and the Evidence lookup. */
 export { toSubmission, canDrop, mayChange, decisionCounts, citingRequirements, type CanDrop } from "@/features/review/rules";
 export type { ReviewRun, ReviewState, ReviewAction, ChangeDecision, Snapshot } from "@/features/review/types";
+
+/** The screen for an `awaiting_review` Run: top bar, rail, CV page and margin. Key it by the Run ID. */
+export { ReviewScreen } from "@/features/review/ReviewScreen";
+/** The CV as a document with the Changes laid over `originalCv`. `readOnly` shows kept Changes' marks only (for Done's "See what changed"). */
+export { CvPage, type CvPageProps } from "@/features/review/CvPage";
+/** The marks the CV page draws: the original CV with Changes (and drops) laid over it. Pure. */
+export { buildCvMarks, type CvMarks, type ItemMark, type ListMarks, type MarkKind } from "@/features/review/cvMarks";
+/** Maps the shared `dropProblem` message (`canDrop(...).reason`) to review.md's words. */
+export { explainDrop, type DropRefusal } from "@/features/review/dropCopy";
+/** The event the rail's "Open checklist" dispatches on `window`; the checklist drawer listens for it. */
+export { OPEN_CHECKLIST_EVENT } from "@/features/review/Rail";

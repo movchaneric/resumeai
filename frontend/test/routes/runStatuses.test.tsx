@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { RUN_ID, STATUSES, runView } from "../fixtures/runViews";
 import { expectNoSeriousViolations } from "../helpers/axe";
@@ -16,7 +16,7 @@ describe("/runs/:id status switch", () => {
     ["extracting", "Tailoring your CV"],
     ["awaiting_answers", "Have you used Node.js?"],
     ["tailoring", "Tailoring your CV"],
-    ["awaiting_review", "Review your Changes"],
+    ["awaiting_review", "Review"],
     ["completed", "Your tailored CV is ready"],
     ["failed", "This Run didn't finish"],
     ["interrupted", "This Run was cut off"],
@@ -39,7 +39,7 @@ describe("/runs/:id status switch", () => {
   it("leaves the job out of the header when the Run has none", async () => {
     serveRun(RUN_ID, runView("awaiting_review", { job: null }));
     renderApp(PATH);
-    await screen.findByRole("heading", { level: 1, name: "Review your Changes" });
+    await screen.findByRole("heading", { level: 1, name: "Review" });
     expect(screen.queryByText(/Northwind/)).toBeNull();
   });
 
@@ -51,16 +51,6 @@ describe("/runs/:id status switch", () => {
     expect(screen.getByText("Round 1 of 3")).toBeInTheDocument();
     expect(screen.getByText("—")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Tailoring, round 1 of 3.");
-  });
-
-  it("the Review placeholder shows the score and the number of Changes", async () => {
-    serveRun(RUN_ID, runView("awaiting_review"));
-    renderApp(PATH);
-    await screen.findByRole("heading", { name: "Review your Changes" });
-    const changes = screen.getByText("Changes", { selector: "dt" }).parentElement!;
-    expect(within(changes).getByText("3")).toBeInTheDocument();
-    expect(screen.getByText("54 → 72")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Ready for your Review: 3 Changes.");
   });
 
   it("a failed Run shows the message for its error code and a way to start a new Run", async () => {

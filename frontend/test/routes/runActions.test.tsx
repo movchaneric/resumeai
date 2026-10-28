@@ -64,7 +64,7 @@ describe("Run actions in the header", () => {
     await user.click(await screen.findByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(deleted).toBe(0);
-    expect(screen.getByRole("heading", { name: "Review your Changes" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Review" })).toBeInTheDocument();
   });
 
   it("a failed delete keeps the dialog open with a message", async () => {

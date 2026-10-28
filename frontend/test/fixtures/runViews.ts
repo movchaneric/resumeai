@@ -87,3 +87,19 @@ export const STATUSES = Object.keys(VIEWS) as RunView["status"][];
 export function runView<S extends RunView["status"]>(status: S, overrides: Record<string, unknown> = {}): Extract<RunView, { status: S }> {
   return RunViewSchema.parse({ ...(VIEWS[status] as object), ...overrides }) as Extract<RunView, { status: S }>;
 }
+
+type StepSpec = [key: string, state: "pending" | "running" | "done" | "failed"];
+
+/** A `steps` array from `[key, state]` pairs, for the `overrides` of `runView`. */
+export const stepsOf = (...specs: StepSpec[]) => specs.map(([key, state]) => ({ key, state }));
+
+/** Steps of a Run that is tailoring: everything before is done, tailoring runs, the rest wait. */
+export const TAILORING_STEPS = stepsOf(
+  ["parse", "done"],
+  ["extract", "done"],
+  ["coverage", "done"],
+  ["questions", "done"],
+  ["tailor", "running"],
+  ["fit", "pending"],
+  ["review", "pending"],
+);

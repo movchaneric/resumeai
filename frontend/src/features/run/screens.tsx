@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import { Link } from "react-router";
 import type { RunView } from "@resume-ai/shared";
 import { downloadUrl } from "@/api";
-import { Chip } from "@/ui/Chip";
 
 type Of<S extends RunView["status"]> = Extract<RunView, { status: S }>;
 
@@ -17,34 +16,6 @@ export function Screen({ title, lead, status, children }: { title: string; lead?
       </p>
       {children}
     </section>
-  );
-}
-
-const LEAD_WHILE_WORKING = "You can leave this page. Your Run keeps going, and the link to this page brings you back to it.";
-
-export function ParsingScreen({ notice }: { run: Of<"parsing">; notice: string }) {
-  return <Screen title="Reading your CV…" lead={LEAD_WHILE_WORKING} status={notice || "Reading your CV."} />;
-}
-
-export function ExtractingScreen({ notice }: { run: Of<"extracting">; notice: string }) {
-  return <Screen title="Tailoring your CV" lead={LEAD_WHILE_WORKING} status={notice || "Reading the Job Description."} />;
-}
-
-export function TailoringScreen({ run, notice }: { run: Of<"tailoring">; notice: string }) {
-  const { before, after } = run.score;
-  const delta = after === null ? null : Math.round(after - before);
-  const round = `Round ${Math.min(run.iterations.used + 1, run.iterations.max)} of ${run.iterations.max}`;
-  return (
-    <Screen title="Tailoring your CV" lead={LEAD_WHILE_WORKING} status={notice || `Tailoring, ${round.toLowerCase()}.`}>
-      <div className="flex flex-wrap items-center gap-3 rounded-hero bg-surface p-5 ring-1 ring-line">
-        <span className="text-sm font-semibold text-fg-3">Match Score</span>
-        <span className="text-2xl font-bold tabular-nums">{Math.round(before)}</span>
-        <span aria-hidden="true">→</span>
-        <span className="text-2xl font-bold tabular-nums">{after === null ? "—" : Math.round(after)}</span>
-        {delta !== null && delta > 0 && <Chip variant="delta">+{delta}</Chip>}
-        <span className="ml-auto text-sm text-fg-3">{round}</span>
-      </div>
-    </Screen>
   );
 }
 
@@ -88,32 +59,6 @@ export function DoneScreen({ run, notice }: { run: Of<"completed">; notice: stri
           See what changed (coming soon)
         </span>
       </div>
-    </Screen>
-  );
-}
-
-const FAILURE_COPY: Partial<Record<Of<"failed">["error"]["code"], [string, string]>> = {
-  EXTRACTION_FAILED: ["We couldn't understand this CV or Job Description.", "Try again; if it keeps failing, try the other file format."],
-  NO_REQUIREMENTS: ["We found no Requirements in this Job Description.", "Paste the full posting, including its requirements."],
-  COVERAGE_FAILED: ["We couldn't compare your CV with the job.", "Try again in a moment."],
-  INTERNAL: ["Something broke on our side.", "Try again in a moment."],
-};
-
-export function FailedScreen({ run }: { run: Of<"failed"> }) {
-  const [headline, hint] = FAILURE_COPY[run.error.code] ?? [run.error.message, "Try again in a moment."];
-  return (
-    <Screen title="This Run didn't finish" status={headline}>
-      <p className="text-[15px] text-fg-2">{hint}</p>
-      <StartNewRun />
-    </Screen>
-  );
-}
-
-export function InterruptedScreen() {
-  return (
-    <Screen title="This Run was cut off" status="This Run was cut off by a server restart and can't continue.">
-      <p className="text-[15px] text-fg-2">Start a new Run with the same files.</p>
-      <StartNewRun />
     </Screen>
   );
 }

@@ -55,3 +55,27 @@ Settled in a design pass and a grilling session (2026-10-27); every decision is 
 
 ## Proof
 A real Run through the browser, from Upload to Questions to Progress to the Review placeholder, plus the failure paths (a scanned PDF, a Job Description that's too long). Screenshots and notes go here when done.
+
+**Result (2026-10-28).** Chrome, against `pnpm dev` (master backend) through the Vite proxy, with real model calls. The CV was the fixture `cv.pdf`, with a made-up Job Description.
+- **Upload:** the file is chosen and the counter runs. Submit goes to `/runs/:id`.
+- **Progress:**
+  - the steps tick live over SSE;
+  - the score card shows 70 → —;
+  - the running step shows its explanation.
+- **Questions:** one at a time.
+  - The keys 1 and 2 and ⌘Enter work.
+  - An empty choice shows "Choose one.".
+  - A refresh restores the draft.
+- **Review placeholder:** 70 → 80, with 1 Change.
+- **Done:** I reached it by posting the Review through the API.
+  - It shows 70 → 80 with a +10 chip, the three tiles and the expiry date.
+  - PDF (1 page) and Word download through the proxy as `tailored-cv.pdf` / `.docx`.
+- **Lost connection, by accident:** the backend briefly loaded a `shared` build from the 7a branch, so `GET /runs/:id` returned 500. The screen showed "Lost connection. Retrying…". After `shared` was rebuilt, it recovered by itself and moved on to the Review.
+- **Failure paths:**
+  - **Scanned PDF:** `SCANNED_PDF` shows its message under the CV pane.
+  - **Job Description over 20,000 characters:** the client check fires under the Job Description pane, with `aria-invalid` and focus.
+- **375px:** Upload, Done, Sign in and Sign up have no horizontal scroll. The 768px Run header has none either.
+- **Found and fixed (58c11d8):**
+  - **The round number was one too high.** `iterations.used` counts rounds started, not finished. The label is now "Round max(used, 1) of max", and "Round N finished" is announced when round N+1 starts.
+  - **The Run header wrapped at 375px.** The copy-link button is icon-only below `sm` and keeps its accessible name, and "Sign in" no longer wraps.
+- **Not checked in a browser:** the `interrupted` and `failed` screens (tests only), and drag-and-drop.

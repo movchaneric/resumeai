@@ -33,8 +33,8 @@ export async function submitReview(id: string, submission: ReviewSubmission) {
 }
 
 /** The fit of a Review as it would be submitted. Nothing is submitted. */
-export function previewReview(id: string, submission: ReviewSubmission) {
-  return requestJson(`/runs/${encodeURIComponent(id)}/review/preview`, ReviewFitSchema, jsonBody(submission));
+export function previewReview(id: string, submission: ReviewSubmission, signal?: AbortSignal) {
+  return requestJson(`/runs/${encodeURIComponent(id)}/review/preview`, ReviewFitSchema, { ...jsonBody(submission), signal });
 }
 
 export function deleteRun(id: string): Promise<void> {

@@ -40,3 +40,7 @@ A full browser Run on the long synthetic CV (`backend/test/fixtures/longCv.ts`, 
 - a `CV_TOO_LONG` round-trip works;
 - submit, then download a one-page PDF;
 - focus mode is checked at 390px.
+
+## Settled during implementation
+- **Word download for a CV that can't fit one page.** The owner chose to allow it: `cv.docx` is rendered at the smallest size step even when the CV does not fit, while `cv.pdf` stays a 409 `CV_TOO_LONG`. Without this, a Run whose CV is not fittable ends on Done with no file at all, and Done's copy ("Download it anyway as Word") would be false.
+- **`onePage` on the completed view.** The `completed` view carries `onePage: boolean`, computed on read with `fitOf` on the Tailored CV (one render when it fits; a Done page is not polled). Done drops "· one page" and shows the notice up front, with Word as the primary button, when it is false.

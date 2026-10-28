@@ -76,6 +76,7 @@ const VIEWS: Record<RunView["status"], unknown> = {
     ...common,
     status: "completed",
     ...reviewFields,
+    onePage: true,
     download: { docx: `/runs/${RUN_ID}/cv.docx`, pdf: `/runs/${RUN_ID}/cv.pdf` },
   },
   failed: { ...common, status: "failed", error: { code: "NO_REQUIREMENTS", message: "No Requirements found." } },

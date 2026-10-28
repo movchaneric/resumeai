@@ -99,6 +99,21 @@ describe("Done screen", () => {
     expect(screen.getByRole("heading", { name: "Your tailored CV is ready" })).toBeInTheDocument();
   });
 
+  it("for a CV that does not fit one page: no 'one page', the notice up front, Word first", async () => {
+    serveRun(RUN_ID, runView("completed", { onePage: false }));
+    const { container } = renderApp(PATH);
+    expect(await screen.findByText("Senior Backend Engineer at Northwind Labs")).toBeInTheDocument();
+    expect(screen.queryByText(/one page$/)).toBeNull();
+    const note = screen.getByRole("note");
+    expect(note).toHaveTextContent("This CV can't fit on one page with your choices.");
+    expect(note).toHaveTextContent("Download it anyway as Word, or start a new Run with a shorter CV.");
+    const [first, second] = screen.getAllByRole("link", { name: /^Download / });
+    expect(first).toHaveTextContent("Download Word");
+    expect(second).toHaveTextContent("Download PDF");
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    await expectNoSeriousViolations(container);
+  });
+
   it("downloads the file through the API and shows no error", async () => {
     const user = userEvent.setup();
     let requests = 0;

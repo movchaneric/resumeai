@@ -45,7 +45,7 @@ export function DoneScreen({ run, notice }: { run: Completed; notice: string }) 
       <div className="flex flex-col gap-1">
         <h1 className="text-[28px] leading-tight">Your tailored CV is ready</h1>
         <p className="text-[15px] text-fg-2">
-          {[jobLine(run.job), "one page"].filter(Boolean).join(" · ")}
+          {[jobLine(run.job), run.onePage ? "one page" : ""].filter(Boolean).join(" · ")}
         </p>
       </div>
       <p role="status" className="sr-only">
@@ -70,10 +70,25 @@ export function DoneScreen({ run, notice }: { run: Completed; notice: string }) 
       </div>
 
       <div className="flex w-full flex-col gap-3 sm:flex-row">
-        <DownloadLink runId={run.id} format="pdf" variant="primary" label="Download PDF" onError={setDownloadError} />
-        <DownloadLink runId={run.id} format="docx" variant="secondary" label="Download Word" onError={setDownloadError} />
+        {run.onePage ? (
+          <>
+            <DownloadLink runId={run.id} format="pdf" variant="primary" label="Download PDF" onError={setDownloadError} />
+            <DownloadLink runId={run.id} format="docx" variant="secondary" label="Download Word" onError={setDownloadError} />
+          </>
+        ) : (
+          <>
+            <DownloadLink runId={run.id} format="docx" variant="primary" label="Download Word" onError={setDownloadError} />
+            <DownloadLink runId={run.id} format="pdf" variant="secondary" label="Download PDF" onError={setDownloadError} />
+          </>
+        )}
       </div>
-      {downloadError !== null && (
+      {!run.onePage && (
+        <div role="note" className="rounded-hero bg-warn-soft p-4 text-left text-[15px] text-warn-fg ring-1 ring-warn-line">
+          <p className="font-semibold">This CV can't fit on one page with your choices.</p>
+          <p>Download it anyway as Word, or start a new Run with a shorter CV.</p>
+        </div>
+      )}
+      {run.onePage && downloadError !== null && (
         <div role="alert" className="rounded-hero bg-warn-soft p-4 text-left text-[15px] text-warn-fg ring-1 ring-warn-line">
           {tooLong ? (
             <>

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ItemId } from "@resume-ai/shared";
-import { canDrop, createReviewReducer, initialReviewState, loadReviewState, mayChange, requirementsCiting, reviewStorageKey, saveReviewState, toSubmission, decisionCounts } from "@/features/review";
+import { canDrop, createReviewReducer, initialReviewState, loadReviewState, mayChange, citingRequirements, reviewStorageKey, saveReviewState, toSubmission, decisionCounts } from "@/features/review";
 import type { ReviewAction, ReviewState } from "@/features/review";
 import { reviewRunView } from "../../fixtures/runViews";
 
@@ -214,10 +214,10 @@ describe("mayChange (the three sets of final_rejudge)", () => {
   });
 });
 
-describe("requirementsCiting", () => {
+describe("citingRequirements", () => {
   it("returns the rows whose final Evidence cites the Item", () => {
-    expect(requirementsCiting(run, "b2").map((r) => r.id)).toEqual(["r1"]);
-    expect(requirementsCiting(run, "b3")).toEqual([]);
+    expect(citingRequirements(run, "b2").map((r) => r.id)).toEqual(["r1"]);
+    expect(citingRequirements(run, "b3")).toEqual([]);
   });
 });
 

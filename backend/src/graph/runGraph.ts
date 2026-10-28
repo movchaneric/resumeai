@@ -8,7 +8,7 @@ import { setActiveSpanAttribute } from "@/utils/spans.js";
 import { condenseDrop, condenseReword, measureCondense, type CondenseInput, type CondenseStepResult } from "@/tailoring/condense.js";
 import { removableBullets } from "@/tailoring/removable.js";
 import { mergeRoundIntoChanges } from "@/tailoring/mergeChanges.js";
-import { mergeCoverage, requirementsAffectedByReview, requirementsCiting, requirementsListedBy } from "@/tailoring/roundCoverage.js";
+import { mergeCoverage } from "@/tailoring/roundCoverage.js";
 import { onlyGapsLeft, routeAfterRound, shouldSkipTailoring } from "@/scoring/exitRouter.js";
 import { assessCoverage } from "@/scoring/assessCoverage.js";
 import { matchScore } from "@/scoring/matchScore.js";
@@ -16,7 +16,7 @@ import { resolveJobProfile, type JobProfileCache } from "@/graph/jobProfileCache
 import { STATUS_AT_POSITION } from "@/services/runs.js";
 import { RunState, type CondenseProgress, type RunStateValues } from "@/graph/state.js";
 import type { RecordedRejection } from "@/tailoring/validateChanges.js";
-import { UserEvidenceIdSchema, type Answer, type Change, type Question, type RequirementId, type ReviewSubmission, type UserEvidence, applyChanges, applyDecisions, keptChanges, userDrops } from "@resume-ai/shared";
+import { UserEvidenceIdSchema, type Answer, type Change, type Question, type RequirementId, type ReviewSubmission, type UserEvidence, applyChanges, applyDecisions, keptChanges, requirementsAffectedByReview, requirementsCiting, requirementsListedBy, userDrops } from "@resume-ai/shared";
 
 /** The Run status a node writes when the graph enters it (decisions record, "Storage and status"). */
 export const NODE_STATUS = {

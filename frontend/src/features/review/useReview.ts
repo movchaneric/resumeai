@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useReducer } from "react";
 import type { ItemId } from "@resume-ai/shared";
 import { createReviewReducer, initialReviewState, loadReviewState, saveReviewState } from "@/features/review/state";
-import { canDrop, decisionCounts, mayChange, requirementsCiting, toSubmission } from "@/features/review/rules";
+import { canDrop, decisionCounts, mayChange, citingRequirements, toSubmission } from "@/features/review/rules";
 import { useFitPreview } from "@/features/review/useFitPreview";
 import type { ReviewAction, ReviewRun, ReviewState } from "@/features/review/types";
 
@@ -31,7 +31,7 @@ export function useReview(run: ReviewRun) {
     /** The totals for the confirm dialog. */
     counts: decisionCounts(state),
     /** The Requirements whose final verdict cites this Item (for the confirm before dropping a cited bullet). */
-    requirementsCiting: (itemId: string) => requirementsCiting(run, itemId),
+    citingRequirements: (itemId: string) => citingRequirements(run, itemId),
     /** The live fit: `{ fit, checking, error, retry, setFit }`. */
     fit,
     /** True when there is something to undo. */

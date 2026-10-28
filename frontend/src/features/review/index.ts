@@ -7,5 +7,5 @@ export { useFitPreview, PREVIEW_DEBOUNCE_MS, invalidReviewTarget, type FitPrevie
 /** The reducer factory, the starting state and the `sessionStorage` helpers. */
 export { createReviewReducer, initialReviewState, loadReviewState, saveReviewState, clearSavedReview, reviewStorageKey } from "@/features/review/state";
 /** Pure rules: the submission body, the drop check, the "may change" set, the confirm totals and the Evidence lookup. */
-export { toSubmission, canDrop, mayChange, decisionCounts, requirementsCiting, type CanDrop } from "@/features/review/rules";
+export { toSubmission, canDrop, mayChange, decisionCounts, citingRequirements, type CanDrop } from "@/features/review/rules";
 export type { ReviewRun, ReviewState, ReviewAction, ChangeDecision, Snapshot } from "@/features/review/types";

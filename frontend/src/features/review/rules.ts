@@ -1,5 +1,5 @@
-import { applyDecisions, dropProblem, userDrops } from "@resume-ai/shared";
-import type { Change, ItemId, ReviewSubmission } from "@resume-ai/shared";
+import { applyDecisions, dropProblem, requirementsAffectedByReview, userDrops } from "@resume-ai/shared";
+import type { Change, Coverage, ItemId, ReviewSubmission } from "@resume-ai/shared";
 import type { ReviewRun, ReviewState } from "@/features/review/types";
 
 /** The submission for the state: a decision per Change in the Run's order, and the drops. Pure; `after` is trimmed as the server does. */
@@ -40,31 +40,22 @@ export function canDrop(run: ReviewRun, state: ReviewState, itemId: ItemId): Can
 }
 
 /** The Requirements whose final verdict cites this Item as Evidence (for the "may lower the score" confirm before a drop). */
-export function requirementsCiting(run: Pick<ReviewRun, "requirements">, itemId: string) {
+export function citingRequirements(run: Pick<ReviewRun, "requirements">, itemId: string) {
   return run.requirements.filter((r) => r.after.evidenceIds.some((id) => id === itemId));
 }
 
 /**
- * The IDs of the Requirements the submit will judge again, under the current decisions. The same three sets as the
- * backend's `final_rejudge` (`requirementsAffectedByReview`), which works on the Changes the user undid (rejected or
- * revised, their drops included as revised removes):
- *   1. a Requirement one of those Changes lists;
- *   2. a Requirement whose Evidence cites an Item one of those Changes rewrites or removes (the target of a `replace` or `remove`);
- *   3. a Requirement whose Evidence cites a bullet the user dropped.
- * Pure. Evidence here is the final verdict's `evidenceIds` (the `after` of each row), as in the backend's Coverage.
+ * The IDs of the Requirements the submit will judge again, under the current decisions: the shared
+ * `requirementsAffectedByReview`, which the backend's `final_rejudge` calls. It gets the Changes the user undid (rejected
+ * or revised, their drops included as revised removes) and the final verdicts (the `after` of each row) as Coverage.
+ * Three sets: a Requirement an undone Change lists; one whose Evidence cites an Item an undone `replace` or `remove`
+ * targets; one whose Evidence cites a dropped bullet.
  */
 export function mayChange(state: Pick<ReviewState, "changeIds" | "decisions" | "drops">, run: Pick<ReviewRun, "changes" | "requirements" | "originalCv">): Set<string> {
   const decided = applyDecisions(run.changes, toSubmission(state).decisions);
-  const undone = decided.filter((c) => c.status === "rejected" || c.status === "revised");
-  const listed = new Set(undone.flatMap((c) => c.requirementIds as string[]));
-  const touched = new Set(undone.flatMap((c) => (c.op === "replace" || c.op === "remove" ? [c.targetItemId as string] : [])));
-  const dropped = new Set(userDrops(run.originalCv, state.drops).map((c) => (c.op === "remove" ? (c.targetItemId as string) : "")));
-  const result = new Set<string>();
-  for (const r of run.requirements) {
-    const cites = (ids: Set<string>) => r.after.evidenceIds.some((e) => ids.has(e as string));
-    if (listed.has(r.id) || cites(touched) || cites(dropped)) result.add(r.id);
-  }
-  return result;
+  const undone = [...decided.filter((c) => c.status === "rejected" || c.status === "revised"), ...userDrops(run.originalCv, state.drops)];
+  const coverage: Coverage[] = run.requirements.map((r) => ({ requirementId: r.id, verdict: r.after.verdict, evidenceIds: r.after.evidenceIds, reason: r.after.reason }));
+  return new Set(requirementsAffectedByReview(run.requirements, coverage, undone).map((r) => r.id as string));
 }
 
 /** The totals for the confirm dialog: "Accept 15, edit 2, reject 7, drop 2". */

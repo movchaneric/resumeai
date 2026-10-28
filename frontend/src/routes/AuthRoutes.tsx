@@ -1,23 +1,19 @@
-import { Link } from "react-router";
-import { Screen } from "@/features/run/screens";
+import { AuthForm } from "@/features/auth/AuthForm";
+import { AuthLayout } from "@/features/auth/AuthLayout";
+import { SignInPanel, SignUpPanel } from "@/features/auth/BrandPanels";
 
-/** Placeholders until the auth ticket. Accounts don't exist yet. */
 export function SignInRoute() {
   return (
-    <Screen title="Sign in" status="Accounts are coming soon.">
-      <Link to="/" className="self-start font-semibold text-accent underline">
-        Enter as a guest
-      </Link>
-    </Screen>
+    <AuthLayout panel={<SignInPanel />}>
+      <AuthForm mode="sign-in" />
+    </AuthLayout>
   );
 }
 
 export function SignUpRoute() {
   return (
-    <Screen title="Create an account" status="Accounts are coming soon.">
-      <Link to="/" className="self-start font-semibold text-accent underline">
-        Enter as a guest
-      </Link>
-    </Screen>
+    <AuthLayout panel={<SignUpPanel />}>
+      <AuthForm mode="sign-up" />
+    </AuthLayout>
   );
 }

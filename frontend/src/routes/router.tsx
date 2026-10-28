@@ -7,14 +7,15 @@ import { RunRoute } from "@/routes/RunRoute";
 import { UploadRoute } from "@/routes/UploadRoute";
 
 export const appRoutes: RouteObject[] = [
+  // The auth pages are full two-half layouts with their own brand header, so they sit outside AppShell.
+  { path: "sign-in", element: <SignInRoute />, errorElement: <ErrorScreen /> },
+  { path: "sign-up", element: <SignUpRoute />, errorElement: <ErrorScreen /> },
   {
     element: <AppShell />,
     errorElement: <ErrorScreen />,
     children: [
       { index: true, element: <UploadRoute /> },
       { path: "runs/:id", element: <RunRoute /> },
-      { path: "sign-in", element: <SignInRoute /> },
-      { path: "sign-up", element: <SignUpRoute /> },
       { path: "*", element: <NotFoundRoute /> },
     ],
   },

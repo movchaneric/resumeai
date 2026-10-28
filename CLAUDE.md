@@ -53,6 +53,8 @@ frontend/test/   mirrors src (ui/, api/, routes/, features/); helpers in test/he
 ```
 
 - `ui/` imports no `features/`, `routes/` or `api/`.
+- Every API response is parsed with the shared zod schemas inside `api/`; callers get typed data or an `ApiError`.
+- One set of query options per Run (`runQueryOptions`): a TanStack query keeps one `retry` and `networkMode`, so two observers with different ones overwrite each other.
 - Only `api/` uses `fetch` or `EventSource`; everything else gets server data through TanStack Query hooks built on `api/`.
 - No raw hex colors outside `styles/`: use the tokens (`bg-accent`, `text-fg-2`, ...).
 - Import frontend code with the `@/` alias, never relative paths (tests may import their own helpers relatively); shared types and schemas come from `@resume-ai/shared`.

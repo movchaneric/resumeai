@@ -11,7 +11,9 @@ import { buildCards, counts as countFilters, matchesFilter, textsWithAdds, type 
 import { buildCvMarks } from "@/features/review/cvMarks";
 import { explainDrop } from "@/features/review/dropCopy";
 import { decidedChanges } from "@/features/review/rules";
-import { useReview } from "@/features/review/useReview";
+import { FocusMode } from "@/features/review/focus/FocusMode";
+import { useIsDesktop } from "@/features/review/useIsDesktop";
+import { useReview, type UseReview } from "@/features/review/useReview";
 import { useReviewShortcuts } from "@/features/review/useReviewShortcuts";
 import { ReviewTopBar } from "@/features/review/topbar/ReviewTopBar";
 import type { ReviewRun } from "@/features/review/types";
@@ -23,11 +25,17 @@ const find = (attribute: string, value: string) => document.querySelector<HTMLEl
 const prefersReducedMotion = () => typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /**
- * The Review screen on desktop, "suggesting mode": the top bar, the filter rail, the CV page with the Changes laid over
- * it, and the margin of Change cards. Mount it keyed by the Run, so the Review state is the Run's.
+ * The Review screen. From 1024px it is "suggesting mode" (the top bar, the filter rail, the CV page with the Changes laid
+ * over it, and the margin of Change cards); below that it is focus mode, one Change at a time. Both share the one
+ * `useReview(run)` result, and only one layout is mounted. Mount it keyed by the Run, so the Review state is the Run's.
  */
 export function ReviewScreen({ run, notice = "" }: { run: ReviewRun; notice?: string }) {
   const review = useReview(run);
+  const desktop = useIsDesktop();
+  return desktop ? <DesktopReview run={run} review={review} notice={notice} /> : <FocusMode run={run} review={review} notice={notice} />;
+}
+
+function DesktopReview({ run, review, notice }: { run: ReviewRun; review: UseReview; notice: string }) {
   const { state, dispatch } = review;
   const toast = useToast();
 

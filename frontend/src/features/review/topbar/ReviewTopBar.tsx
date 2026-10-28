@@ -23,6 +23,11 @@ export interface ReviewTopBarProps {
   /** When given, the checklist drawer is controlled by the screen (so the rail can open it). */
   checklistOpen?: boolean;
   onChecklistOpenChange?: (open: boolean) => void;
+  /** Phone focus mode: a compact bar (no Submit button, no "Next unreviewed"), the fit and checklist as sheets. */
+  compact?: boolean;
+  /** When given, the submit dialog is controlled by the screen (so the bottom bar can open it). */
+  submitOpen?: boolean;
+  onSubmitOpenChange?: (open: boolean) => void;
 }
 
 function jobLine(job: ReviewRun["job"]): string {
@@ -51,10 +56,12 @@ function nextUnreviewed(review: UseReview): string | null {
  * `INVALID_REVIEW` closes the dialog, selects the named Change and shows the message in an alert under the bar (the dialog
  * would cover the card, and the card is the page's).
  */
-export function ReviewTopBar({ run, review, onHighlightChanges, checklistOpen: controlledOpen, onChecklistOpenChange }: ReviewTopBarProps) {
+export function ReviewTopBar({ run, review, onHighlightChanges, checklistOpen: controlledOpen, onChecklistOpenChange, compact = false, submitOpen: controlledSubmit, onSubmitOpenChange }: ReviewTopBarProps) {
   const client = useQueryClient();
   const toast = useToast();
-  const [submitOpen, setSubmitOpen] = useState(false);
+  const [ownSubmitOpen, setOwnSubmitOpen] = useState(false);
+  const submitOpen = controlledSubmit ?? ownSubmitOpen;
+  const setSubmitOpen = onSubmitOpenChange ?? setOwnSubmitOpen;
   const [ownChecklistOpen, setOwnChecklistOpen] = useState(false);
   const checklistOpen = controlledOpen ?? ownChecklistOpen;
   const setChecklistOpen = onChecklistOpenChange ?? setOwnChecklistOpen;
@@ -120,8 +127,54 @@ export function ReviewTopBar({ run, review, onHighlightChanges, checklistOpen: c
   const next = nextUnreviewed(review);
   const job = jobLine(run.job);
 
+  const fitChip = (
+    <FitChip
+      fit={review.fit}
+      open={fitOpen}
+      onOpenChange={(next) => {
+        setFitOpen(next);
+        if (!next) setFitNotice(null);
+      }}
+      notice={fitNotice}
+      sheet={compact}
+    />
+  );
+  const scoreChip = (
+    <Chip variant="status" onClick={() => setChecklistOpen(true)} className="min-h-10 px-3">
+      Match Score {Math.round(run.score.before)} → {Math.round(run.score.after)}
+    </Chip>
+  );
+
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-surface/90 backdrop-blur">
+      {compact ? (
+        <div className="flex flex-col gap-2 px-4 py-2.5">
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-lg leading-tight">Review</h1>
+              {job && <p className="truncate text-[13px] text-fg-2">{job}</p>}
+            </div>
+            <Menu
+              label="Run options"
+              items={[
+                { label: "Submit Review", onSelect: () => setSubmitOpen(true) },
+                { label: "Copy link", icon: Link2, onSelect: copyLink },
+                { label: "Delete Run", icon: Trash2, onSelect: () => setDeleting(true), tone: "danger" },
+              ]}
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {fitChip}
+            {scoreChip}
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-[13px] font-semibold tabular-nums">
+              {done} of {total}
+            </span>
+            <ProgressBar value={done} max={Math.max(total, 1)} label="Review progress" className="flex-1" />
+          </div>
+        </div>
+      ) : (
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-2.5 md:px-6">
         <div className="min-w-0">
           <h1 className="text-lg leading-tight">Review</h1>
@@ -144,18 +197,8 @@ export function ReviewTopBar({ run, review, onHighlightChanges, checklistOpen: c
         </div>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <FitChip
-            fit={review.fit}
-            open={fitOpen}
-            onOpenChange={(next) => {
-              setFitOpen(next);
-              if (!next) setFitNotice(null);
-            }}
-            notice={fitNotice}
-          />
-          <Chip variant="status" onClick={() => setChecklistOpen(true)} className="min-h-10 px-3">
-            Match Score {Math.round(run.score.before)} → {Math.round(run.score.after)}
-          </Chip>
+          {fitChip}
+          {scoreChip}
           <Button size="compact" onClick={() => setSubmitOpen(true)}>
             Submit Review
           </Button>
@@ -168,6 +211,7 @@ export function ReviewTopBar({ run, review, onHighlightChanges, checklistOpen: c
           />
         </div>
       </div>
+      )}
 
       {invalidMessage && (
         <div role="alert" className="flex items-center gap-2 border-t border-line bg-warn-soft px-4 py-2 text-[13px] text-danger md:px-6">
@@ -179,7 +223,7 @@ export function ReviewTopBar({ run, review, onHighlightChanges, checklistOpen: c
         </div>
       )}
 
-      <ChecklistDrawer run={run} mayChange={review.mayChange} open={checklistOpen} onOpenChange={setChecklistOpen} onHighlightChanges={onHighlightChanges} />
+      <ChecklistDrawer sheet={compact} run={run} mayChange={review.mayChange} open={checklistOpen} onOpenChange={setChecklistOpen} onHighlightChanges={onHighlightChanges} />
       <SubmitDialog
         open={submitOpen}
         onOpenChange={(next) => {

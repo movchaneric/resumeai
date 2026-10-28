@@ -67,7 +67,7 @@ function DecisionButton({ active, activeLabel, label, tone, icon: Icon, hint, on
   );
 }
 
-function TextEditor({ initial, onSave, onCancel }: { initial: string; onSave: (text: string) => void; onCancel: () => void }) {
+export function TextEditor({ initial, onSave, onCancel }: { initial: string; onSave: (text: string) => void; onCancel: () => void }) {
   const [text, setText] = useState(initial);
   const save = () => text.trim() && onSave(text);
   return (
@@ -103,7 +103,7 @@ function TextEditor({ initial, onSave, onCancel }: { initial: string; onSave: (t
   );
 }
 
-function OrderEditor({ ids, texts, onSave, onCancel }: { ids: ItemId[]; texts: Map<string, string>; onSave: (ids: ItemId[]) => void; onCancel: () => void }) {
+export function OrderEditor({ ids, texts, onSave, onCancel }: { ids: ItemId[]; texts: Map<string, string>; onSave: (ids: ItemId[]) => void; onCancel: () => void }) {
   const [order, setOrder] = useState(ids);
   const move = (index: number, by: -1 | 1) =>
     setOrder((current) => {

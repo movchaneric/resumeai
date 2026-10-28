@@ -84,13 +84,15 @@ export interface ChecklistDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onHighlightChanges: (changeIds: string[]) => void;
+  /** Show it as a modal bottom sheet (phone focus mode) instead of a right-hand drawer. */
+  sheet?: boolean;
 }
 
 /**
  * The Requirement checklist, as a right-hand drawer: must-haves first, then nice-to-haves. It is not modal and has no
  * overlay, so the highlighted Changes stay visible on the page behind it.
  */
-export function ChecklistDrawer({ run, mayChange, open, onOpenChange, onHighlightChanges }: ChecklistDrawerProps) {
+export function ChecklistDrawer({ run, mayChange, open, onOpenChange, onHighlightChanges, sheet = false }: ChecklistDrawerProps) {
   const texts = useMemo(() => {
     const map = new Map([...itemTexts(run.originalCv), ...itemTexts(run.cv)]);
     for (const e of run.userEvidence) map.set(e.id, e.text);
@@ -104,7 +106,7 @@ export function ChecklistDrawer({ run, mayChange, open, onOpenChange, onHighligh
 
   return (
     <Dialog.Root
-      modal={false}
+      modal={sheet}
       open={open}
       onOpenChange={(next) => {
         if (!next) onHighlightChanges([]);
@@ -112,9 +114,14 @@ export function ChecklistDrawer({ run, mayChange, open, onOpenChange, onHighligh
       }}
     >
       <Dialog.Portal>
+        {sheet && <Dialog.Overlay className="fixed inset-0 z-40 bg-fg/40" />}
         <Dialog.Content
-          onInteractOutside={(e) => e.preventDefault()}
-          className="fixed inset-y-0 right-0 z-40 flex w-96 max-w-[calc(100vw-2rem)] flex-col gap-4 overflow-y-auto bg-bg p-5 shadow-xl ring-1 ring-line"
+          onInteractOutside={sheet ? undefined : (e) => e.preventDefault()}
+          className={
+            sheet
+              ? "fixed inset-x-0 bottom-0 z-50 flex max-h-[85vh] flex-col gap-4 overflow-y-auto rounded-t-hero bg-bg p-5 pb-8 shadow-xl"
+              : "fixed inset-y-0 right-0 z-40 flex w-96 max-w-[calc(100vw-2rem)] flex-col gap-4 overflow-y-auto bg-bg p-5 shadow-xl ring-1 ring-line"
+          }
         >
           <div className="flex items-start justify-between gap-2">
             <Dialog.Title className="text-xl font-bold tracking-tight">Requirement checklist</Dialog.Title>

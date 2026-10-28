@@ -5,6 +5,7 @@ import type { RunView } from "@resume-ai/shared";
 import { ApiError } from "@/api";
 import { Button } from "@/ui/Button";
 import { Chip } from "@/ui/Chip";
+import { CvPage } from "@/features/review";
 import { DeleteRunDialog } from "@/features/run/DeleteRunDialog";
 import { DownloadLink } from "@/features/done/DownloadLink";
 import { doneStats, formatExpiry } from "@/features/done/stats";
@@ -28,6 +29,7 @@ function jobLine(job: Completed["job"]): string {
 
 export function DoneScreen({ run, notice }: { run: Completed; notice: string }) {
   const [deleting, setDeleting] = useState(false);
+  const [showChanges, setShowChanges] = useState(false);
   const [downloadError, setDownloadError] = useState<unknown>(null);
   const before = Math.round(run.score.before);
   const after = Math.round(run.score.after);
@@ -91,9 +93,9 @@ export function DoneScreen({ run, notice }: { run: Completed; notice: string }) 
       </dl>
 
       <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-1">
-        <span aria-disabled="true" className="font-semibold text-fg-3">
-          See what changed (coming soon)
-        </span>
+        <button type="button" aria-expanded={showChanges} aria-controls="what-changed" onClick={() => setShowChanges((open) => !open)} className="font-semibold text-accent underline">
+          {showChanges ? "Hide what changed" : "See what changed"}
+        </button>
         <Link to="/" className="font-semibold text-accent underline">
           Tailor for another job
         </Link>
@@ -101,6 +103,11 @@ export function DoneScreen({ run, notice }: { run: Completed; notice: string }) 
           Delete this Run now
         </Button>
       </div>
+      {showChanges && (
+        <div id="what-changed" className="w-full text-left">
+          <CvPage cv={run.originalCv} changes={run.changes} readOnly />
+        </div>
+      )}
       <DeleteRunDialog runId={run.id} open={deleting} onOpenChange={setDeleting} />
 
       <p className="text-sm text-fg-3">Deleted automatically on {formatExpiry(run.expiresAt)}.</p>

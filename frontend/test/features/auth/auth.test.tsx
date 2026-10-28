@@ -69,6 +69,7 @@ describe("Sign up", () => {
     expect(screen.getByText("Keep every tailored CV in one place.")).toBeInTheDocument();
     expect(screen.getByLabelText("Name")).toHaveAttribute("autocomplete", "name");
     expect(screen.getByLabelText("Password")).toHaveAttribute("autocomplete", "new-password");
+    expect(screen.getByText("No account needed. Your Run stays at its link for 7 days.")).toBeInTheDocument();
     expect(screen.getAllByRole("status")).toHaveLength(1);
     await expectNoSeriousViolations(container);
   });

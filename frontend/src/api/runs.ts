@@ -47,6 +47,6 @@ export function downloadUrl(id: string, format: "pdf" | "docx"): string {
 }
 
 /** The Tailored CV as a file, fetched so a failure (409 `CV_TOO_LONG`) arrives as an `ApiError` a link could not show. */
-export function downloadCv(id: string, format: "pdf" | "docx"): Promise<Blob> {
+export function downloadCv(id: string, format: "pdf" | "docx"): Promise<{ blob: Blob; filename: string | null }> {
   return requestBlob(`/runs/${encodeURIComponent(id)}/cv.${format}`);
 }

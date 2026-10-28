@@ -1,6 +1,6 @@
 import { http, HttpResponse } from "msw";
 import { describe, expect, it, vi } from "vitest";
-import { ApiError, answer, createRun, deleteRun, downloadUrl, getRun, previewReview, submitReview } from "@/api";
+import { ApiError, answer, createRun, deleteRun, downloadCv, downloadUrl, getRun, previewReview, submitReview } from "@/api";
 import { RUN_ID, runView } from "../fixtures/runViews";
 import { server } from "../helpers/server";
 
@@ -101,6 +101,15 @@ describe("api client", () => {
   it("deleteRun resolves on 204", async () => {
     server.use(http.delete(`/api/runs/${RUN_ID}`, () => new HttpResponse(null, { status: 204 })));
     await expect(deleteRun(RUN_ID)).resolves.toBeUndefined();
+  });
+
+  it("downloadCv returns the blob with the server's filename, or null without one", async () => {
+    server.use(
+      http.get(`/api/runs/${RUN_ID}/cv.pdf`, () => new HttpResponse("pdf", { headers: { "Content-Disposition": 'attachment; filename="tailored-cv.pdf"' } })),
+      http.get(`/api/runs/${RUN_ID}/cv.docx`, () => new HttpResponse("docx")),
+    );
+    expect((await downloadCv(RUN_ID, "pdf")).filename).toBe("tailored-cv.pdf");
+    expect((await downloadCv(RUN_ID, "docx")).filename).toBeNull();
   });
 
   it("builds download URLs under the API base", () => {

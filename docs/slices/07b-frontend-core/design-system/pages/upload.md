@@ -10,7 +10,7 @@ Start a Run: one CV file and the Job Description text. It also says what the pro
 - **Hero:**
   - "Tailor your CV to the job you want" (44px, 700, at most 16ch);
   - the lead: "It rewords and reorders what's already in your CV, asks about the gaps, and lets you approve every change. It never invents facts."
-- **One raised form card** (16px radius) with two panes side by side that stack below 720px:
+- **One raised form card** (16px radius) with two panes side by side that stack below 720px (`min-[720px]:` in the code):
   - **Your CV:**
     - **Empty:** a drop target with "Choose a file or drop it here" and "PDF or Word, up to 5 MB and 5 pages". It's a real `<input type=file>` with a label, and works by keyboard.
     - **Chosen:** a file row with an icon, the name, the type and size, and a green check, plus "Choose a different file".

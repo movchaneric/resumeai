@@ -97,7 +97,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
         >
           Enter as a guest →
         </Link>
-        {mode === "sign-in" && <p className="text-center text-[13px] text-fg-3">No account needed. Your Run stays at its link for 7 days.</p>}
+        <p className="text-center text-[13px] text-fg-3">No account needed. Your Run stays at its link for 7 days.</p>
       </div>
       <p className="text-center text-sm text-fg-2">
         {mode === "sign-in" ? "New here? " : "Already have an account? "}

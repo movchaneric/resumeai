@@ -99,9 +99,9 @@ export function UploadScreen() {
       </header>
 
       <form onSubmit={submit} noValidate className="overflow-hidden rounded-hero bg-surface shadow-sm ring-1 ring-line">
-        <div className="grid md:grid-cols-2">
+        <div className="grid min-[720px]:grid-cols-2">
           <CvPane ref={fileRef} file={file} error={errors.cv ?? null} onPick={pick} />
-          <div className="flex flex-col gap-3 bg-bg p-5 md:p-6">
+          <div className="flex flex-col gap-3 bg-bg p-5 min-[720px]:p-6">
             <div className="flex items-baseline justify-between gap-3">
               <label htmlFor={jdId} className="text-sm font-semibold">
                 Job Description

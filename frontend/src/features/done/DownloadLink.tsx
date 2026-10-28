@@ -34,13 +34,16 @@ export function DownloadLink({
     if (busy) return;
     setBusy(true);
     try {
-      const blob = await downloadCv(runId, format);
+      const { blob, filename } = await downloadCv(runId, format);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `tailored-cv.${format}`;
+      a.download = filename ?? `tailored-cv.${format}`;
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      a.remove();
+      // Revoking at once can cancel the download in Firefox and Safari.
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
       onError(null);
     } catch (error) {
       onError(error instanceof ApiError ? error : new Error("download failed"));

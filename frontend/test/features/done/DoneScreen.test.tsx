@@ -76,10 +76,14 @@ describe("Done screen", () => {
   it("downloads the file through the API and shows no error", async () => {
     const user = userEvent.setup();
     let requests = 0;
+    let downloadName = "";
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      if (this.href.startsWith("blob:")) downloadName = this.download;
+    });
     server.use(
       http.get(`/api/runs/${RUN_ID}/cv.pdf`, () => {
         requests += 1;
-        return new HttpResponse("pdf", { headers: { "Content-Type": "application/pdf" } });
+        return new HttpResponse("pdf", { headers: { "Content-Type": "application/pdf", "Content-Disposition": 'attachment; filename="server-name.pdf"' } });
       }),
     );
     serveRun(RUN_ID, runView("completed"));
@@ -88,6 +92,12 @@ describe("Done screen", () => {
     await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalled());
     expect(requests).toBe(1);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(click).toHaveBeenCalledTimes(1);
+    click.mockRestore();
+    expect(downloadName).toBe("server-name.pdf");
+    expect(document.querySelector("a[download][href='blob:test']")).toBeNull();
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+    await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:test"), { timeout: 2000 });
   });
 
   it("a 409 CV_TOO_LONG shows the one-page message", async () => {

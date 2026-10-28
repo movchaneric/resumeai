@@ -37,9 +37,17 @@ export async function requestVoid(path: string, init?: RequestInit): Promise<voi
   await send(path, init);
 }
 
-/** A request whose response is a file. */
-export async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
-  return (await send(path, init)).blob();
+/** The filename in a `Content-Disposition` header, or null when there is none. */
+export function filenameFrom(header: string | null): string | null {
+  if (!header) return null;
+  const match = /filename="?([^";]+)"?/i.exec(header);
+  return match?.[1]?.trim() || null;
+}
+
+/** A request whose response is a file, with the filename the server chose (null when it sent none). */
+export async function requestBlob(path: string, init?: RequestInit): Promise<{ blob: Blob; filename: string | null }> {
+  const response = await send(path, init);
+  return { blob: await response.blob(), filename: filenameFrom(response.headers.get("Content-Disposition")) };
 }
 
 export function jsonBody(value: unknown): RequestInit {

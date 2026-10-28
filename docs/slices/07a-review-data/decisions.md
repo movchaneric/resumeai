@@ -36,3 +36,19 @@ Settled in the slice 7 grilling (2026-10-27); every decision is owner-approved. 
 A real Run through `scripts/proof-run.sh`. At `awaiting_review`:
 - a removed bullet is in `originalCv` but not in `cv`;
 - a timed preview is faster than before (record both timings).
+
+**Result (2026-10-28).** The Run used the fixture `cv.pdf` and a made-up Job Description, on the 7a backend (:3001) with real model calls. It reached `awaiting_review` with a score of 70 → 80, after 2 rounds and a plateau. It had 2 Changes: one `add` (`r1.c1`) and one `replace` (`r2.c1` on `exp1.b1`).
+- **`originalCv` is present and unchanged:**
+  - its bullets are `exp1.b1`, `exp1.b2` and `exp2.b1`;
+  - `cv` has those plus the added `exp1.b3`;
+  - `exp1.b1` keeps its original text in `originalCv` and the reworded text in `cv`.
+- **No `remove` Change in this Run:** the CV fits at the normal size, so nothing was condensed. A removed bullet in `originalCv` but not in `cv` is covered by the route test in `reviewFit.test.ts` instead (`exp3.b2`, at `awaiting_review` and `completed`). A preview that drops `exp1.b2`, a bullet of the original, was accepted (200).
+- **Preview timings:** three calls each, accept-all and reject-plus-drop, on master (:3000) and on 7a (:3001), against the same Run.
+
+  | Backend | Preview time |
+  |---|---|
+  | master | 24–29ms after warm-up |
+  | 7a | 27–34ms after warm-up |
+
+  - **No difference, as expected:** a CV that fits at the normal size takes one render in both versions.
+  - **Where 7a gains:** on CVs over one page, which take 2 renders instead of 7, or at most 5 when they need shrinking. The render-count tests and the suite timings above show this. A long-CV browser Run in 7c will show it end to end.

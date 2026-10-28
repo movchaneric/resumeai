@@ -1,6 +1,5 @@
-import { Screen } from "@/features/run/screens";
+import { UploadScreen } from "@/features/upload/UploadScreen";
 
-/** A placeholder until the Upload ticket lands. */
 export function UploadRoute() {
-  return <Screen title="Tailor your CV to a job" lead="Upload is coming soon." status="Upload isn't available yet." />;
+  return <UploadScreen />;
 }

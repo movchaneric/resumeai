@@ -47,7 +47,7 @@ describe("Run actions in the header", () => {
     expect(deleted).toBe(0);
 
     await user.click(screen.getByRole("button", { name: "Delete Run" }));
-    expect(await screen.findByRole("heading", { name: "Tailor your CV to a job" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Tailor your CV to the job you want" })).toBeInTheDocument();
     expect(deleted).toBe(1);
     expect(router.state.location.pathname).toBe("/");
     expect(screen.queryByRole("dialog")).toBeNull();

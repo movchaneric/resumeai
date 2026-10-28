@@ -38,6 +38,29 @@ backend/test/    mirrors src (routes/, export/, services/, graph/, parsing/, pro
 - `app.ts` builds the Express app; `index.ts` starts the server. `index.ts` builds the `RunsService` and passes it to `createApp`, because startup recovery (`recoverRuns`) needs the same instance; tests let `createApp` build it.
 - Dependencies come in through constructors so each layer can be tested alone (a service test uses a fake store; routes are tested with `supertest`).
 
+## Frontend structure
+
+Organise `frontend/src` by layer. Components are PascalCase files (`Button.tsx`); other files are camelCase.
+
+```
+frontend/src/
+  api/        the only place with `fetch` or `EventSource`: the client, the typed `ApiError`, and parsing every response with the `@resume-ai/shared` schemas
+  routes/     one component per route, and the router; compose features
+  features/   one folder per feature (`features/<name>/`): its components, hooks and queries
+  ui/         primitives (Button, Chip, Field, Kbd, ProgressBar, Radix wrappers). Pure: props in, markup out
+  styles/     `tokens.css`: the color tokens (`@theme`), font and base styles
+frontend/test/   mirrors src (ui/, api/, routes/, features/); helpers in test/helpers (MSW server, axe)
+```
+
+- `ui/` imports no `features/`, `routes/` or `api/`.
+- Every API response is parsed with the shared zod schemas inside `api/`; callers get typed data or an `ApiError`.
+- One set of query options per Run (`runQueryOptions`): a TanStack query keeps one `retry` and `networkMode`, so two observers with different ones overwrite each other.
+- Only `api/` uses `fetch` or `EventSource`; everything else gets server data through TanStack Query hooks built on `api/`.
+- No raw hex colors outside `styles/`: use the tokens (`bg-accent`, `text-fg-2`, ...).
+- Import frontend code with the `@/` alias, never relative paths (tests may import their own helpers relatively); shared types and schemas come from `@resume-ai/shared`.
+- Each screen test runs axe (`test/helpers/axe.ts`) and fails on serious or critical violations.
+- `frontend/test/architecture.test.ts` enforces these rules, so a broken rule fails CI.
+
 ## Imports
 
 - Inside `backend/src` and `backend/test`, import src code with the `@/` alias, never with relative paths: `import { ApiError } from "@/utils/errors.js"`.

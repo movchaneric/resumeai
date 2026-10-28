@@ -40,3 +40,4 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm --filter @resume-ai/shared test
       - run: pnpm --filter backend test
+      - run: pnpm --filter frontend test

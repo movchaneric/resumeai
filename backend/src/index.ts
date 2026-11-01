@@ -1,5 +1,7 @@
 import "dotenv/config";
 import { createApp } from "@/app.js";
+import { createAuth } from "@/auth/betterAuth.js";
+import { LogEmailSender } from "@/auth/emailSender.js";
 import { describeLlmSettings, loadConfig } from "@/utils/config.js";
 import { createPrisma } from "@/utils/db.js";
 import { createPostgresCheckpointer } from "@/graph/checkpointer.js";
@@ -36,10 +38,11 @@ const runsService = new RunsService(runsDeps);
 const streams = new OpenStreams();
 const sweep = new SweepService({ store, jobProfiles: jobProfileCache, checkpoints: new CheckpointStore(prisma), purgeExpiredRun: (id, status) => runsService.purgeExpiredRun(id, status) });
 const sweeper = createSweepScheduler(() => sweep.sweep(), config.sweepIntervalMs);
-const app = createApp(runsDeps, runsService, streams);
+const auth = createAuth({ prisma, config, emailSender: new LogEmailSender() });
+const app = createApp(runsDeps, runsService, streams, auth);
 
 const server = app.listen(config.port, () => {
-  console.log(`backend listening on :${config.port} (${describeLlmSettings(config.llm)})`);
+  console.log(`backend listening on :${config.port} (${describeLlmSettings(config.llm)}, google=${config.auth.google ? "on" : "off"})`);
   // In the background, so requests are accepted while cut-off Runs are carried on; it never rejects, but a bug must not crash the server.
   // The first sweep waits for recovery, so a Run being recovered is never deleted halfway through.
   runsService

@@ -12,7 +12,7 @@ vi.mock("unpdf", () => ({
   extractTextItems: () => new Promise(() => {}),
 }));
 
-const { limits } = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" });
+const { limits } = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32) });
 
 describe("parseCv timeout", () => {
   it("rejects a parse that never finishes", async () => {

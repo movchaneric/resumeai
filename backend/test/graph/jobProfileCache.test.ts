@@ -16,7 +16,7 @@ import { coverageAnswer, extractedCv, extractedJob } from "../runFixtures.js";
 
 const JD = "We are hiring a backend developer with Node.js experience.";
 const cvPdf = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf"));
-const CV_TEXT = await parseCv(cvPdf, loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" }).limits);
+const CV_TEXT = await parseCv(cvPdf, loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32) }).limits);
 const KEY = jobProfileCacheKey(JD, "test-judge");
 
 function setup(cache = new FakeJobProfileCache()) {

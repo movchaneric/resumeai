@@ -1,7 +1,7 @@
 import type { RunErrorCode } from "@resume-ai/shared";
 
 /** Codes returned by the HTTP API: every `RunErrorCode` plus errors that never belong to a Run. */
-export type ApiErrorCode = RunErrorCode | "BAD_REQUEST" | "INVALID_ANSWERS" | "INVALID_REVIEW" | "RUN_NOT_FOUND" | "RUN_NOT_AWAITING_ANSWERS" | "RUN_NOT_AWAITING_REVIEW" | "RUN_BUSY" | "RUN_NOT_COMPLETED" | "CV_TOO_LONG" | "NOT_FOUND";
+export type ApiErrorCode = RunErrorCode | "BAD_REQUEST" | "INVALID_ANSWERS" | "INVALID_REVIEW" | "RUN_NOT_FOUND" | "RUN_NOT_AWAITING_ANSWERS" | "RUN_NOT_AWAITING_REVIEW" | "RUN_BUSY" | "RUN_NOT_COMPLETED" | "CV_TOO_LONG" | "NOT_FOUND" | "UNAUTHENTICATED";
 
 const STATUS: Record<ApiErrorCode, number> = {
   UNSUPPORTED_FILE: 415,
@@ -25,6 +25,7 @@ const STATUS: Record<ApiErrorCode, number> = {
   RUN_NOT_COMPLETED: 409,
   CV_TOO_LONG: 409,
   NOT_FOUND: 404,
+  UNAUTHENTICATED: 401,
 };
 
 /** Beyond the code and the message: fields added to the response body, and a status that replaces the code's usual one. */

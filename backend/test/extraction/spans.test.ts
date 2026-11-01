@@ -243,7 +243,7 @@ describe("pipeline span", () => {
     const store = fakeStore();
     const service = new RunsService({
       store: store as unknown as RunStore,
-      config: loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" }),
+      config: loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32) }),
       graphRunner: skipQuestions(makeGraphRunner(store, llm)),
       events: new InProcessRunEvents(),
     });
@@ -281,7 +281,7 @@ describe("pipeline span", () => {
     const store = fakeStore();
     const service = new RunsService({
       store: store as unknown as RunStore,
-      config: loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" }),
+      config: loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32) }),
       graphRunner: skipQuestions(makeGraphRunner(store, llm)),
       events: new InProcessRunEvents(),
     });
@@ -320,7 +320,7 @@ describe("pipeline span", () => {
     const store = fakeStore();
     const service = new RunsService({
       store: store as unknown as RunStore,
-      config: loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" }),
+      config: loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32) }),
       graphRunner: skipQuestions(makeGraphRunner(store, llm)),
       events: new InProcessRunEvents(),
     });

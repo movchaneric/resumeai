@@ -19,8 +19,8 @@ backend/src/
   routes/        index.ts mounts each feature's router and wires service -> controller -> router
   controllers/   the HTTP edge: read the request, call the service, set status and response. No business rules, no DB.
   services/      business rules. No Express (`req`/`res`). Throws `ApiError` to reject.
-  stores/        data access (Prisma). Only stores import the Prisma client.
-  middleware/    cross-cutting HTTP code (error handler, not-found)
+  stores/        data access (Prisma). Only stores (and `auth/`, for Better Auth's tables) import the Prisma client.
+  middleware/    cross-cutting HTTP code (error handler, not-found, `accounts.ts`: `optionalAccount` and `requireAccount`, which put the `Account` on the request)
   parsing/       CV file parsing (file to text, no model)
   extraction/    Extraction chains, ID assignment, verbatim check. Imports `LlmClient` and `@/utils/spans.js`, never LangChain.
   scoring/       Coverage chain, Match Score, weights, exit router (`exitRouter.ts`). Imports `LlmClient` and `@/utils/spans.js`, never LangChain.
@@ -28,6 +28,7 @@ backend/src/
   prompts/       pure renderers that turn the CV and Requirements into prompt text with IDs. Imports only shared types (`@resume-ai/shared`).
   graph/         the LangGraph Run graph, its thin nodes, the graph runner and the Postgres checkpointer. The only importer of LangGraph (`@langchain/langgraph*`); nodes call `extraction/`, `scoring/` and `tailoring/`, and the service sees the runner only through the `GraphRunner` interface it defines.
   export/        the Tailored CV as a file, built in memory: layout (CV to page blocks), the size table, the PDF renderer (PDFKit), the DOCX renderer (docx) and `measureFit` (shrink to one page) and `fitOf` (fits, or lines over). No model, no DB, no Express. Imports only shared types, `pdfkit`, `docx` and node built-ins. The service calls it for downloads; `tailoring/` calls `fitOf` to keep the Tailored CV on one page.
+  auth/          the Better Auth instance (built by `createAuth` from the Prisma client, config and an `EmailSender`), `EmailSender` and its `LogEmailSender`, and `AccountsService` (`accountOf(req)`). The only importer of `better-auth`; the rest of the backend sees only our `Account` type. Mounted at `/api/auth/*`, before `express.json()`.
   llm/           the `LlmClient` interface and its LangChain implementation. Only `llm/` imports LangChain models (one exception below).
   utils/         config, db client, errors, tracing (`tracing.ts`), named spans (`spans.ts`), the in-process Run event bus (`runEvents.ts`), server shutdown (`shutdown.ts`), the open-stream registry it uses (`openStreams.ts`) and the TTL sweep timer (`sweepScheduler.ts`)
 backend/test/    mirrors src (routes/, export/, services/, graph/, parsing/, prompts/, scoring/, tailoring/, utils/); fixtures live in test/fixtures

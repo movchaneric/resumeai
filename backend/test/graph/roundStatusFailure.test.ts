@@ -11,7 +11,7 @@ import { FakeLlmClient } from "../fakes/fakeLlmClient.js";
 import { FakeJobProfileCache } from "../fakes/jobProfileCache.js";
 import { extractedCv, extractedJob } from "../runFixtures.js";
 
-const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" });
+const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32) });
 const cvText = await parseCv(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf")), config.limits);
 
 const job = {

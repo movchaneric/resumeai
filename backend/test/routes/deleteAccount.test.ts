@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CHECKPOINT_TABLES, createCheckpointDb } from "../fakes/checkpointDb.js";
-import { makeAuthApp } from "../fakes/authApp.js";
+import { APP_ORIGIN, makeAuthApp } from "../fakes/authApp.js";
 
 // Real Better Auth, real Postgres checkpointer: deleting an Account leaves nothing of it behind.
 
@@ -50,7 +50,13 @@ describe("DELETE /account", () => {
     const graces = await startRun(grace);
     const guest = await startRun();
     for (const id of [first, second, expired, graces, guest]) await expectThread(id, true);
-    await prisma.verification.create({ data: { id: randomUUID(), identifier: ADA.email, value: "reset-token", expiresAt: new Date(Date.now() + 60_000) } });
+    // A pending password reset (Better Auth keys it `reset-password:<token>`, with the user id as value), and a row keyed by the email.
+    expect((await request(app).post("/api/auth/request-password-reset").set("Origin", APP_ORIGIN).send({ email: ADA.email })).status).toBe(200);
+    await prisma.verification.create({ data: { id: randomUUID(), identifier: ADA.email, value: "other", expiresAt: new Date(Date.now() + 60_000) } });
+    await request(app).post("/api/auth/request-password-reset").set("Origin", APP_ORIGIN).send({ email: GRACE.email });
+    expect(await prisma.verification.count({ where: { identifier: { startsWith: "reset-password:" }, value: adaId } })).toBe(1);
+    const graceResets = await prisma.verification.count({ where: { identifier: { startsWith: "reset-password:" }, value: graceId } });
+    expect(graceResets).toBe(1);
 
     const res = await request(app).delete("/account").set("Cookie", ada);
     expect(res.status).toBe(204);
@@ -64,7 +70,8 @@ describe("DELETE /account", () => {
     expect(await prisma.user.count({ where: { id: adaId } })).toBe(0);
     expect(await prisma.session.count({ where: { userId: adaId } })).toBe(0);
     expect(await prisma.authAccount.count({ where: { userId: adaId } })).toBe(0);
-    expect(await prisma.verification.count({ where: { identifier: ADA.email } })).toBe(0);
+    expect(await prisma.verification.count({ where: { OR: [{ identifier: ADA.email }, { value: adaId }] } })).toBe(0);
+    expect(await prisma.verification.count({ where: { value: graceId } })).toBe(graceResets);
     // The cookie no longer signs in.
     expect((await request(app).get("/account").set("Cookie", ada)).status).toBe(401);
 

@@ -32,7 +32,8 @@ export class AccountsService {
     await this.prisma.$transaction([
       this.prisma.session.deleteMany({ where: { userId: accountId } }),
       this.prisma.authAccount.deleteMany({ where: { userId: accountId } }),
-      this.prisma.verification.deleteMany({ where: { identifier: user.email } }),
+      // `reset-password:<token>` rows hold the user id as `value`; the email condition covers any row keyed by the address. Email verification is a signed link with no row.
+      this.prisma.verification.deleteMany({ where: { OR: [{ identifier: { startsWith: "reset-password:" }, value: accountId }, { identifier: user.email }] } }),
       this.prisma.user.delete({ where: { id: accountId } }),
     ]);
   }

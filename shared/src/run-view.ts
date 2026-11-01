@@ -103,3 +103,5 @@ export const RunViewSchema = z.discriminatedUnion("status", [
 ]);
 export type RunView = z.infer<typeof RunViewSchema>;
 export type RunStatus = RunView["status"];
+// The statuses are the discriminator values of the view, so they cannot drift from it.
+export const RunStatusSchema = z.enum(RunViewSchema.options.map((option) => option.shape.status.value) as [RunStatus, ...RunStatus[]]);

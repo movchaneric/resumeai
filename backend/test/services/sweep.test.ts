@@ -81,6 +81,28 @@ describe("SweepService.sweep with Postgres", () => {
     }
   });
 
+  it("deletes an expired Owned Run like a Guest Run, with its checkpoints, and leaves an unexpired one alone", async () => {
+    // A unique email: other test files leave their users behind.
+    const accountId = randomUUID();
+    const account = await prisma.user.create({ data: { id: accountId, name: "Ada Example", email: `ada-${accountId}@example.com` } });
+    try {
+      const expired = await seedRun("completed", -HOUR);
+      const live = await seedRun("completed", HOUR);
+      await prisma.run.updateMany({ where: { id: { in: [expired, live] } }, data: { accountId: account.id } });
+
+      const result = await sweep.sweep();
+
+      expect(result.runs).toBe(1);
+      expect(await store.get(expired)).toBeNull();
+      await expectThread(expired, false);
+      expect((await store.get(live))?.accountId).toBe(account.id);
+      await expectThread(live, true);
+    } finally {
+      await store.deleteAll();
+      await prisma.user.delete({ where: { id: account.id } });
+    }
+  });
+
   it("leaves a Run that has not expired alone", async () => {
     const live = await seedRun("awaiting_review", HOUR);
     await sweep.sweep();

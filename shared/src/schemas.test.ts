@@ -6,7 +6,9 @@ import {
   DateRangeSchema,
   ExtractedCvSchema,
   ExtractedJobProfileSchema,
+  ClaimRunsRequestSchema,
   ItemIdSchema,
+  MyRunsSchema,
   ReviewDecisionSchema,
   ReviewFitSchema,
   ReviewSubmissionSchema,
@@ -351,5 +353,24 @@ describe("run view", () => {
   });
   it("rejects timestamps with offsets (the backend emits Z)", () => {
     expect(RunViewSchema.safeParse({ ...base, createdAt: "2026-10-12T09:14:00+02:00", status: "parsing" }).success).toBe(false);
+  });
+});
+
+describe("My Runs and claim", () => {
+  const summary = { id: RUN_ID, status: "completed", createdAt: "2026-10-12T09:14:00.000Z", jobTitle: "Backend Developer", company: null, matchScore: 82 };
+
+  it("accepts a summary with nulls for what a Run does not have yet", () => {
+    expect(MyRunsSchema.safeParse({ runs: [summary, { ...summary, status: "extracting", jobTitle: null, matchScore: null }] }).success).toBe(true);
+  });
+  it("rejects an unknown status and a score out of range", () => {
+    expect(MyRunsSchema.safeParse({ runs: [{ ...summary, status: "paused" }] }).success).toBe(false);
+    expect(MyRunsSchema.safeParse({ runs: [{ ...summary, matchScore: 101 }] }).success).toBe(false);
+  });
+  it("takes 1 to 50 IDs to claim", () => {
+    const ids = (n: number) => Array.from({ length: n }, () => RUN_ID);
+    expect(ClaimRunsRequestSchema.safeParse({ runIds: ids(1) }).success).toBe(true);
+    expect(ClaimRunsRequestSchema.safeParse({ runIds: ids(50) }).success).toBe(true);
+    expect(ClaimRunsRequestSchema.safeParse({ runIds: ids(51) }).success).toBe(false);
+    expect(ClaimRunsRequestSchema.safeParse({ runIds: [] }).success).toBe(false);
   });
 });

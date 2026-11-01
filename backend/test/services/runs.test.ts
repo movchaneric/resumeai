@@ -28,7 +28,7 @@ class FakeStore {
   /** Every status written, in order, per Run. */
   statusLog: RunStatus[] = [];
   async create(run: NewRun): Promise<StoredRun> {
-    const stored = { ...run, error: null };
+    const stored = { ...run, accountId: run.accountId ?? null, error: null };
     this.rows.set(run.id, stored);
     return stored;
   }
@@ -95,6 +95,32 @@ describe("RunsService", () => {
     const row = store.rows.get(id)!;
     expect(row.createdAt).toEqual(start);
     expect(row.expiresAt.getTime()).toBe(start.getTime() + config.runTtlMs);
+  });
+
+  it("gives a Guest Run the guest TTL and no Account, and an Owned Run the owned TTL from the same creation time", async () => {
+    const start = new Date("2026-10-01T00:00:00Z");
+    const { store, service } = setup(() => start);
+    const guest = await service.createRun({ cv, jobDescription: "Backend developer" });
+    const owned = await service.createRun({ cv, jobDescription: "Backend developer", accountId: "account-ada" });
+    expect(store.rows.get(guest)).toMatchObject({ accountId: null, expiresAt: new Date(start.getTime() + config.runTtlMs) });
+    expect(store.rows.get(owned)).toMatchObject({ accountId: "account-ada", createdAt: start, expiresAt: new Date(start.getTime() + config.ownedRunTtlMs) });
+    expect(config.ownedRunTtlMs).toBe(90 * 24 * 60 * 60 * 1000);
+  });
+
+  it("shows an Owned Run only to its Account, with the same 404 as a Run that does not exist", async () => {
+    const { store, service } = setup();
+    const owned = await service.createRun({ cv, jobDescription: "Backend developer", accountId: "account-ada" });
+    const guest = await service.createRun({ cv, jobDescription: "Backend developer" });
+    const missing = await service.getRunView("c0ffee00-0000-4000-8000-000000000000", "account-grace").catch((e: unknown) => e as ApiError);
+    expect(missing).toMatchObject({ code: "RUN_NOT_FOUND", status: 404 });
+
+    for (const viewer of ["account-grace", null]) {
+      const refused = await service.getRunView(owned, viewer).catch((e: unknown) => e as ApiError);
+      expect(refused).toMatchObject({ code: "RUN_NOT_FOUND", status: 404, message: (missing as ApiError).message });
+    }
+    expect((await service.getRunView(owned, "account-ada")).id).toBe(owned);
+    for (const viewer of ["account-grace", null]) expect((await service.getRunView(guest, viewer)).id).toBe(guest);
+    expect(store.rows.size).toBe(2);
   });
 
   it("rejects an empty or over-long job description before parsing the CV", async () => {
@@ -922,7 +948,7 @@ describe("RunsService.submitAnswers", () => {
       await store.setStatus(id, to);
       return true;
     };
-    store.rows.set(runId, { id: runId, status, createdAt: now(), expiresAt: new Date(now().getTime() + 1000), error: null });
+    store.rows.set(runId, { id: runId, status, createdAt: now(), expiresAt: new Date(now().getTime() + 1000), accountId: null, error: null });
     const answer = vi.fn<GraphRunner["answer"]>(async () => snapshot);
     const graphRunner: GraphRunner = { start: async () => snapshot, answer, review: async () => snapshot, recover: async () => snapshot, read: async () => snapshot, deleteThread: async () => {} };
     const tasks: (() => Promise<void>)[] = [];
@@ -1040,7 +1066,7 @@ describe("RunsService.submitReview when the claim is lost", () => {
       await lose(store, id);
       return false;
     };
-    store.rows.set(runId, { id: runId, status: "awaiting_review", createdAt: now(), expiresAt: new Date(now().getTime() + 1000), error: null });
+    store.rows.set(runId, { id: runId, status: "awaiting_review", createdAt: now(), expiresAt: new Date(now().getTime() + 1000), accountId: null, error: null });
     const graphRunner: GraphRunner = { start: async () => snapshot, answer: async () => snapshot, review: async () => snapshot, recover: async () => snapshot, read: async () => snapshot, deleteThread: async () => {} };
     const tasks: (() => Promise<void>)[] = [];
     const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner, events: new InProcessRunEvents(), now, runInBackground: (t) => void tasks.push(t) });
@@ -1070,7 +1096,7 @@ describe("RunsService.deleteRun", () => {
   /** A store holding one Run, with the conditional delete the real store does in SQL, and a runner whose `deleteThread` is a spy. */
   function deleteSetup(deleteThread: GraphRunner["deleteThread"] = async () => {}) {
     const store = new FakeStore() as FakeStore & { deleteIdleLive(id: RunId, busy: RunStatus[], liveAt: Date): Promise<boolean> };
-    store.rows.set(runId, { id: runId, status: "awaiting_review", createdAt: now(), expiresAt: new Date(now().getTime() + 1000), error: null });
+    store.rows.set(runId, { id: runId, status: "awaiting_review", createdAt: now(), expiresAt: new Date(now().getTime() + 1000), accountId: null, error: null });
     store.deleteIdleLive = async (id, busy, liveAt) => {
       const row = store.rows.get(id);
       if (!row || busy.includes(row.status) || row.expiresAt <= liveAt) return false;

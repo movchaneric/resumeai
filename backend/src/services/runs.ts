@@ -23,6 +23,7 @@ import {
   type RunErrorCode,
   type RunId,
   type RunStatus,
+  type RunSummary,
   type StepState,
   type UserEvidence,
   type RunView,
@@ -175,7 +176,19 @@ const REVIEW_PAUSE = { status: "awaiting_review", code: "RUN_NOT_AWAITING_REVIEW
 /** The longest `has_experience` text, after trimming. */
 export const MAX_ANSWER_LENGTH = 1000;
 
-export type CreateRunInput = { cv: Buffer; jobDescription: unknown };
+export type CreateRunInput = {
+  cv: Buffer;
+  jobDescription: unknown;
+  /** The signed-in Account starting the Run, or `null`/absent for a Guest Run. */
+  accountId?: string | null;
+};
+
+/**
+ * Who is asking, as an Account id, or `null` for a guest. Every method that serves a Run takes it as its last
+ * parameter and passes it to `findLiveRun`, the one place an Owned Run is kept from anyone else. It defaults to `null`
+ * only because the many callers that deal in Guest Runs (the tests) leave it out; the controller always passes it.
+ */
+type Viewer = string | null;
 
 /** The business rules for a Run. It knows nothing about HTTP. */
 export class RunsService {
@@ -193,7 +206,7 @@ export class RunsService {
   }
 
   /** Validates and parses the upload, then stores the Run. Throws an `ApiError` when the upload is rejected. */
-  async createRun({ cv, jobDescription }: CreateRunInput): Promise<RunId> {
+  async createRun({ cv, jobDescription, accountId = null }: CreateRunInput): Promise<RunId> {
     const { store, config } = this.deps;
     const jobDescriptionText = typeof jobDescription === "string" ? stripNul(jobDescription).trim() : "";
     if (!jobDescriptionText) throw new ApiError("BAD_REQUEST", "The `jobDescription` field is required.");
@@ -202,13 +215,14 @@ export class RunsService {
     }
 
     const cvText = await parseCv(cv, config.limits);
-    // Both timestamps come from one clock, so a Run lives exactly RUN_TTL_DAYS.
+    // Both timestamps come from one clock, so a Run lives exactly its TTL: the owned one for an Owned Run, RUN_TTL_DAYS for a Guest Run.
     const createdAt = this.now();
     const run = await store.create({
       id: RunIdSchema.parse(randomUUID()),
       status: "extracting",
       createdAt,
-      expiresAt: new Date(createdAt.getTime() + config.runTtlMs),
+      expiresAt: new Date(createdAt.getTime() + (accountId === null ? config.runTtlMs : config.ownedRunTtlMs)),
+      accountId,
     });
     this.background(run.id, () => this.runPipeline({ runId: run.id, cvText, jobDescriptionText }));
     return run.id;
@@ -255,10 +269,11 @@ export class RunsService {
    * Accepts the Answers for a Run paused in `awaiting_answers` and resumes it in the background (`resumeFromPause`):
    * 404, 409, then 400 for Answers that do not fit the Run's Questions, then the claim.
    */
-  async submitAnswers(rawId: string, body: unknown): Promise<void> {
+  async submitAnswers(rawId: string, body: unknown, viewer: Viewer = null): Promise<void> {
     const { graphRunner } = this.deps;
     await this.resumeFromPause(
       rawId,
+      viewer,
       { status: "awaiting_answers", code: "RUN_NOT_AWAITING_ANSWERS", message: "This Run is not waiting for answers." },
       async (id) => validateAnswers(body, new Set(((await graphRunner.read(id))?.questions ?? []).map((q) => q.id as string))),
       (id, answers) => this.runResume(id, answers),
@@ -270,10 +285,11 @@ export class RunsService {
    * 404, 409, then 400 for decisions or drops that do not fit the Run (`validateReview`, nothing is resumed), then 400
    * `CV_TOO_LONG` when the result runs over one page although the shortest possible CV fits (`reviewFit`), then the claim.
    */
-  async submitReview(rawId: string, body: unknown): Promise<void> {
+  async submitReview(rawId: string, body: unknown, viewer: Viewer = null): Promise<void> {
     const { graphRunner } = this.deps;
     await this.resumeFromPause(
       rawId,
+      viewer,
       REVIEW_PAUSE,
       async (id) => {
         const snapshot = await graphRunner.read(id);
@@ -296,8 +312,8 @@ export class RunsService {
    * The fit of a Review as it would be submitted, without submitting it: same 404 and 409 as `submitReview`, same 400s for
    * the body, and nothing changes. The answer is the fit of the CV the submission would produce.
    */
-  async previewReview(rawId: string, body: unknown): Promise<ReviewFit> {
-    const run = await this.findLiveRun(rawId);
+  async previewReview(rawId: string, body: unknown, viewer: Viewer = null): Promise<ReviewFit> {
+    const run = await this.findLiveRun(rawId, viewer);
     if (run.status !== REVIEW_PAUSE.status) throw new ApiError(REVIEW_PAUSE.code, REVIEW_PAUSE.message);
     const snapshot = await this.deps.graphRunner.read(run.id);
     const { decisions, drops } = validateReview(body, snapshot);
@@ -313,13 +329,14 @@ export class RunsService {
    */
   private async resumeFromPause<T>(
     rawId: string,
+    viewer: Viewer,
     pause: { status: "awaiting_answers" | "awaiting_review"; code: "RUN_NOT_AWAITING_ANSWERS" | "RUN_NOT_AWAITING_REVIEW"; message: string },
     prepare: (id: RunId) => Promise<T>,
     resume: (id: RunId, input: T) => Promise<void>,
   ): Promise<void> {
     const { store, events } = this.deps;
     const notFound = () => new ApiError("RUN_NOT_FOUND", "Run not found.");
-    const run = await this.findLiveRun(rawId);
+    const run = await this.findLiveRun(rawId, viewer);
     if (run.status !== pause.status) throw new ApiError(pause.code, pause.message);
 
     const input = await prepare(run.id);
@@ -415,20 +432,70 @@ export class RunsService {
   }
 
   /**
-   * Deletes a Run: its row, then its checkpoints. 404 for a malformed, unknown, expired or already-deleted ID, 409
-   * `RUN_BUSY` while it is `parsing`, `extracting` or `tailoring` (the runner would write checkpoints after the delete),
-   * and then nothing is deleted. The row goes first, in one conditional statement, so a simultaneous `POST /answers`
-   * either claims the Run first (this gets 409) or finds it gone (that gets 404).
+   * Deletes a Run: its row, then its checkpoints. 404 for a malformed, unknown, expired or already-deleted ID, or an
+   * Owned Run that is not the viewer's, 409 `RUN_BUSY` while it is `parsing`, `extracting` or `tailoring` (the runner
+   * would write checkpoints after the delete), and then nothing is deleted. The row goes first, in one conditional
+   * statement that also carries the owner check, so a simultaneous `POST /answers` either claims the Run first (this
+   * gets 409) or finds it gone (that gets 404), and a check-then-delete race cannot delete someone else's Run.
    */
-  async deleteRun(rawId: string): Promise<void> {
+  async deleteRun(rawId: string, viewer: Viewer = null): Promise<void> {
     const { store } = this.deps;
     const id = RunIdSchema.safeParse(rawId);
     if (!id.success) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
-    if (await this.purgeRun(id.data, () => store.deleteIdleLive(id.data, BUSY_STATUSES, this.now()))) return;
-    // Nothing was deleted: re-read to say why.
-    const run = await store.get(id.data);
-    if (run && run.expiresAt > this.now()) throw new ApiError("RUN_BUSY", "This Run is still working. Try again when it pauses or ends.");
-    throw new ApiError("RUN_NOT_FOUND", "Run not found.");
+    if (await this.purgeRun(id.data, () => store.deleteIdleLive(id.data, BUSY_STATUSES, this.now(), viewer))) return;
+    // Nothing was deleted: the loader says whether the Run is missing or someone else's (404); otherwise it is busy.
+    await this.findLiveRun(rawId, viewer);
+    throw new ApiError("RUN_BUSY", "This Run is still working. Try again when it pauses or ends.");
+  }
+
+  /**
+   * Deletes every Run the Account owns, expired ones included, through the one delete path (row, then checkpoints).
+   * Busy decides first: a Run this process is running, or one in a busy status that has not expired (the notion
+   * `deleteRun` uses), is a 409 `RUN_BUSY` and nothing is deleted. A Run that turns busy between the check and its
+   * delete is also a 409, after the Runs before it are gone.
+   */
+  async deleteOwnedRuns(accountId: string): Promise<void> {
+    const { store } = this.deps;
+    const now = this.now();
+    const runs = await store.listAllOwned(accountId);
+    const busy = () => new ApiError("RUN_BUSY", "A Run is still working. Try again when it pauses or ends.");
+    if (runs.some((run) => this.running.has(run.id) || (BUSY_STATUSES.includes(run.status) && run.expiresAt > now))) throw busy();
+    for (const run of runs) {
+      if (await this.purgeRun(run.id, () => store.deleteOwnedIdle(run.id, accountId, BUSY_STATUSES, this.now()))) continue;
+      // Not deleted: gone already (fine), or it turned busy since the check.
+      if (await store.get(run.id)) throw busy();
+    }
+  }
+
+  /**
+   * Hands the Guest Runs among `rawIds` to the Account (`RunStore.claimGuestRuns`). A malformed ID is ignored, like an
+   * Owned, expired or missing one. Returns the IDs that became Owned Runs.
+   */
+  async claimRuns(accountId: string, rawIds: string[]): Promise<RunId[]> {
+    const ids = new Set<RunId>();
+    for (const raw of rawIds) {
+      const id = RunIdSchema.safeParse(raw);
+      if (id.success) ids.add(id.data);
+    }
+    return this.deps.store.claimGuestRuns([...ids], accountId, this.deps.config.ownedRunTtlMs, this.now());
+  }
+
+  /** My Runs: the Account's unexpired Owned Runs, newest first, each with its job and Match Score from the checkpoint. */
+  async listMyRuns(accountId: string): Promise<RunSummary[]> {
+    const runs = await this.deps.store.listOwned(accountId, this.now());
+    return Promise.all(
+      runs.map(async (run) => {
+        const state = await this.deps.graphRunner.read(run.id);
+        return {
+          id: run.id,
+          status: run.status,
+          createdAt: run.createdAt.toISOString(),
+          jobTitle: state?.jobProfile?.title ?? null,
+          company: state?.jobProfile?.company ?? null,
+          matchScore: run.status === "awaiting_review" || run.status === "completed" ? matchScoreOf(state) : null,
+        };
+      }),
+    );
   }
 
   /**
@@ -458,11 +525,15 @@ export class RunsService {
     return true;
   }
 
-  /** The Run with this ID, or the 404 `RUN_NOT_FOUND` for a malformed, unknown or expired ID. */
-  private async findLiveRun(rawId: string): Promise<StoredRun> {
+  /**
+   * The Run with this ID, or the 404 `RUN_NOT_FOUND` for a malformed, unknown or expired ID. An Owned Run is found only
+   * by its Account: for anyone else it is the same 404, so nothing tells it from a Run that does not exist. A Guest Run
+   * is found by anyone. Every Run route goes through here.
+   */
+  private async findLiveRun(rawId: string, viewer: Viewer): Promise<StoredRun> {
     const id = RunIdSchema.safeParse(rawId);
     const run = id.success ? await this.deps.store.get(id.data) : null;
-    if (!run || run.expiresAt <= this.now()) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
+    if (!run || run.expiresAt <= this.now() || (run.accountId !== null && run.accountId !== viewer)) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
     return run;
   }
 
@@ -470,8 +541,8 @@ export class RunsService {
    * A malformed, unknown or expired ID all look the same, so an ID reveals nothing about whether it ever existed.
    * Expiry is checked on read; the slice 5 sweep is only cleanup.
    */
-  async getRunView(rawId: string): Promise<RunView> {
-    const run = await this.findLiveRun(rawId);
+  async getRunView(rawId: string, viewer: Viewer = null): Promise<RunView> {
+    const run = await this.findLiveRun(rawId, viewer);
     // A Run with no checkpoint yet (the graph has not started) reads as null.
     const state = await this.deps.graphRunner.read(run.id);
     // The fit of the CV as shown (every Change accepted, no drops), measured on read: up to 7 renders, 14 when it is over.
@@ -486,8 +557,8 @@ export class RunsService {
    * Same 404 as `getRunView`; 409 `RUN_NOT_COMPLETED` for any other status. A CV that does not fit one page at the smallest size
    * is a 409 `CV_TOO_LONG` for the PDF only; the DOCX is rendered anyway, at the smallest size, so the user always has a file.
    */
-  async exportCv(rawId: string, format: ExportFormat): Promise<Buffer> {
-    const run = await this.findLiveRun(rawId);
+  async exportCv(rawId: string, format: ExportFormat, viewer: Viewer = null): Promise<Buffer> {
+    const run = await this.findLiveRun(rawId, viewer);
     if (run.status !== "completed") throw new ApiError("RUN_NOT_COMPLETED", "The CV can be downloaded once the Run is completed.");
     const state = await this.deps.graphRunner.read(run.id);
     if (!state?.cv) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
@@ -507,7 +578,7 @@ export class RunsService {
    * so views go out in order. It subscribes before reading the first view, so a change in between is not lost.
    * Throws the same 404 as `getRunView` before anything is sent; returns the function that ends the subscription.
    */
-  async openRunStream(rawId: string, { send, close }: RunStreamSink): Promise<() => void> {
+  async openRunStream(rawId: string, { send, close }: RunStreamSink, viewer: Viewer = null): Promise<() => void> {
     const parsed = RunIdSchema.safeParse(rawId);
     if (!parsed.success) throw new ApiError("RUN_NOT_FOUND", "Run not found.");
     const id = parsed.data;
@@ -522,7 +593,7 @@ export class RunsService {
     /** Builds the view and sends it unless it equals the last one. Rejects when the view cannot be built. */
     const emit = async (): Promise<void> => {
       if (done) return;
-      const view = await this.getRunView(id);
+      const view = await this.getRunView(id, viewer);
       if (done) return;
       const json = JSON.stringify(view);
       if (json === lastSent) return;
@@ -600,6 +671,11 @@ function validateReview(body: unknown, snapshot: RunSnapshot | null): ReviewSubm
   return { decisions, drops: parsedDrops.data };
 }
 
+/** The Match Score as the view shows it once a Run reaches Review: the score after the last kept round, rounded; `null` before there is one. */
+function matchScoreOf(state: RunSnapshot | null): number | null {
+  return state?.scoreAfter == null ? null : Math.round(state.scoreAfter);
+}
+
 /** The Tailored CV: while the user is reviewing, the original plus every proposed Change; once completed, only the accepted and revised ones. */
 function tailoredCv(status: RunStatus, cv: Cv, changes: Change[]): Cv {
   return applyChanges(cv, status === "completed" ? keptChanges(changes) : changes);
@@ -638,7 +714,7 @@ function toRunView(run: StoredRun, state: RunSnapshot | null, fit: ReviewFit | u
       status: run.status,
       job,
       steps: steps({ parse: "done", extract: "done", coverage: "done", questions: "done", tailor: "done", fit: "done", review: run.status === "completed" ? "done" : "running" }),
-      score: { before: Math.round(state.scoreBefore), after: Math.round(state.scoreAfter) },
+      score: { before: Math.round(state.scoreBefore), after: matchScoreOf(state) },
       requirements: jobProfile.requirements.map((requirement) => {
         const before = verdict(state.coverageBefore!, requirement.id);
         const after = verdict(state.coverage!, requirement.id);

@@ -69,7 +69,7 @@ export function createAuth({ prisma, config, emailSender, googleStub }: AuthDeps
   });
   return {
     handler: toNodeHandler(instance),
-    accounts: new AccountsService((headers) => instance.api.getSession({ headers })),
+    accounts: new AccountsService((headers) => instance.api.getSession({ headers }), prisma),
   };
 }
 

@@ -1,11 +1,10 @@
 import {
   RunErrorCodeSchema,
-  RunViewSchema,
+  RunStatusSchema,
   type RunErrorCode,
   type RunId,
   type RunStatus,
 } from "@resume-ai/shared";
-import { z } from "zod";
 import type { PrismaClient, Run } from "@/generated/prisma/client.js";
 
 /** Run metadata. The Run's data lives in the graph checkpoint (ADR 0003). */
@@ -14,13 +13,13 @@ export type StoredRun = {
   status: RunStatus;
   createdAt: Date;
   expiresAt: Date;
+  /** The Account that owns the Run, or `null` for a Guest Run. */
+  accountId: string | null;
   error: { code: RunErrorCode; message: string } | null;
 };
 
-export type NewRun = Pick<StoredRun, "id" | "status" | "createdAt" | "expiresAt">;
-
-// The statuses are the discriminator values of the shared RunView, so they cannot drift from it.
-const RunStatusSchema = z.enum(RunViewSchema.options.map((option) => option.shape.status.value) as [RunStatus, ...RunStatus[]]);
+/** `accountId` is left out for a Guest Run. */
+export type NewRun = Pick<StoredRun, "id" | "status" | "createdAt" | "expiresAt"> & { accountId?: string | null };
 
 /** The one place a database row becomes a `StoredRun`: nothing unvalidated leaves the store. */
 function toStoredRun(row: Run): StoredRun {
@@ -29,6 +28,7 @@ function toStoredRun(row: Run): StoredRun {
     status: RunStatusSchema.parse(row.status),
     createdAt: row.createdAt,
     expiresAt: row.expiresAt,
+    accountId: row.accountId,
     error:
       row.errorCode === null
         ? null
@@ -41,7 +41,7 @@ export class RunStore {
   constructor(private readonly prisma: PrismaClient) {}
 
   async create(run: NewRun): Promise<StoredRun> {
-    return toStoredRun(await this.prisma.run.create({ data: run }));
+    return toStoredRun(await this.prisma.run.create({ data: { ...run, accountId: run.accountId ?? null } }));
   }
 
   async get(id: RunId): Promise<StoredRun | null> {
@@ -86,13 +86,51 @@ export class RunStore {
   }
 
   /**
-   * Deletes the Run only if its status is not in `busy` and it has not expired at `liveAt`, in one statement, and says
-   * whether it did. Like `claimStatus`, the condition and the delete cannot be split by a simultaneous request. It is
-   * what `DELETE /runs/:id` uses.
+   * Deletes the Run only if its status is not in `busy`, it has not expired at `liveAt` and `viewer` may delete it (a
+   * Guest Run, or one owned by `viewer`), in one statement, and says whether it did. Like `claimStatus`, the condition
+   * and the delete cannot be split by a simultaneous request, so the owner check cannot race the delete. It is what
+   * `DELETE /runs/:id` uses.
    */
-  async deleteIdleLive(id: RunId, busy: RunStatus[], liveAt: Date): Promise<boolean> {
-    const { count } = await this.prisma.run.deleteMany({ where: { id, status: { notIn: busy }, expiresAt: { gt: liveAt } } });
+  async deleteIdleLive(id: RunId, busy: RunStatus[], liveAt: Date, viewer: string | null): Promise<boolean> {
+    const { count } = await this.prisma.run.deleteMany({
+      where: { id, status: { notIn: busy }, expiresAt: { gt: liveAt }, OR: viewer === null ? [{ accountId: null }] : [{ accountId: null }, { accountId: viewer }] },
+    });
     return count === 1;
+  }
+
+  /**
+   * Deletes the Account's Run only if it is idle (not in `busy`) or has expired at `now`, in one statement, and says
+   * whether it did. It is what deleting an Account uses, so an expired Run that is still listed goes too.
+   */
+  async deleteOwnedIdle(id: RunId, accountId: string, busy: RunStatus[], now: Date): Promise<boolean> {
+    const { count } = await this.prisma.run.deleteMany({ where: { id, accountId, OR: [{ status: { notIn: busy } }, { expiresAt: { lte: now } }] } });
+    return count === 1;
+  }
+
+  /**
+   * Hands the Guest Runs in `ids` that have not expired at `now` to the Account, in one statement, and moves their
+   * expiry to created + `ownedTtlMs`. An Owned, expired or missing Run is left alone. Returns the IDs it claimed.
+   */
+  async claimGuestRuns(ids: RunId[], accountId: string, ownedTtlMs: number, now: Date): Promise<RunId[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+      UPDATE app.runs
+      SET account_id = ${accountId}, expires_at = created_at + (${ownedTtlMs}::double precision * interval '1 millisecond')
+      WHERE id = ANY(${ids}::uuid[]) AND account_id IS NULL AND expires_at > ${now}
+      RETURNING id`;
+    return rows.map((row) => row.id as RunId);
+  }
+
+  /** The Account's Runs that have not expired at `now`, newest first. */
+  async listOwned(accountId: string, now: Date): Promise<StoredRun[]> {
+    const rows = await this.prisma.run.findMany({ where: { accountId, expiresAt: { gt: now } }, orderBy: [{ createdAt: "desc" }, { id: "asc" }] });
+    return rows.map(toStoredRun);
+  }
+
+  /** Every Run of the Account, expired ones included: what deleting the Account must remove. */
+  async listAllOwned(accountId: string): Promise<StoredRun[]> {
+    const rows = await this.prisma.run.findMany({ where: { accountId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+    return rows.map(toStoredRun);
   }
 
   /**

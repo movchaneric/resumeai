@@ -14,6 +14,11 @@ export class FakeLlmClient implements LlmClient {
     return this;
   }
 
+  /** Drops every queued response, so a Run starts from only what the test queues next. */
+  clearQueues(): void {
+    this.queues.clear();
+  }
+
   /**
    * Queues each response `votes` times in a row, for a step the product repeats in parallel (Coverage).
    * The parallel calls make their first attempts before any retry, so a retry sequence stays in order.

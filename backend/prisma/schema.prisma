@@ -19,7 +19,12 @@ model Run {
   errorMessage String?  @map("error_message")
   // How many times startup recovery resumed this Run from its checkpoint (at most one is allowed). Never negative.
   recoveries   Int      @default(0)
+  // The Account that owns the Run; null for a Guest Run. Restrict: Runs are deleted through our path first, because
+  // the checkpoints have no foreign key (ADR 0005), so deleting an Account must never leave a thread behind.
+  accountId    String?  @map("account_id")
+  account      User?    @relation(fields: [accountId], references: [id], onDelete: Restrict)
 
+  @@index([accountId])
   @@map("runs")
   @@schema("app")
 }
@@ -47,6 +52,7 @@ model User {
   updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
   sessions      Session[]
   accounts      AuthAccount[]
+  runs          Run[]
 
   @@map("user")
   @@schema("auth")

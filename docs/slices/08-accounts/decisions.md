@@ -34,7 +34,9 @@ Settled in the slice 8 grilling (2026-10-28). Every decision is owner-approved. 
 - **A Run started while signed in is an Owned Run.**
 - **An Owned Run can be read or acted on only by its Account, signed in.** Anyone else gets a 404. This covers the view, SSE, Answers, Review, preview, downloads and delete.
 - **Owned Runs expire 90 days after creation** (configurable). The Sign up panel's "Download again any time" becomes "for 90 days".
-- **Claiming:** at sign-in and sign-up, the browser sends the IDs of the Guest Runs it started (kept in localStorage). The unexpired ones become Owned Runs, with expiry recomputed as created + 90 days. Nothing else claims a Run.
+- **Claiming:** at sign-in and sign-up, the browser sends the Guest Runs it started (kept in localStorage). The unexpired ones become Owned Runs, with expiry recomputed as created + 90 days. Nothing else claims a Run.
+  - **Claim token** (added 2026-11-01, owner-approved after the 8b review): `POST /runs` returns a claim token with each Guest Run. The browser stores `{ id, claimToken }` and sends both. The backend keeps only a hash and accepts a claim only when the token matches.
+  - Holding a Run's link alone can't claim it. ADR 0009 has the reason. It's built in 8c (#86), as a backend change before the frontend work.
 - **Deleting an Account** deletes its Owned Runs and their checkpoints, then the Account, its sessions and its Google link, all through `deleteAccount(id)`.
 
 ## Frontend
@@ -81,5 +83,6 @@ Settled in the slice 8 grilling (2026-10-28). Every decision is owner-approved. 
   - the verify, forgot and reset pages;
   - the account menu and delete dialog;
   - My Runs;
-  - Guest Run IDs in localStorage, and the claim at sign-in;
+  - the claim token on `POST /runs` and in the claim request (backend, first);
+  - Guest Run IDs and claim tokens in localStorage, and the claim at sign-in;
   - `?next=`, the not-found sign-in line, the Upload note.

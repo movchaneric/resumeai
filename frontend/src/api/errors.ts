@@ -44,5 +44,10 @@ export async function errorFromResponse(response: Response): Promise<ApiError> {
     const { code, message, ...details } = body as { code: string; message?: unknown } & Record<string, unknown>;
     return new ApiError(response.status, code, typeof message === "string" ? message : "Something went wrong.", details);
   }
+  // Better Auth's rate limiter answers 429 with `{ message }` and no code, and the wait in `X-Retry-After` (seconds).
+  if (response.status === 429) {
+    const retryAfter = Number(response.headers.get("X-Retry-After"));
+    return new ApiError(429, "RATE_LIMITED", "Too many requests. Please try again later.", Number.isFinite(retryAfter) && retryAfter > 0 ? { retryAfterSeconds: retryAfter } : {});
+  }
   return new ApiError(response.status, "INTERNAL", "Something went wrong.");
 }

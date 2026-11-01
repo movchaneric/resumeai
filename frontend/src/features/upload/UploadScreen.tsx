@@ -3,6 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import { FileUp } from "lucide-react";
 import { createRun } from "@/api";
+import { addGuestRun } from "@/features/account";
 import { CvPane } from "@/features/upload/CvPane";
 import { ProblemNote } from "@/features/upload/Problem";
 import {
@@ -36,7 +37,10 @@ export function UploadScreen() {
 
   const mutation = useMutation({
     mutationFn: createRun,
-    onSuccess: (id) => navigate(`/runs/${id}`),
+    onSuccess: (run) => {
+      addGuestRun(run); // a Guest Run comes with a claim token; remember it so a later sign-in can claim the Run
+      navigate(`/runs/${run.id}`);
+    },
     onError: (error) => {
       const { pane, title, hint } = rejectionFor(error);
       setErrors({ [pane]: { title, hint } });

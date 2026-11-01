@@ -3,9 +3,9 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { APP_ORIGIN, makeAuthApp } from "../fakes/authApp.js";
 
 const google = { GOOGLE_CLIENT_ID: "test-client-id", GOOGLE_CLIENT_SECRET: "test-client-secret" };
-const PROFILES: Record<string, { id: string; name: string; email: string; emailVerified: boolean }> = {
+const PROFILES: Record<string, { id: string; name: string; email: string; emailVerified: boolean; image?: string }> = {
   "ada-token": { id: "google-ada", name: "Ada Example", email: "ada@example.com", emailVerified: true },
-  "grace-token": { id: "google-grace", name: "Grace Example", email: "grace@example.com", emailVerified: true },
+  "grace-token": { id: "google-grace", name: "Grace Example", email: "grace@example.com", emailVerified: true, image: "https://example.com/grace.png" },
 };
 const { app, prisma, emails, clearAuthTables } = makeAuthApp(google, (idToken) => PROFILES[idToken]!);
 
@@ -60,8 +60,12 @@ describe("Google sign-in", () => {
   });
 
   it("creates an Account for a new Google email", async () => {
-    expect((await googleSignIn("grace-token")).status).toBe(200);
+    const res = await googleSignIn("grace-token");
+    expect(res.status).toBe(200);
     expect(await prisma.user.count()).toBe(1);
+    const cookie = (res.headers["set-cookie"] as unknown as string[]).map((c) => c.split(";")[0]).join("; ");
+    const me = await request(app).get("/account").set("Cookie", cookie);
+    expect(me.body).toMatchObject({ email: "grace@example.com", image: "https://example.com/grace.png" });
     expect((await prisma.authAccount.findMany()).map((a) => a.providerId)).toEqual(["google"]);
   });
 });

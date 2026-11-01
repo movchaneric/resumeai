@@ -7,6 +7,7 @@ import {
   ExtractedCvSchema,
   ExtractedJobProfileSchema,
   ClaimRunsRequestSchema,
+  CreateRunResponseSchema,
   ItemIdSchema,
   MyRunsSchema,
   ReviewDecisionSchema,
@@ -366,11 +367,28 @@ describe("My Runs and claim", () => {
     expect(MyRunsSchema.safeParse({ runs: [{ ...summary, status: "paused" }] }).success).toBe(false);
     expect(MyRunsSchema.safeParse({ runs: [{ ...summary, matchScore: 101 }] }).success).toBe(false);
   });
-  it("takes 1 to 50 IDs to claim", () => {
-    const ids = (n: number) => Array.from({ length: n }, () => RUN_ID);
-    expect(ClaimRunsRequestSchema.safeParse({ runIds: ids(1) }).success).toBe(true);
-    expect(ClaimRunsRequestSchema.safeParse({ runIds: ids(50) }).success).toBe(true);
-    expect(ClaimRunsRequestSchema.safeParse({ runIds: ids(51) }).success).toBe(false);
-    expect(ClaimRunsRequestSchema.safeParse({ runIds: [] }).success).toBe(false);
+  it("takes 1 to 50 runs with a claim token each", () => {
+    const runs = (n: number) => Array.from({ length: n }, () => ({ id: RUN_ID, claimToken: "token" }));
+    expect(ClaimRunsRequestSchema.safeParse({ runs: runs(1) }).success).toBe(true);
+    expect(ClaimRunsRequestSchema.safeParse({ runs: runs(50) }).success).toBe(true);
+    expect(ClaimRunsRequestSchema.safeParse({ runs: runs(51) }).success).toBe(false);
+    expect(ClaimRunsRequestSchema.safeParse({ runs: [] }).success).toBe(false);
+    expect(ClaimRunsRequestSchema.safeParse({ runIds: [RUN_ID] }).success).toBe(false);
+  });
+
+  it("refuses a run without a token, with an empty id or token, or with a token over 128 characters", () => {
+    const parse = (run: object) => ClaimRunsRequestSchema.safeParse({ runs: [run] }).success;
+    expect(parse({ id: RUN_ID })).toBe(false);
+    expect(parse({ id: RUN_ID, claimToken: "" })).toBe(false);
+    expect(parse({ id: "", claimToken: "t" })).toBe(false);
+    expect(parse({ id: RUN_ID, claimToken: "x".repeat(128) })).toBe(true);
+    expect(parse({ id: RUN_ID, claimToken: "x".repeat(129) })).toBe(false);
+  });
+
+  it("answers a created Run with its ID and, for a Guest Run, a claim token", () => {
+    expect(CreateRunResponseSchema.parse({ id: RUN_ID })).toEqual({ id: RUN_ID });
+    expect(CreateRunResponseSchema.parse({ id: RUN_ID, claimToken: "token" })).toEqual({ id: RUN_ID, claimToken: "token" });
+    expect(CreateRunResponseSchema.safeParse({ id: "nope" }).success).toBe(false);
+    expect(CreateRunResponseSchema.safeParse({ id: RUN_ID, claimToken: "" }).success).toBe(false);
   });
 });

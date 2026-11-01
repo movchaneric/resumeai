@@ -1,4 +1,4 @@
-import { ClaimRunsRequestSchema, type ClaimRunsResponse, type MyRuns } from "@resume-ai/shared";
+import { ClaimRunsRequestSchema, type ClaimRunsResponse, type CreateRunResponse, type MyRuns } from "@resume-ai/shared";
 import type { Request, Response } from "express";
 import { ApiError } from "@/utils/errors.js";
 import type { Config } from "@/utils/config.js";
@@ -24,8 +24,8 @@ export class RunsController {
 
   create = async (req: Request, res: Response): Promise<void> => {
     if (!req.file) throw new ApiError("BAD_REQUEST", "Upload your CV in the `cv` field.");
-    const id = await this.service.createRun({ cv: req.file.buffer, jobDescription: req.body?.jobDescription, accountId: viewerOf(req) });
-    res.status(201).location(`/runs/${id}`).json({ id });
+    const body: CreateRunResponse = await this.service.createRun({ cv: req.file.buffer, jobDescription: req.body?.jobDescription, accountId: viewerOf(req) });
+    res.status(201).location(`/runs/${body.id}`).json(body);
   };
 
   /** `GET /runs`, behind `requireAccount`: My Runs, the Account's unexpired Owned Runs, newest first. */
@@ -37,8 +37,8 @@ export class RunsController {
   /** `POST /runs/claim`, behind `requireAccount`: `200` with the IDs of the Guest Runs that became Owned Runs. Others are ignored. */
   claim = async (req: Request, res: Response): Promise<void> => {
     const parsed = ClaimRunsRequestSchema.safeParse(req.body);
-    if (!parsed.success) throw new ApiError("BAD_REQUEST", "Send `runIds` as a list of 1 to 50 Run IDs.");
-    const body: ClaimRunsResponse = { claimed: await this.service.claimRuns(req.account!.accountId, parsed.data.runIds) };
+    if (!parsed.success) throw new ApiError("BAD_REQUEST", "Send `runs` as a list of 1 to 50 items, each with the Run `id` and its `claimToken`.");
+    const body: ClaimRunsResponse = { claimed: await this.service.claimRuns(req.account!.accountId, parsed.data.runs) };
     res.json(body);
   };
 

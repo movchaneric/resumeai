@@ -75,7 +75,7 @@ const settle = async (process: Process) => {
   await Promise.all(process.tasks.splice(0));
 };
 const statusOf = async (id: RunId) => (await store.get(id))?.status;
-const create = (process: Process, jobDescription = JOB_DESCRIPTION) => process.service.createRun({ cv: cvFile, jobDescription });
+const create = (process: Process, jobDescription = JOB_DESCRIPTION) => process.service.createRun({ cv: cvFile, jobDescription }).then((run) => run.id);
 /** The view without what differs between two Runs of the same input. */
 const comparable = (view: RunView) => ({ ...view, id: undefined, createdAt: undefined, expiresAt: undefined });
 const stepStates = (view: RunView) => view.steps.map((s) => `${s.key}:${s.state}`);

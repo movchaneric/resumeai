@@ -69,7 +69,7 @@ function enqueueHappyPath(llm: FakeLlmClient) {
   llm.enqueue("extract_job_profile", JOB_PROFILE).enqueue("extract_cv", extractedCv).enqueueVoted("assess_coverage", COVERAGE_ANSWER);
 }
 
-const createExtractableRun = (ctx: ReturnType<typeof setup>) => ctx.service.createRun({ cv, jobDescription: "Backend developer" });
+const createExtractableRun = (ctx: ReturnType<typeof setup>) => ctx.service.createRun({ cv, jobDescription: "Backend developer" }).then((run) => run.id);
 
 const stepStates = (view: { steps: { key: string; state: string }[] }) =>
   view.steps.filter((s) => s.state !== "pending").map((s) => `${s.key}:${s.state}`);
@@ -91,7 +91,7 @@ describe("RunsService", () => {
   it("sets the creation time and the expiry from the same clock", async () => {
     const start = new Date("2026-10-01T00:00:00Z");
     const { store, service } = setup(() => start);
-    const id = await service.createRun({ cv, jobDescription: "Backend developer" });
+    const { id } = await service.createRun({ cv, jobDescription: "Backend developer" });
     const row = store.rows.get(id)!;
     expect(row.createdAt).toEqual(start);
     expect(row.expiresAt.getTime()).toBe(start.getTime() + config.runTtlMs);
@@ -100,8 +100,8 @@ describe("RunsService", () => {
   it("gives a Guest Run the guest TTL and no Account, and an Owned Run the owned TTL from the same creation time", async () => {
     const start = new Date("2026-10-01T00:00:00Z");
     const { store, service } = setup(() => start);
-    const guest = await service.createRun({ cv, jobDescription: "Backend developer" });
-    const owned = await service.createRun({ cv, jobDescription: "Backend developer", accountId: "account-ada" });
+    const { id: guest } = await service.createRun({ cv, jobDescription: "Backend developer" });
+    const { id: owned } = await service.createRun({ cv, jobDescription: "Backend developer", accountId: "account-ada" });
     expect(store.rows.get(guest)).toMatchObject({ accountId: null, expiresAt: new Date(start.getTime() + config.runTtlMs) });
     expect(store.rows.get(owned)).toMatchObject({ accountId: "account-ada", createdAt: start, expiresAt: new Date(start.getTime() + config.ownedRunTtlMs) });
     expect(config.ownedRunTtlMs).toBe(90 * 24 * 60 * 60 * 1000);
@@ -109,8 +109,8 @@ describe("RunsService", () => {
 
   it("shows an Owned Run only to its Account, with the same 404 as a Run that does not exist", async () => {
     const { store, service } = setup();
-    const owned = await service.createRun({ cv, jobDescription: "Backend developer", accountId: "account-ada" });
-    const guest = await service.createRun({ cv, jobDescription: "Backend developer" });
+    const { id: owned } = await service.createRun({ cv, jobDescription: "Backend developer", accountId: "account-ada" });
+    const { id: guest } = await service.createRun({ cv, jobDescription: "Backend developer" });
     const missing = await service.getRunView("c0ffee00-0000-4000-8000-000000000000", "account-grace").catch((e: unknown) => e as ApiError);
     expect(missing).toMatchObject({ code: "RUN_NOT_FOUND", status: 404 });
 
@@ -143,7 +143,7 @@ describe("RunsService", () => {
   it("stops treating a Run as readable once it has expired", async () => {
     let now = new Date("2026-10-01T00:00:00Z");
     const { service } = setup(() => now);
-    const id = await service.createRun({ cv, jobDescription: "Backend developer" });
+    const { id } = await service.createRun({ cv, jobDescription: "Backend developer" });
     expect((await service.getRunView(id)).status).toBe("extracting");
 
     now = new Date(now.getTime() + config.runTtlMs);
@@ -161,7 +161,7 @@ describe("RunsService", () => {
 
     it("shows the Run as extracting with extract running before the graph has a checkpoint", async () => {
       const { service } = setup();
-      const id = await service.createRun({ cv, jobDescription: "Backend developer" });
+      const { id } = await service.createRun({ cv, jobDescription: "Backend developer" });
       const view = await service.getRunView(id);
       expect(view.status).toBe("extracting");
       expect(view.job).toBeNull();
@@ -907,7 +907,7 @@ describe("RunsService awaiting answers", () => {
     const graphRunner = makeGraphRunner(store, llm, judge);
     const tasks: (() => Promise<void>)[] = [];
     const service = new RunsService({ store: store as unknown as RunStore, config, graphRunner, events: new InProcessRunEvents(), runInBackground: (t) => void tasks.push(t) });
-    const id = await service.createRun({ cv, jobDescription: "Backend developer" });
+    const { id } = await service.createRun({ cv, jobDescription: "Backend developer" });
     await Promise.all(tasks.map((t) => t()));
 
     const paused = await service.getRunView(id);

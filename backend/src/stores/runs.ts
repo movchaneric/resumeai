@@ -19,7 +19,7 @@ export type StoredRun = {
 };
 
 /** `accountId` is left out for a Guest Run. */
-export type NewRun = Pick<StoredRun, "id" | "status" | "createdAt" | "expiresAt"> & { accountId?: string | null };
+export type NewRun = Pick<StoredRun, "id" | "status" | "createdAt" | "expiresAt"> & { accountId?: string | null; claimTokenHash?: string | null };
 
 /** The one place a database row becomes a `StoredRun`: nothing unvalidated leaves the store. */
 function toStoredRun(row: Run): StoredRun {
@@ -41,7 +41,7 @@ export class RunStore {
   constructor(private readonly prisma: PrismaClient) {}
 
   async create(run: NewRun): Promise<StoredRun> {
-    return toStoredRun(await this.prisma.run.create({ data: { ...run, accountId: run.accountId ?? null } }));
+    return toStoredRun(await this.prisma.run.create({ data: { ...run, accountId: run.accountId ?? null, claimTokenHash: run.claimTokenHash ?? null } }));
   }
 
   async get(id: RunId): Promise<StoredRun | null> {
@@ -108,15 +108,20 @@ export class RunStore {
   }
 
   /**
-   * Hands the Guest Runs in `ids` that have not expired at `now` to the Account, in one statement, and moves their
-   * expiry to created + `ownedTtlMs`. An Owned, expired or missing Run is left alone. Returns the IDs it claimed.
+   * Hands the Guest Runs in `claims` that have not expired at `now` to the Account, in one statement, and moves their
+   * expiry to created + `ownedTtlMs`. A Run is claimed only when its stored claim token hash equals the one given, and
+   * the hash is cleared, so a token works once. An Owned, expired or missing Run, or a wrong token, is left alone.
+   * Returns the IDs it claimed.
    */
-  async claimGuestRuns(ids: RunId[], accountId: string, ownedTtlMs: number, now: Date): Promise<RunId[]> {
-    if (ids.length === 0) return [];
+  async claimGuestRuns(claims: { id: RunId; claimTokenHash: string }[], accountId: string, ownedTtlMs: number, now: Date): Promise<RunId[]> {
+    if (claims.length === 0) return [];
+    const ids = claims.map((claim) => claim.id);
+    const hashes = claims.map((claim) => claim.claimTokenHash);
     const rows = await this.prisma.$queryRaw<{ id: string }[]>`
       UPDATE app.runs
-      SET account_id = ${accountId}, expires_at = created_at + (${ownedTtlMs}::double precision * interval '1 millisecond')
-      WHERE id = ANY(${ids}::uuid[]) AND account_id IS NULL AND expires_at > ${now}
+      SET account_id = ${accountId}, expires_at = created_at + (${ownedTtlMs}::double precision * interval '1 millisecond'), claim_token_hash = NULL
+      WHERE account_id IS NULL AND expires_at > ${now}
+        AND (id, claim_token_hash) IN (SELECT * FROM unnest(${ids}::uuid[], ${hashes}::text[]))
       RETURNING id`;
     return rows.map((row) => row.id as RunId);
   }

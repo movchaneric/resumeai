@@ -58,7 +58,7 @@ afterAll(() => prisma.$disconnect());
 async function heldInCondensing(p: Process): Promise<RunId> {
   p.llm.enqueue("extract_job_profile", job).enqueue("extract_cv", longExtracted).enqueueVoted("assess_coverage", coverage);
   const release = p.llm.hold("condense_reword");
-  const id = await p.service.createRun({ cv: cvFile, jobDescription: "Platform engineer" });
+  const { id } = await p.service.createRun({ cv: cvFile, jobDescription: "Platform engineer" });
   await until(() => p.llm.held.includes("condense_reword"), "the reword call");
   releases.set(p, release);
   return id;
@@ -85,7 +85,7 @@ describe("the fit step", () => {
   it("is done at once when the CV needed no condensing", async () => {
     const p = boot(createMemoryCheckpointer());
     p.llm.enqueue("extract_job_profile", job).enqueue("extract_cv", { ...longExtracted, experience: longExtracted.experience.slice(0, 1) }).enqueueVoted("assess_coverage", coverage);
-    const id = await p.service.createRun({ cv: cvFile, jobDescription: "Platform engineer" });
+    const { id } = await p.service.createRun({ cv: cvFile, jobDescription: "Platform engineer" });
     await settle(p);
     const view = await p.service.getRunView(id);
     expect(view.status).toBe("awaiting_review");

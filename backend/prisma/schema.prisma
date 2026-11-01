@@ -23,6 +23,8 @@ model Run {
   // the checkpoints have no foreign key (ADR 0005), so deleting an Account must never leave a thread behind.
   accountId    String?  @map("account_id")
   account      User?    @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  // SHA-256 hex of the claim token a Guest Run's starting browser got; null for an Owned Run, a Run already claimed, or one made before claim tokens.
+  claimTokenHash String? @map("claim_token_hash")
 
   @@index([accountId])
   @@map("runs")

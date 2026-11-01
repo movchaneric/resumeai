@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
   AnswerSchema,
   ReviewDecisionSchema,
@@ -190,6 +190,11 @@ export type CreateRunInput = {
  */
 type Viewer = string | null;
 
+/** The SHA-256 hex of a claim token: what the Run row keeps instead of the token. */
+function hashClaimToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
 /** The business rules for a Run. It knows nothing about HTTP. */
 export class RunsService {
   private readonly now: () => Date;
@@ -206,7 +211,7 @@ export class RunsService {
   }
 
   /** Validates and parses the upload, then stores the Run. Throws an `ApiError` when the upload is rejected. */
-  async createRun({ cv, jobDescription, accountId = null }: CreateRunInput): Promise<RunId> {
+  async createRun({ cv, jobDescription, accountId = null }: CreateRunInput): Promise<{ id: RunId; claimToken?: string }> {
     const { store, config } = this.deps;
     const jobDescriptionText = typeof jobDescription === "string" ? stripNul(jobDescription).trim() : "";
     if (!jobDescriptionText) throw new ApiError("BAD_REQUEST", "The `jobDescription` field is required.");
@@ -217,15 +222,18 @@ export class RunsService {
     const cvText = await parseCv(cv, config.limits);
     // Both timestamps come from one clock, so a Run lives exactly its TTL: the owned one for an Owned Run, RUN_TTL_DAYS for a Guest Run.
     const createdAt = this.now();
+    // A Guest Run gets a claim token, shown once to the browser that started it; only its hash is stored.
+    const claimToken = accountId === null ? randomBytes(32).toString("base64url") : undefined;
     const run = await store.create({
       id: RunIdSchema.parse(randomUUID()),
       status: "extracting",
       createdAt,
       expiresAt: new Date(createdAt.getTime() + (accountId === null ? config.runTtlMs : config.ownedRunTtlMs)),
       accountId,
+      claimTokenHash: claimToken === undefined ? null : hashClaimToken(claimToken),
     });
     this.background(run.id, () => this.runPipeline({ runId: run.id, cvText, jobDescriptionText }));
-    return run.id;
+    return claimToken === undefined ? { id: run.id } : { id: run.id, claimToken };
   }
 
   /** Starts `work` for the Run in the background and keeps the Run in the running set until it ends, however it ends. */
@@ -468,16 +476,17 @@ export class RunsService {
   }
 
   /**
-   * Hands the Guest Runs among `rawIds` to the Account (`RunStore.claimGuestRuns`). A malformed ID is ignored, like an
-   * Owned, expired or missing one. Returns the IDs that became Owned Runs.
+   * Hands the Guest Runs among `items` to the Account (`RunStore.claimGuestRuns`), each only with its claim token. A
+   * malformed ID is ignored, like an Owned, expired or missing Run or a wrong token. Returns the IDs that became Owned Runs.
    */
-  async claimRuns(accountId: string, rawIds: string[]): Promise<RunId[]> {
-    const ids = new Set<RunId>();
-    for (const raw of rawIds) {
-      const id = RunIdSchema.safeParse(raw);
-      if (id.success) ids.add(id.data);
+  async claimRuns(accountId: string, items: { id: string; claimToken: string }[]): Promise<RunId[]> {
+    const claims = new Map<RunId, string>();
+    for (const item of items) {
+      const id = RunIdSchema.safeParse(item.id);
+      if (id.success) claims.set(id.data, hashClaimToken(item.claimToken));
     }
-    return this.deps.store.claimGuestRuns([...ids], accountId, this.deps.config.ownedRunTtlMs, this.now());
+    const list = [...claims].map(([id, claimTokenHash]) => ({ id, claimTokenHash }));
+    return this.deps.store.claimGuestRuns(list, accountId, this.deps.config.ownedRunTtlMs, this.now());
   }
 
   /** My Runs: the Account's unexpired Owned Runs, newest first, each with its job and Match Score from the checkpoint. */

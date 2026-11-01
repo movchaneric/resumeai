@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BaseCheckpointSaver } from "@langchain/langgraph";
-import { RunIdSchema, type RunId } from "@resume-ai/shared";
+import { CreateRunResponseSchema, type RunId } from "@resume-ai/shared";
 import request from "supertest";
 import { createApp } from "@/app.js";
 import { createAuth, type GoogleStub } from "@/auth/betterAuth.js";
@@ -67,20 +67,23 @@ export function makeAuthApp(env: Record<string, string> = {}, googleStub?: Googl
     return (res.headers["set-cookie"] as unknown as string[]).map((c) => c.split(";")[0]).join("; ");
   };
 
-  /** Starts a Run (as the cookie's Account, or as a guest without one) and waits until it is waiting for review, skipping its Questions. */
-  const startRun = async (cookie?: string): Promise<RunId> => {
+  /** Starts a Run (as the cookie's Account, or as a guest without one, which gets a claim token) and waits until it is waiting for review, skipping its Questions. */
+  const startRunWithToken = async (cookie?: string): Promise<{ id: RunId; claimToken?: string }> => {
     // A Run that ended without using every queued response must not feed the next one.
     llm.clearQueues();
     enqueueToReview(llm);
     const created = request(app).post("/runs").attach("cv", cvFile, "cv.pdf").field("jobDescription", JOB_DESCRIPTION);
     const res = await (cookie ? created.set("Cookie", cookie) : created);
-    const id = RunIdSchema.parse(res.body.id);
+    const { id, claimToken } = CreateRunResponseSchema.parse(res.body);
     await settle();
     const answers = request(app).post(`/runs/${id}/answers`).send({ answers: [] });
     await (cookie ? answers.set("Cookie", cookie) : answers);
     await settle();
-    return id;
+    return claimToken === undefined ? { id } : { id, claimToken };
   };
 
-  return { app, prisma, store, service, emails, auth, llm, settle, clearAuthTables, signUpAndIn, startRun };
+  /** `startRunWithToken` for a caller that needs only the Run's ID. */
+  const startRun = async (cookie?: string): Promise<RunId> => (await startRunWithToken(cookie)).id;
+
+  return { app, prisma, store, service, emails, auth, llm, settle, clearAuthTables, signUpAndIn, startRun, startRunWithToken };
 }

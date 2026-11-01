@@ -1,5 +1,5 @@
 import { MyRunsSchema, RunIdSchema, RunSummarySchema, type RunId } from "@resume-ai/shared";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import request from "supertest";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
@@ -10,7 +10,7 @@ import { makeAuthApp } from "../fakes/authApp.js";
 
 // Real Better Auth and the real test database: an Owned Run is served only to its Account, signed in.
 
-const { app, prisma, store, llm, settle, clearAuthTables, signUpAndIn, startRun, emails } = makeAuthApp();
+const { app, prisma, store, llm, settle, clearAuthTables, signUpAndIn, startRun, startRunWithToken, emails } = makeAuthApp();
 const cvFile = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf"));
 
 const ADA = { name: "Ada Example", email: "ada@example.com", password: "correct-horse-9" };
@@ -157,17 +157,24 @@ describe("POST /runs", () => {
 
 describe("POST /runs/claim", () => {
   const claim = (body: unknown, cookie?: string) => as(request(app).post("/runs/claim").send(body as object), cookie);
+  /** A Guest Run with the claim token its starting browser got. */
+  const startGuest = async (): Promise<{ id: RunId; claimToken: string }> => {
+    const run = await startRunWithToken();
+    expect(run.claimToken).toBeTypeOf("string");
+    return { id: run.id, claimToken: run.claimToken! };
+  };
 
   it("claims a Guest Run: the Account then sees it, expiring owned TTL after its creation", async () => {
-    const id = await startRun();
+    const { id, claimToken } = await startGuest();
     expect((await request(app).get(`/runs/${id}`).set("Cookie", ada)).status).toBe(200);
 
-    const res = await claim({ runIds: [id] }, ada);
+    const res = await claim({ runs: [{ id, claimToken }] }, ada);
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ claimed: [id] });
 
     const row = await prisma.run.findUniqueOrThrow({ where: { id } });
     expect(row.accountId).not.toBeNull();
+    expect(row.claimTokenHash).toBeNull();
     expect(row.expiresAt.getTime() - row.createdAt.getTime()).toBe(90 * 24 * 60 * 60 * 1000);
     expect((await request(app).get(`/runs/${id}`).set("Cookie", ada)).body.expiresAt).toBe(row.expiresAt.toISOString());
     // Now it is Ada's alone.
@@ -177,44 +184,124 @@ describe("POST /runs/claim", () => {
   });
 
   it("ignores another Account's Owned Run, an expired Run, a missing Run and a malformed ID, and claims the rest", async () => {
-    const guest = await startRun();
+    const guest = await startGuest();
     const owned = await startRun(grace);
-    const expired = await startRun();
-    await prisma.run.update({ where: { id: expired }, data: { expiresAt: new Date(Date.now() - 1000) } });
+    const expired = await startGuest();
+    await prisma.run.update({ where: { id: expired.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
     const before = await prisma.run.findUniqueOrThrow({ where: { id: owned } });
 
-    const res = await claim({ runIds: [owned, expired, randomUUID(), "not-an-id", guest, guest] }, ada);
+    const res = await claim(
+      { runs: [{ id: owned, claimToken: "any" }, expired, { id: randomUUID(), claimToken: "any" }, { id: "not-an-id", claimToken: "any" }, guest, guest] },
+      ada,
+    );
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ claimed: [guest] });
+    expect(res.body).toEqual({ claimed: [guest.id] });
 
     expect(await prisma.run.findUniqueOrThrow({ where: { id: owned } })).toEqual(before);
-    expect((await prisma.run.findUniqueOrThrow({ where: { id: expired } })).accountId).toBeNull();
+    expect((await prisma.run.findUniqueOrThrow({ where: { id: expired.id } })).accountId).toBeNull();
   });
 
-  it("accepts 50 IDs and refuses 51 with 400 BAD_REQUEST, claiming nothing", async () => {
-    const guest = await startRun();
-    const fifty = [guest, ...Array.from({ length: 49 }, () => randomUUID())];
-    expect((await claim({ runIds: fifty }, ada)).body).toEqual({ claimed: [guest] });
+  it("claims nothing for a wrong token, and the Run stays a Guest Run that its real token can still claim", async () => {
+    const guest = await startGuest();
+    const res = await claim({ runs: [{ id: guest.id, claimToken: "not-the-token" }] }, ada);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ claimed: [] });
+    expect((await prisma.run.findUniqueOrThrow({ where: { id: guest.id } })).accountId).toBeNull();
 
-    const guest2 = await startRun();
-    const tooMany = await claim({ runIds: [guest2, ...Array.from({ length: 50 }, () => randomUUID())] }, ada);
+    expect((await claim({ runs: [guest] }, ada)).body).toEqual({ claimed: [guest.id] });
+  });
+
+  it("claims nothing with another Run's token", async () => {
+    const first = await startGuest();
+    const second = await startGuest();
+    const res = await claim({ runs: [{ id: first.id, claimToken: second.claimToken }] }, ada);
+    expect(res.body).toEqual({ claimed: [] });
+    expect((await prisma.run.findUniqueOrThrow({ where: { id: first.id } })).accountId).toBeNull();
+    expect((await prisma.run.findUniqueOrThrow({ where: { id: second.id } })).accountId).toBeNull();
+  });
+
+  it("claims nothing the second time with the same ID and token, even for another Account", async () => {
+    const guest = await startGuest();
+    expect((await claim({ runs: [guest] }, ada)).body).toEqual({ claimed: [guest.id] });
+    expect((await claim({ runs: [guest] }, ada)).body).toEqual({ claimed: [] });
+    expect((await claim({ runs: [guest] }, grace)).body).toEqual({ claimed: [] });
+    expect((await prisma.run.findUniqueOrThrow({ where: { id: guest.id } })).accountId).not.toBeNull();
+  });
+
+  it("claims nothing for a Guest Run that has no stored token hash (made before claim tokens)", async () => {
+    const guest = await startGuest();
+    await prisma.run.update({ where: { id: guest.id }, data: { claimTokenHash: null } });
+    expect((await claim({ runs: [guest] }, ada)).body).toEqual({ claimed: [] });
+    expect((await prisma.run.findUniqueOrThrow({ where: { id: guest.id } })).accountId).toBeNull();
+  });
+
+  it("gives an Owned Run no claim token, and stores only the SHA-256 of a Guest Run's token", async () => {
+    const owned = await startRunWithToken(ada);
+    expect(owned.claimToken).toBeUndefined();
+    expect((await prisma.run.findUniqueOrThrow({ where: { id: owned.id } })).claimTokenHash).toBeNull();
+
+    const guest = await startGuest();
+    const row = await prisma.run.findUniqueOrThrow({ where: { id: guest.id } });
+    expect(row.claimTokenHash).not.toBe(guest.claimToken);
+    expect(row.claimTokenHash).toBe(createHash("sha256").update(guest.claimToken).digest("hex"));
+  });
+
+  it("answers POST /runs with the claim token for a Guest Run only, and no other route returns it", async () => {
+    llm.clearQueues();
+    enqueueToReview(llm);
+    const guestRes = await request(app).post("/runs").attach("cv", cvFile, "cv.pdf").field("jobDescription", "A backend developer role.");
+    expect(guestRes.status).toBe(201);
+    expect(Object.keys(guestRes.body).sort()).toEqual(["claimToken", "id"]);
+    expect(guestRes.headers.location).toBe(`/runs/${guestRes.body.id}`);
+    await settle();
+
+    llm.clearQueues();
+    enqueueToReview(llm);
+    const ownedRes = await request(app).post("/runs").set("Cookie", ada).attach("cv", cvFile, "cv.pdf").field("jobDescription", "A backend developer role.");
+    expect(ownedRes.status).toBe(201);
+    expect(ownedRes.body).toEqual({ id: ownedRes.body.id });
+    await settle();
+
+    const view = await request(app).get(`/runs/${guestRes.body.id}`);
+    expect(view.status).toBe(200);
+    expect(JSON.stringify(view.body)).not.toContain(guestRes.body.claimToken);
+    expect(JSON.stringify(view.headers)).not.toContain(guestRes.body.claimToken);
+  });
+
+  it("accepts 50 items and refuses 51 with 400 BAD_REQUEST, claiming nothing", async () => {
+    const guest = await startGuest();
+    const filler = () => ({ id: randomUUID(), claimToken: "any" });
+    const fifty = [guest, ...Array.from({ length: 49 }, filler)];
+    expect((await claim({ runs: fifty }, ada)).body).toEqual({ claimed: [guest.id] });
+
+    const guest2 = await startGuest();
+    const tooMany = await claim({ runs: [guest2, ...Array.from({ length: 50 }, filler)] }, ada);
     expect(tooMany.status).toBe(400);
     expect(tooMany.body.code).toBe("BAD_REQUEST");
-    expect((await prisma.run.findUniqueOrThrow({ where: { id: guest2 } })).accountId).toBeNull();
+    expect((await prisma.run.findUniqueOrThrow({ where: { id: guest2.id } })).accountId).toBeNull();
   });
 
-  it.each([{}, { runIds: [] }, { runIds: "x" }, { runIds: [1] }])("refuses the body %j with 400", async (body) => {
+  it.each([
+    {},
+    { runs: [] },
+    { runs: "x" },
+    { runs: [1] },
+    { runs: [{ id: randomUUID() }] },
+    { runs: [{ id: randomUUID(), claimToken: "" }] },
+    { runs: [{ id: randomUUID(), claimToken: "x".repeat(129) }] },
+    { runIds: [randomUUID()] },
+  ])("refuses the body %j with 400", async (body) => {
     const res = await claim(body, ada);
     expect(res.status).toBe(400);
     expect(res.body.code).toBe("BAD_REQUEST");
   });
 
   it("is 401 UNAUTHENTICATED without a session, and claims nothing", async () => {
-    const guest = await startRun();
-    const res = await claim({ runIds: [guest] });
+    const guest = await startGuest();
+    const res = await claim({ runs: [guest] });
     expect(res.status).toBe(401);
     expect(res.body.code).toBe("UNAUTHENTICATED");
-    expect((await prisma.run.findUniqueOrThrow({ where: { id: guest } })).accountId).toBeNull();
+    expect((await prisma.run.findUniqueOrThrow({ where: { id: guest.id } })).accountId).toBeNull();
   });
 });
 

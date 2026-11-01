@@ -17,7 +17,7 @@ Rules:
 - If the reason has to infer the Requirement from something else ("indicating", "suggests", "shows ability to", "implies"), the verdict is at most "partially_met". If no Item states anything related, it is "unmet".
 - The reason may only describe what the cited Items say. Never add details that are not in them.
 - Requirements of kind soft_skill (ownership, attention to detail, collaboration, iterating quickly) are "met" only when an Item describes that behaviour. Otherwise they are "unmet". Never use "partially_met" for them.
-- A duration such as "3+ years" is "met" only when the dates of the cited Items prove it. A bare year cannot prove a duration, so use "partially_met" and say so in the reason.
+- Each dated Item in the CV shows its tenure as of today, for example "(1y11m to 2y10m as of Nov 2026)". A range appears when a date is only a year. A duration such as "3+ years" is "met" only when the SHORTEST tenure of a cited Item reaches it. If the range straddles the duration (shortest below, longest at or above), use "partially_met" and say the dates are too vague to prove it. If even the longest tenure falls short, use "partially_met" or "unmet" as the other rules say. Never add tenures of different Items together and never compute tenure yourself.
 - "unmet" cites no Evidence. "met" and "partially_met" cite at least one Item.
 - Write the reason first (1 to 2 sentences), then the Evidence IDs, then the verdict.
 - Never assume experience the CV does not show.
@@ -80,11 +80,12 @@ async function judgeOnce(
   llm: LlmClient,
   cv: Cv,
   requirements: Requirement[],
+  today: Date,
   onRetry: () => void,
 ): Promise<CallResult> {
   const messages: LlmMessage[] = [
     { role: "system", content: COVERAGE_SYSTEM_PROMPT },
-    { role: "user", content: `Requirements:\n${renderRequirements(requirements)}\n\nCV:\n${renderCv(cv)}` },
+    { role: "user", content: `Today: ${today.toISOString().slice(0, 10)}\n\nRequirements:\n${renderRequirements(requirements)}\n\nCV:\n${renderCv(cv, today)}` },
   ];
 
   /** One model call. Returns the answer, or the issues that make it unusable. */
@@ -111,7 +112,7 @@ async function judgeOnce(
       throw new CoverageError("The model did not return a valid coverage assessment", result.issues);
     }
   }
-  return applyClaimRule(requirements, result.answer);
+  return applyClaimRule(requirements, result.answer, { cv, today });
 }
 
 /**
@@ -128,9 +129,10 @@ export async function assessCoverage(
   llm: LlmClient,
   cv: Cv,
   requirements: Requirement[],
-  options: { round?: number; votes?: number } = {},
+  options: { round?: number; votes?: number; today?: Date } = {},
 ): Promise<{ coverage: Coverage[]; downgrades: number }> {
   const votes = options.votes ?? COVERAGE_VOTES;
+  const today = options.today ?? new Date(); // the one clock read; tests pass `today`
   return withSpan(CALL_NAME, async (span) => {
     if (options.round !== undefined) span.setAttribute("round", options.round);
     span.setAttribute("coverage.votes", votes);
@@ -138,7 +140,7 @@ export async function assessCoverage(
     let retries = 0;
     span.setAttribute("coverage.retries", retries);
     const onRetry = () => span.setAttribute("coverage.retries", ++retries);
-    const settled = await Promise.allSettled(Array.from({ length: votes }, () => judgeOnce(llm, cv, requirements, onRetry)));
+    const settled = await Promise.allSettled(Array.from({ length: votes }, () => judgeOnce(llm, cv, requirements, today, onRetry)));
     const succeeded = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
     const failed = settled.length - succeeded.length;
     span.setAttribute("coverage.failed_calls", failed);

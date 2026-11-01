@@ -119,12 +119,13 @@ describe("assessCoverage", () => {
 
   it("sends the system prompt and the rendered Requirements and CV", async () => {
     const llm = new FakeLlmClient().enqueue("assess_coverage", good);
-    await assessCoverage(llm, cv(), requirements, ONE);
+    const today = new Date("2026-11-01T12:00:00Z");
+    await assessCoverage(llm, cv(), requirements, { ...ONE, today });
 
     const [system, user] = llm.calls[0]!.messages;
     expect(system).toEqual({ role: "system", content: COVERAGE_SYSTEM_PROMPT });
     expect(user!.role).toBe("user");
-    expect(user!.content).toBe(`Requirements:\n${renderRequirements(requirements)}\n\nCV:\n${renderCv(cv())}`);
+    expect(user!.content).toBe(`Today: 2026-11-01\n\nRequirements:\n${renderRequirements(requirements)}\n\nCV:\n${renderCv(cv(), today)}`);
   });
 
   it("keeps the inference rule and the no-added-details rule in the system prompt", async () => {

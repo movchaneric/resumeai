@@ -12,3 +12,4 @@ export * from "./cvItems.js";
 export * from "./applyChanges.js";
 export * from "./review.js";
 export * from "./rejudge.js";
+export * from "./tenure.js";

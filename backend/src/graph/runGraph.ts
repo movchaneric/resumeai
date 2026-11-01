@@ -174,7 +174,7 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
     })
     // Computes the Questions and stores them, so the Run view can show them while the graph is paused.
     // (Named for what it does: LangGraph forbids a node with the same name as the `questions` state channel.)
-    .addNode("select_questions", (state) => ({ questions: selectQuestions(state.jobProfile!.requirements, state.coverage!) }))
+    .addNode("select_questions", (state) => ({ questions: selectQuestions(state.jobProfile!.requirements, state.coverage!, state.cv!, new Date()) }))
     // The only `interrupt()`. LangGraph runs this node again from the top on resume, so everything before the
     // `interrupt()` call must be pure: here it is only a read of `state.questions`.
     .addNode("collect_answers", (state) => {

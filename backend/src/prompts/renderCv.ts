@@ -1,12 +1,15 @@
+import { formatTenure, tenureOf } from "@resume-ai/shared";
 import type { Cv, DateRange, Requirement } from "@resume-ai/shared";
 
 /** Prompt text for the CV: every Item on its own line, starting with `[<id>]`, so the model can cite IDs. */
 
-function renderDates(dates: DateRange | null): string {
+function renderDates(dates: DateRange | null, today?: Date): string {
   if (dates === null) return "";
   const end = dates.current ? "present" : dates.end;
   if (dates.start === null && end === null) return "";
-  return `${dates.start ?? "?"} – ${end ?? "?"}`;
+  const text = `${dates.start ?? "?"} – ${end ?? "?"}`;
+  const tenure = today === undefined ? null : tenureOf(dates, today);
+  return tenure === null ? text : `${text} (${formatTenure(tenure, today!)})`;
 }
 
 const joinParts = (parts: (string | null | undefined)[]) => parts.filter((p) => p && p.length > 0).join(", ");
@@ -15,7 +18,12 @@ const bulletLines = (bullets: { id: string; text: string }[]) => bullets.map((b)
 
 const section = (heading: string, lines: string[]) => (lines.length === 0 ? null : [`## ${heading}`, ...lines].join("\n"));
 
-export function renderCv(cv: Cv): string {
+/**
+ * The CV as prompt text. With `today`, each dated Item also shows how long it lasted as of that day (a range when a
+ * date is a bare year). Only the Coverage chain passes it: the tailor, claim check and condense prompts must not see
+ * tenure, or the tailor might write it into the CV.
+ */
+export function renderCv(cv: Cv, today?: Date): string {
   const contact = [
     cv.contact.name,
     cv.contact.headline,
@@ -31,14 +39,14 @@ export function renderCv(cv: Cv): string {
     section(
       "Experience",
       cv.experience.flatMap((e) => [
-        `[${e.id}] ${joinParts([e.title, e.company, e.location, renderDates(e.dates)])}`,
+        `[${e.id}] ${joinParts([e.title, e.company, e.location, renderDates(e.dates, today)])}`,
         ...bulletLines(e.bullets),
       ]),
     ),
     section(
       "Education",
       cv.education.flatMap((e) => [
-        `[${e.id}] ${joinParts([e.degree, e.field, e.institution, renderDates(e.dates)])}`,
+        `[${e.id}] ${joinParts([e.degree, e.field, e.institution, renderDates(e.dates, today)])}`,
         ...bulletLines(e.bullets),
       ]),
     ),
@@ -46,7 +54,7 @@ export function renderCv(cv: Cv): string {
     section(
       "Projects",
       cv.projects.flatMap((p) => [
-        `[${p.id}] ${joinParts([p.name, p.url, renderDates(p.dates)])}`,
+        `[${p.id}] ${joinParts([p.name, p.url, renderDates(p.dates, today)])}`,
         ...bulletLines(p.bullets),
       ]),
     ),

@@ -16,15 +16,20 @@ export interface MenuProps {
   label: string;
   items: MenuItem[];
   trigger?: ReactNode;
+  /** Replaces the default 40px square button styling, for a trigger that holds more than an icon. */
+  triggerClassName?: string;
 }
 
 /** An icon button (⋯) that opens a menu of actions. */
-export function Menu({ label, items, trigger }: MenuProps) {
+export function Menu({ label, items, trigger, triggerClassName }: MenuProps) {
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger
         aria-label={label}
-        className="inline-flex size-10 items-center justify-center rounded-btn text-fg-2 transition-colors duration-150 hover:bg-soft data-[state=open]:bg-soft"
+        className={cx(
+          "inline-flex items-center justify-center rounded-btn transition-colors duration-150 hover:bg-soft data-[state=open]:bg-soft",
+          triggerClassName ?? "size-10 text-fg-2",
+        )}
       >
         {trigger ?? <MoreHorizontal aria-hidden="true" size={18} strokeWidth={2} />}
       </DropdownMenu.Trigger>

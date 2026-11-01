@@ -53,7 +53,7 @@ describe("email and password", () => {
 
     const me = await request(app).get("/account").set("Cookie", cookie);
     expect(me.status).toBe(200);
-    expect(me.body).toEqual({ accountId: expect.any(String), name: ADA.name, email: ADA.email });
+    expect(me.body).toEqual({ accountId: expect.any(String), name: ADA.name, email: ADA.email, image: null });
 
     expect((await post("/sign-out", {}, cookie)).status).toBe(200);
     const after = await request(app).get("/account").set("Cookie", cookie);

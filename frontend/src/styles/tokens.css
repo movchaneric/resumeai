@@ -34,6 +34,12 @@
   --color-panel-badge: #c7d2fe;
   --color-panel-badge-bg: #312e81;
 
+  /* The Google "G" mark's brand colours (sign-in button only). */
+  --color-google-blue: #4285f4;
+  --color-google-green: #34a853;
+  --color-google-yellow: #fbbc05;
+  --color-google-red: #ea4335;
+
   --radius-sm: 8px;
   --radius-input: 10px;
   --radius-btn: 12px;

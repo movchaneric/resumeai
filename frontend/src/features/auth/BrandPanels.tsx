@@ -43,7 +43,7 @@ export function SignUpPanel() {
     <div className="flex flex-col gap-6">
       <h2 className="max-w-[460px] text-[28px] leading-tight min-[960px]:text-[36px]">Keep every tailored CV in one place.</h2>
       <div className="hidden min-[960px]:block">
-        <Checks items={["All your Runs, listed", "Download again any time", "Delete it all in one click"]} />
+        <Checks items={["All your Runs, listed", "Download again for 90 days", "Delete it all in one click"]} />
       </div>
     </div>
   );

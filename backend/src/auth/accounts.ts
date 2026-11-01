@@ -3,10 +3,10 @@ import type { Request } from "express";
 import type { PrismaClient } from "@/generated/prisma/client.js";
 
 /** The signed-in person, as the rest of the backend sees them. Nothing outside `auth/` sees Better Auth's own types. */
-export type Account = { accountId: string; name: string; email: string };
+export type Account = { accountId: string; name: string; email: string; image: string | null };
 
 /** The one thing the service needs from Better Auth: the session behind a set of headers. */
-export type GetSession = (headers: Headers) => Promise<{ user: { id: string; name: string; email: string } } | null>;
+export type GetSession = (headers: Headers) => Promise<{ user: { id: string; name: string; email: string; image?: string | null } } | null>;
 
 export class AccountsService {
   constructor(
@@ -18,7 +18,7 @@ export class AccountsService {
   async accountOf(req: Pick<Request, "headers">): Promise<Account | null> {
     const session = await this.getSession(fromNodeHeaders(req.headers));
     if (!session) return null;
-    return { accountId: session.user.id, name: session.user.name, email: session.user.email };
+    return { accountId: session.user.id, name: session.user.name, email: session.user.email, image: session.user.image ?? null };
   }
 
   /**

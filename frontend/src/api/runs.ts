@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { RunIdSchema, ReviewFitSchema, RunViewSchema, type Answer, type ReviewSubmission, type RunView } from "@resume-ai/shared";
+import { CreateRunResponseSchema, RunIdSchema, ReviewFitSchema, RunViewSchema, type Answer, type CreateRunResponse, type ReviewSubmission, type RunView } from "@resume-ai/shared";
 import { apiUrl } from "@/api/config";
 import { jsonBody, requestBlob, requestJson, requestVoid } from "@/api/http";
 
@@ -10,12 +10,15 @@ export interface CreateRunInput {
   jobDescription: string;
 }
 
-/** `POST /runs` (multipart): the CV in `cv`, the Job Description in `jobDescription`. Returns the new Run's ID. */
-export async function createRun({ cv, jobDescription }: CreateRunInput) {
+/**
+ * `POST /runs` (multipart): the CV in `cv`, the Job Description in `jobDescription`. Returns the new Run's ID and, for a
+ * Guest Run, its `claimToken` (shown once; the browser keeps it so a later sign-in can claim the Run).
+ */
+export async function createRun({ cv, jobDescription }: CreateRunInput): Promise<CreateRunResponse> {
   const form = new FormData();
   form.append("cv", cv);
   form.append("jobDescription", jobDescription);
-  return (await requestJson("/runs", RunRefSchema, { method: "POST", body: form })).id;
+  return requestJson("/runs", CreateRunResponseSchema, { method: "POST", body: form });
 }
 
 export function getRun(id: string): Promise<RunView> {

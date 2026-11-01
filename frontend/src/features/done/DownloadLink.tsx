@@ -20,12 +20,15 @@ export function DownloadLink({
   variant,
   label,
   onError,
+  compact = false,
 }: {
   runId: string;
   format: DownloadFormat;
   variant: "primary" | "secondary";
   label: string;
   onError: (error: unknown) => void;
+  /** A smaller inline link (My Runs rows) instead of the full-width button of the Done screen. */
+  compact?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -59,7 +62,8 @@ export function DownloadLink({
       onClick={(e) => void onClick(e)}
       aria-busy={busy || undefined}
       className={cx(
-        "inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-btn px-5 text-[15px] font-semibold transition-colors duration-150",
+        "inline-flex items-center justify-center gap-2 rounded-btn font-semibold transition-colors duration-150",
+        compact ? "min-h-10 px-4 text-sm" : "min-h-12 flex-1 px-5 text-[15px]",
         STYLE[variant],
         busy && "pointer-events-none opacity-50",
       )}

@@ -42,7 +42,12 @@ export function createAuth({ prisma, config, emailSender, googleStub }: AuthDeps
     // Our Prisma models are named so they do not clash with ours: the account table is `AuthAccount`.
     user: { modelName: "user" },
     session: { modelName: "session", expiresIn: 7 * DAY_SECONDS, updateAge: DAY_SECONDS },
-    account: { modelName: "authAccount", accountLinking: { enabled: true, trustedProviders: ["google"] } },
+    account: {
+      modelName: "authAccount",
+      // Google links only into an Account whose email is already verified, so an unverified password sign-up for someone
+      // else's email cannot capture their Google sign-in (ADR 0009).
+      accountLinking: { enabled: true, trustedProviders: ["google"], requireLocalEmailVerified: true },
+    },
     verification: { modelName: "verification" },
     emailAndPassword: {
       enabled: true,

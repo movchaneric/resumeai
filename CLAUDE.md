@@ -31,7 +31,7 @@ backend/src/
   auth/          the Better Auth instance (built by `createAuth` from the Prisma client, config and an `EmailSender`), `EmailSender` and its `LogEmailSender`, and `AccountsService` (`accountOf(req)`). The only importer of `better-auth`; the rest of the backend sees only our `Account` type. Mounted at `/api/auth/*`, before `express.json()`.
   llm/           the `LlmClient` interface and its LangChain implementation. Only `llm/` imports LangChain models (one exception below).
   utils/         config, db client, errors, tracing (`tracing.ts`), named spans (`spans.ts`), the in-process Run event bus (`runEvents.ts`), server shutdown (`shutdown.ts`), the open-stream registry it uses (`openStreams.ts`) and the TTL sweep timer (`sweepScheduler.ts`)
-backend/test/    mirrors src (routes/, export/, services/, graph/, parsing/, prompts/, scoring/, tailoring/, utils/); fixtures live in test/fixtures
+backend/test/    mirrors src (auth/, routes/, export/, services/, graph/, parsing/, prompts/, scoring/, tailoring/, utils/); fixtures live in test/fixtures
 ```
 
 - `utils/tracing.ts` is the one file outside `llm/` that imports LangChain (`@langchain/core/callbacks/manager`, to instrument it). `utils/spans.ts` imports only the OpenTelemetry API and OpenInference semantic conventions, so any layer may use `withSpan`.

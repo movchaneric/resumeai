@@ -46,6 +46,19 @@ describe("Google sign-in", () => {
     expect(new Set(accounts.map((a) => a.userId)).size).toBe(1);
   });
 
+  it("does not link into a password Account whose email is not verified", async () => {
+    await post("/sign-up/email", { name: "Ada Example", email: "ada@example.com", password: "correct-horse-9" });
+
+    const res = await googleSignIn("ada-token");
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe("OAUTH_LINK_ERROR");
+    expect(res.headers["set-cookie"]).toBeUndefined();
+
+    expect(await prisma.user.count()).toBe(1);
+    expect(await prisma.authAccount.count({ where: { providerId: "google" } })).toBe(0);
+    expect((await prisma.user.findUniqueOrThrow({ where: { email: "ada@example.com" } })).emailVerified).toBe(false);
+  });
+
   it("creates an Account for a new Google email", async () => {
     expect((await googleSignIn("grace-token")).status).toBe(200);
     expect(await prisma.user.count()).toBe(1);

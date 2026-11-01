@@ -1,4 +1,5 @@
 import { Link, Outlet, useMatch } from "react-router";
+import { AccountMenu } from "@/features/accountMenu/AccountMenu";
 import { RunActions } from "@/features/run/RunActions";
 import { useCachedRun } from "@/features/run/useRun";
 
@@ -27,9 +28,7 @@ export function AppShell() {
           {job && <span className="hidden min-w-0 truncate text-sm text-fg-2 sm:block">{job}</span>}
           <div className="ml-auto flex items-center gap-2">
             {runId && !inReview && <RunActions runId={runId} />}
-            <Link to="/sign-in" className="shrink-0 whitespace-nowrap rounded-sm px-2 py-2 text-sm font-semibold text-accent hover:bg-accent-soft">
-              Sign in
-            </Link>
+            <AccountMenu />
           </div>
         </div>
       </header>

@@ -13,7 +13,7 @@ export const AUTH_BASE_PATH = "/api/auth";
 const DAY_SECONDS = 24 * 60 * 60;
 
 /** Tests only: the profile a Google ID token stands for, so a Google sign-in needs no network. */
-export type GoogleProfile = { id: string; name: string; email: string; emailVerified: boolean };
+export type GoogleProfile = { id: string; name: string; email: string; emailVerified: boolean; image?: string };
 export type GoogleStub = (idToken: string) => GoogleProfile;
 
 export type AuthDeps = {

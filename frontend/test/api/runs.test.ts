@@ -59,11 +59,11 @@ describe("api client", () => {
 
   it("createRun sends multipart with the cv and jobDescription and returns the ID", async () => {
     // jsdom's FormData can't be sent through the fetch under MSW, so this one test looks at what fetch is given.
-    const fetchSpy = vi.fn(async () => Response.json({ id: RUN_ID }, { status: 201 }));
+    const fetchSpy = vi.fn(async () => Response.json({ id: RUN_ID, claimToken: "tok-1" }, { status: 201 }));
     vi.stubGlobal("fetch", fetchSpy);
     try {
-      const id = await createRun({ cv: new File(["x"], "cv.pdf", { type: "application/pdf" }), jobDescription: "Backend role" });
-      expect(id).toBe(RUN_ID);
+      const created = await createRun({ cv: new File(["x"], "cv.pdf", { type: "application/pdf" }), jobDescription: "Backend role" });
+      expect(created).toEqual({ id: RUN_ID, claimToken: "tok-1" });
       const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
       expect(url).toBe("/api/runs");
       expect(init.method).toBe("POST");

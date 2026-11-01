@@ -9,11 +9,16 @@ import { server } from "../../helpers/server";
 
 const pdf = (name = "cv.pdf", size = 10) => new File([new Uint8Array(size)], name, { type: "application/pdf" });
 
-/** jsdom's FormData can't pass through MSW, so the POST is answered by a stubbed fetch. */
-function stubUpload(response: () => Response) {
-  const spy = vi.fn(async () => response());
+/** jsdom's FormData can't pass through MSW, so the POST is answered by a stubbed fetch; every other request (the header's `GET /account`) goes to MSW. */
+function stubFetch(answer: (url: string, init: RequestInit) => Promise<Response>) {
+  const real = globalThis.fetch;
+  const spy = vi.fn((url: string, init: RequestInit = {}) => (init.method === "POST" ? answer(url, init) : real(url, init)));
   vi.stubGlobal("fetch", spy);
   return spy;
+}
+
+function stubUpload(response: () => Response) {
+  return stubFetch(async () => response());
 }
 
 async function fill(user: ReturnType<typeof userEvent.setup>, file: File | null, text: string) {
@@ -104,8 +109,7 @@ describe("Upload screen", () => {
   it("uploads, shows Uploading…, and goes to the Run on 201", async () => {
     const user = userEvent.setup();
     let release: (r: Response) => void = () => {};
-    const spy = vi.fn(() => new Promise<Response>((r) => (release = r)));
-    vi.stubGlobal("fetch", spy);
+    const spy = stubFetch(() => new Promise<Response>((r) => (release = r)));
     serveIdleStream(RUN_ID);
     server.use(http.get(`/api/runs/${RUN_ID}`, () => HttpResponse.json({ code: "RUN_NOT_FOUND", message: "x" }, { status: 404 })));
     const { router } = renderApp("/");
@@ -115,7 +119,8 @@ describe("Upload screen", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Uploading");
     release(Response.json({ id: RUN_ID }, { status: 201 }));
     await waitFor(() => expect(router.state.location.pathname).toBe(`/runs/${RUN_ID}`));
-    const form = (spy.mock.calls[0] as unknown as [string, RequestInit])[1].body as FormData;
+    const post = spy.mock.calls.find(([, init]) => init?.method === "POST")!;
+    const form = post[1]!.body as FormData;
     expect(form.get("jobDescription")).toBe("Backend role");
   });
 

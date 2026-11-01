@@ -2,9 +2,11 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { expectNoSeriousViolations } from "../../helpers/axe";
+import { beforeEach } from "vitest";
+import { serveAccount } from "../../helpers/account";
 import { renderApp } from "../../helpers/render";
 
-const SOON = "Accounts are coming soon. Enter as a guest for now: everything works without one.";
+beforeEach(() => serveAccount(null));
 
 describe("Sign in", () => {
   it("has the panel, the form, one status region and no axe violations", async () => {
@@ -28,19 +30,13 @@ describe("Sign in", () => {
     expect(email).toHaveAccessibleDescription("Enter a full email address, like name@example.com.");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     expect(email).toHaveFocus();
-    expect(screen.getByRole("status")).toBeEmptyDOMElement();
   });
 
-  it("a valid submit shows the coming-soon note, and Forgot password shows it too", async () => {
+  it("Forgot password? links to the forgot-password page", async () => {
     const user = userEvent.setup();
     renderApp("/sign-in");
-    await user.click(await screen.findByRole("button", { name: "Forgot password?" }));
-    expect(screen.getByRole("status")).toHaveTextContent(SOON);
-    await user.type(screen.getByLabelText("Email"), "ada@example.com");
-    expect(screen.getByRole("status")).toBeEmptyDOMElement();
-    await user.type(screen.getByLabelText("Password"), "hunter2");
-    await user.click(screen.getByRole("button", { name: "Sign in" }));
-    expect(screen.getByRole("status")).toHaveTextContent(SOON);
+    await user.click(await screen.findByRole("link", { name: "Forgot password?" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Forgot your password?" })).toBeInTheDocument();
   });
 
   it("toggles the password without submitting", async () => {
@@ -50,7 +46,6 @@ describe("Sign in", () => {
     await user.click(screen.getByRole("button", { name: "Show password" }));
     expect(password).toHaveAttribute("type", "text");
     expect(screen.getByRole("button", { name: "Hide password" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toBeEmptyDOMElement();
     expect(password).not.toHaveAttribute("aria-invalid");
   });
 
@@ -67,6 +62,7 @@ describe("Sign up", () => {
     const { container } = renderApp("/sign-up");
     expect(await screen.findByRole("heading", { level: 1, name: "Create your account" })).toBeInTheDocument();
     expect(screen.getByText("Keep every tailored CV in one place.")).toBeInTheDocument();
+    expect(screen.getByText("Download again for 90 days")).toBeInTheDocument();
     expect(screen.getByLabelText("Name")).toHaveAttribute("autocomplete", "name");
     expect(screen.getByLabelText("Password")).toHaveAttribute("autocomplete", "new-password");
     expect(screen.getByText("No account needed. Your Run stays at its link for 7 days.")).toBeInTheDocument();
@@ -95,10 +91,6 @@ describe("Sign up", () => {
     expect(rule).not.toHaveTextContent("(met)");
     await user.type(password, "0");
     expect(rule).toHaveTextContent("(met)");
-    await user.type(screen.getByLabelText("Name"), "Ada Example");
-    await user.type(screen.getByLabelText("Email"), "ada@example.com");
-    await user.click(screen.getByRole("button", { name: "Create account" }));
-    expect(screen.getByRole("status")).toHaveTextContent(SOON);
   });
 
   it("links to Sign in", async () => {

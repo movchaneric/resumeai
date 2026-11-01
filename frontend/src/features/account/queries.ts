@@ -37,10 +37,14 @@ export async function refreshAccount(client: QueryClient): Promise<void> {
   await client.invalidateQueries({ queryKey: accountKey });
 }
 
-/** After a sign-out or an Account deletion: the person is a guest now, and My Runs is not theirs to keep in the cache. */
+/**
+ * After a sign-out or an Account deletion: the person is a guest now. Every other cached server answer (My Runs, the Run
+ * views they opened) is theirs, so none of it stays for the next person on this browser. The Account query itself is kept
+ * and set to `null`, so its mounted observers (the header) switch to "Sign in" without a refetch.
+ */
 export function clearAccount(client: QueryClient): void {
+  client.removeQueries({ predicate: (query) => query.queryKey[0] !== accountKey[0] });
   client.setQueryData(accountKey, null);
-  client.removeQueries({ queryKey: myRunsKey });
 }
 
 /** The same two helpers bound to the app's `QueryClient`. */

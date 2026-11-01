@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
+import { useAccount } from "@/features/account";
 
 /** One screen: a title, a lead, and the single `role="status"` region that announces a sentence. */
 export function Screen({ title, lead, status, children }: { title: string; lead?: string; status: string; children?: ReactNode }) {
@@ -24,10 +25,20 @@ export function StartNewRun() {
 }
 
 /** The Run does not exist, or it expired (404). */
-export function RunNotFoundScreen() {
+export function RunNotFoundScreen({ runId }: { runId?: string }) {
+  const { account } = useAccount();
   return (
     <Screen title="This Run doesn't exist or has expired" status="Run not found.">
       <p className="text-[15px] text-fg-2">A Run is deleted after 7 days, or sooner if you delete it.</p>
+      {runId && account === null && (
+        <p className="text-[15px] text-fg-2">
+          If this is your Run,{" "}
+          <Link to={`/sign-in?next=/runs/${runId}`} className="font-semibold text-accent underline">
+            sign in
+          </Link>{" "}
+          to open it
+        </p>
+      )}
       <StartNewRun />
     </Screen>
   );

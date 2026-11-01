@@ -1,9 +1,9 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { FileUp } from "lucide-react";
 import { createRun } from "@/api";
-import { addGuestRun } from "@/features/account";
+import { addGuestRun, useAccount } from "@/features/account";
 import { CvPane } from "@/features/upload/CvPane";
 import { ProblemNote } from "@/features/upload/Problem";
 import {
@@ -26,6 +26,7 @@ const STEPS = ["We read both.", "You fill the gaps (up to 5 questions).", "You a
 
 export function UploadScreen() {
   const navigate = useNavigate();
+  const { account } = useAccount();
   const [file, setFile] = useState<File | null>(null);
   const [jd, setJd] = useState("");
   const [errors, setErrors] = useState<Errors>({});
@@ -146,6 +147,15 @@ export function UploadScreen() {
             {busy ? "Uploading…" : "Tailor my CV →"}
           </Button>
         </div>
+        {account === null && (
+          <p className="border-t border-line px-5 py-3 text-[13px] text-fg-3 md:px-6">
+            As a guest, this Run stays at its link for 7 days.{" "}
+            <Link to="/sign-in" className="font-semibold text-accent underline">
+              Sign in
+            </Link>{" "}
+            to keep it in My Runs.
+          </p>
+        )}
         <p role="status" className="sr-only">
           {busy ? "Uploading your CV and Job Description." : ""}
         </p>

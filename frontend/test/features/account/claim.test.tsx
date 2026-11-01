@@ -94,6 +94,25 @@ describe("claiming Guest Runs", () => {
     expect(readGuestRuns()).toHaveLength(1);
   });
 
+  it("keeps the entries on a 401 (signed out meanwhile)", async () => {
+    addGuestRun({ id: RUN_A, claimToken: "ta" });
+    serveAccount(ADA);
+    const batches = serveClaim({ status: 401 });
+    renderClaim();
+    await waitFor(() => expect(batches).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(readGuestRuns()).toHaveLength(1);
+  });
+
+  it("drops the sent entries on any other 4xx, since they would fail forever", async () => {
+    addGuestRun({ id: RUN_A, claimToken: "ta" });
+    serveAccount(ADA);
+    const batches = serveClaim({ status: 400 });
+    renderClaim();
+    await waitFor(() => expect(readGuestRuns()).toEqual([]));
+    expect(batches).toHaveLength(1);
+  });
+
   it("keeps the entries when the network is down", async () => {
     addGuestRun({ id: RUN_A, claimToken: "ta" });
     serveAccount(ADA);

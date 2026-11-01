@@ -7,7 +7,7 @@ export function RunRoute() {
   const { id = "" } = useParams();
   const { run, error, lostConnection, retry } = useRun(id);
   if (run) return <RunScreen run={run} lostConnection={lostConnection} />;
-  if (error?.isNotFound) return <RunNotFoundScreen />;
+  if (error?.isNotFound) return <RunNotFoundScreen runId={id} />;
   if (error?.isParseError) return <ErrorScreen message="We couldn't read the server's answer." />;
   if (error) return <ErrorScreen onRetry={retry} />;
   return (

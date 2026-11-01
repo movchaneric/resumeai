@@ -12,7 +12,8 @@ afterEach(() => vi.unstubAllGlobals());
 
 async function upload(response: Response) {
   const user = userEvent.setup();
-  vi.stubGlobal("fetch", vi.fn(async () => response));
+  const real = globalThis.fetch;
+  vi.stubGlobal("fetch", vi.fn((url: string, init: RequestInit = {}) => (init.method === "POST" ? Promise.resolve(response) : real(url, init))));
   serveIdleStream(RUN_ID);
   server.use(http.get(`/api/runs/${RUN_ID}`, () => HttpResponse.json({ code: "RUN_NOT_FOUND", message: "x" }, { status: 404 })));
   const { router } = renderApp("/");

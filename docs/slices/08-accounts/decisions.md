@@ -86,3 +86,15 @@ Settled in the slice 8 grilling (2026-10-28). Every decision is owner-approved. 
   - the claim token on `POST /runs` and in the claim request (backend, first);
   - Guest Run IDs and claim tokens in localStorage, and the claim at sign-in;
   - `?next=`, the not-found sign-in line, the Upload note.
+
+## Proof (2026-11-01, localhost, through the Vite proxy on :5173)
+- **API flow, by the session:**
+  - A Guest Run returned `{ id, claimToken }`.
+  - Sign-up returned 200. Sign-in before verifying gave 403 `EMAIL_NOT_VERIFIED`.
+  - The logged verification link redirected to `/verify-email?next=%2Fruns`, and sign-in then gave 200.
+  - `GET /account` returned the Account with `image: null`.
+  - The claim with a wrong token claimed nothing, the right token claimed the Run, and a second claim with the same token claimed nothing.
+  - My Runs listed the Run (`awaiting_answers`, "Senior backend engineer", Acme), and the guest view of it gave 404.
+  - The reset link redirected to `/reset-password?token=…`. The reset worked, and reusing the token gave 400 `INVALID_TOKEN`.
+  - `DELETE /account` gave 204. Afterwards the Account gave 401, sign-in gave 401, and the Run gave 404.
+- **In the browser, by the owner:** the pages, the claim from localStorage, My Runs, and Google sign-in linking into the same Account.

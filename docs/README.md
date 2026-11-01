@@ -35,3 +35,4 @@ Every decision record, handoff, review or note belongs to the slice being worked
 | [`07a-review-data`](./slices/07a-review-data) | 7a: `originalCv` in the view, faster `measureFit`, drop rules in shared | Done |
 | [`07b-frontend-core`](./slices/07b-frontend-core) | 7b: design system and page specs; Vite SPA, API layer, live updates, Upload, Questions, Progress, Done, Sign in and Sign up (UI only) | Done |
 | [`07c-review`](./slices/07c-review) | 7c: Review (suggesting mode, top bar, phone focus mode), Word download for a CV that can't fit; slice 7 handoff and retrospective | Done |
+| [`08-accounts`](./slices/08-accounts) | 8: Accounts (Better Auth: email and password, Google), Owned Runs, My Runs (ADR 0009) | In progress |

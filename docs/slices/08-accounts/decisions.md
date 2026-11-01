@@ -15,7 +15,13 @@ Settled in the slice 8 grilling (2026-10-28). Every decision is owner-approved. 
 - **Sessions:** Better Auth database sessions in an httpOnly cookie. They last 7 days and are renewed each day the app is used. There's no "Remember me".
 - **Rate limiting:** Better Auth's rate limiting is on for the auth endpoints.
 - **Routes:** under `/api/auth/*` through the existing Vite proxy, on one origin with no CORS.
-- **Local only.** The Google OAuth client is registered for `http://localhost:5173`. The production origin belongs to the Deployment slice.
+- **Local only.** The Google OAuth client is registered for `http://localhost:5173`, in the dev Google Cloud project (consent screen in Testing, with the owner as the only test user). The production origin belongs to the Deployment slice.
+  - **To do in the Deployment slice:** create a separate prod Google Cloud project with its own OAuth client:
+    - origin `https://<domain>`, redirect `https://<domain>/api/auth/callback/google`;
+    - a consent screen published "In production", with the app name, privacy and terms links, the authorized domain and brand verification;
+    - its own `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `APP_ORIGIN` in the prod environment.
+
+    The scopes are only `openid`, `email` and `profile`, so there's no sensitive-scope review. The code needs no change.
 
 ## Structure
 - **Not a separate service.** The owner asked whether auth should be its own repo or service. It stays in the backend, and it isn't logged as tech debt. ADR 0009 lists the reasons and the three triggers that would justify a split.

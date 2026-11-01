@@ -89,7 +89,7 @@ export type ReviewProcess = ReturnType<typeof bootReview>;
 /** Creates a Run and lets it reach Review (it pauses for Answers on the way; they are skipped). */
 export async function reachReview(process: ReviewProcess): Promise<RunId> {
   enqueueToReview(process.llm);
-  const id = await process.service.createRun({ cv: cvFile, jobDescription: "We are hiring a backend developer with Node.js experience." });
+  const { id } = await process.service.createRun({ cv: cvFile, jobDescription: "We are hiring a backend developer with Node.js experience." });
   await process.settle();
   await process.service.submitAnswers(id, { answers: [] });
   await process.settle();

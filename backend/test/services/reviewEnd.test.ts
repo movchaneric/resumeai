@@ -38,7 +38,7 @@ function boot(checkpointer: BaseCheckpointSaver): Process {
 
 /** Creates a Run and lets it reach Review. */
 async function reachReview(process: Process): Promise<RunId> {
-  const id = await process.service.createRun({ cv: cvFile, jobDescription: "We are hiring a backend developer with Node.js experience." });
+  const { id } = await process.service.createRun({ cv: cvFile, jobDescription: "We are hiring a backend developer with Node.js experience." });
   await Promise.all(process.tasks.splice(0));
   return id;
 }

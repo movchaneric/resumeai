@@ -15,7 +15,13 @@ Settled in the slice 8 grilling (2026-10-28). Every decision is owner-approved. 
 - **Sessions:** Better Auth database sessions in an httpOnly cookie. They last 7 days and are renewed each day the app is used. There's no "Remember me".
 - **Rate limiting:** Better Auth's rate limiting is on for the auth endpoints.
 - **Routes:** under `/api/auth/*` through the existing Vite proxy, on one origin with no CORS.
-- **Local only.** The Google OAuth client is registered for `http://localhost:5173`. The production origin belongs to the Deployment slice.
+- **Local only.** The Google OAuth client is registered for `http://localhost:5173`, in the dev Google Cloud project (consent screen in Testing, with the owner as the only test user). The production origin belongs to the Deployment slice.
+  - **To do in the Deployment slice:** create a separate prod Google Cloud project with its own OAuth client:
+    - origin `https://<domain>`, redirect `https://<domain>/api/auth/callback/google`;
+    - a consent screen published "In production", with the app name, privacy and terms links, the authorized domain and brand verification;
+    - its own `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `APP_ORIGIN` in the prod environment.
+
+    The scopes are only `openid`, `email` and `profile`, so there's no sensitive-scope review. The code needs no change.
 
 ## Structure
 - **Not a separate service.** The owner asked whether auth should be its own repo or service. It stays in the backend, and it isn't logged as tech debt. ADR 0009 lists the reasons and the three triggers that would justify a split.
@@ -28,7 +34,9 @@ Settled in the slice 8 grilling (2026-10-28). Every decision is owner-approved. 
 - **A Run started while signed in is an Owned Run.**
 - **An Owned Run can be read or acted on only by its Account, signed in.** Anyone else gets a 404. This covers the view, SSE, Answers, Review, preview, downloads and delete.
 - **Owned Runs expire 90 days after creation** (configurable). The Sign up panel's "Download again any time" becomes "for 90 days".
-- **Claiming:** at sign-in and sign-up, the browser sends the IDs of the Guest Runs it started (kept in localStorage). The unexpired ones become Owned Runs, with expiry recomputed as created + 90 days. Nothing else claims a Run.
+- **Claiming:** at sign-in and sign-up, the browser sends the Guest Runs it started (kept in localStorage). The unexpired ones become Owned Runs, with expiry recomputed as created + 90 days. Nothing else claims a Run.
+  - **Claim token** (added 2026-11-01, owner-approved after the 8b review): `POST /runs` returns a claim token with each Guest Run. The browser stores `{ id, claimToken }` and sends both. The backend keeps only a hash and accepts a claim only when the token matches.
+  - Holding a Run's link alone can't claim it. ADR 0009 has the reason. It's built in 8c (#86), as a backend change before the frontend work.
 - **Deleting an Account** deletes its Owned Runs and their checkpoints, then the Account, its sessions and its Google link, all through `deleteAccount(id)`.
 
 ## Frontend
@@ -75,5 +83,6 @@ Settled in the slice 8 grilling (2026-10-28). Every decision is owner-approved. 
   - the verify, forgot and reset pages;
   - the account menu and delete dialog;
   - My Runs;
-  - Guest Run IDs in localStorage, and the claim at sign-in;
+  - the claim token on `POST /runs` and in the claim request (backend, first);
+  - Guest Run IDs and claim tokens in localStorage, and the claim at sign-in;
   - `?next=`, the not-found sign-in line, the Upload note.

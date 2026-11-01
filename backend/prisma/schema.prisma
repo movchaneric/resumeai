@@ -5,7 +5,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  schemas  = ["app"]
+  schemas  = ["app", "auth"]
 }
 
 // Run metadata only (ADR 0003). The Run's data (texts, CV, Job Profile, Coverage, Changes) lives in the LangGraph
@@ -19,7 +19,14 @@ model Run {
   errorMessage String?  @map("error_message")
   // How many times startup recovery resumed this Run from its checkpoint (at most one is allowed). Never negative.
   recoveries   Int      @default(0)
+  // The Account that owns the Run; null for a Guest Run. Restrict: Runs are deleted through our path first, because
+  // the checkpoints have no foreign key (ADR 0005), so deleting an Account must never leave a thread behind.
+  accountId    String?  @map("account_id")
+  account      User?    @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  // SHA-256 hex of the claim token a Guest Run's starting browser got; null for an Owned Run, a Run already claimed, or one made before claim tokens.
+  claimTokenHash String? @map("claim_token_hash")
 
+  @@index([accountId])
   @@map("runs")
   @@schema("app")
 }
@@ -33,4 +40,73 @@ model JobProfile {
 
   @@map("job_profiles")
   @@schema("app")
+}
+
+// Better Auth's tables (ADR 0009), in their own `auth` schema. Hand-written from Better Auth's core schema; the Prisma
+// adapter finds them through the `modelName` options in `src/auth/`. IDs are strings that Better Auth generates itself.
+model User {
+  id            String        @id
+  name          String
+  email         String        @unique
+  emailVerified Boolean       @default(false) @map("email_verified")
+  image         String?
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  sessions      Session[]
+  accounts      AuthAccount[]
+  runs          Run[]
+
+  @@map("user")
+  @@schema("auth")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  token     String   @unique
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+  @@schema("auth")
+}
+
+// One row per way of signing in: `credential` (email and password) or a social provider such as `google`.
+model AuthAccount {
+  id                    String    @id
+  accountId             String    @map("account_id")
+  providerId            String    @map("provider_id")
+  userId                String    @map("user_id")
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?   @map("access_token")
+  refreshToken          String?   @map("refresh_token")
+  idToken               String?   @map("id_token")
+  accessTokenExpiresAt  DateTime? @map("access_token_expires_at") @db.Timestamptz(3)
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at") @db.Timestamptz(3)
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([userId])
+  @@map("account")
+  @@schema("auth")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([identifier])
+  @@map("verification")
+  @@schema("auth")
 }

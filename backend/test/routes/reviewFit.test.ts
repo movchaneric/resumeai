@@ -51,7 +51,7 @@ async function reach(file: Buffer, extracted: unknown): Promise<RunId> {
     .enqueue("condense_reword", REWORD)
     .enqueue("claim_check", { verdicts: [{ id: "cd1.c1", reason: "r", verdict: "supported" }] })
     .enqueue("condense_drop", REMOVE, { drops: [] });
-  const runId = await p.service.createRun({ cv: file, jobDescription: "Platform engineer" });
+  const { id: runId } = await p.service.createRun({ cv: file, jobDescription: "Platform engineer" });
   await p.settle();
   return runId;
 }

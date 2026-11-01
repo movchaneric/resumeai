@@ -3,17 +3,19 @@ import { describeLlmSettings, loadConfig } from "@/utils/config.js";
 
 describe("loadConfig", () => {
   it("applies the documented defaults", () => {
-    const config = loadConfig({ DATABASE_URL: "postgresql://x", OPENAI_API_KEY: "k" });
+    const config = loadConfig({ DATABASE_URL: "postgresql://x", OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32) });
     expect(config.port).toBe(3000);
     expect(config.runTtlMs).toBe(7 * 24 * 60 * 60 * 1000);
+    expect(config.ownedRunTtlMs).toBe(90 * 24 * 60 * 60 * 1000);
     expect(config.limits).toMatchObject({ maxCvBytes: 5 * 1024 * 1024, maxCvPages: 5, maxDocxChars: 30_000, maxJobDescriptionChars: 20_000, minPdfCharsPerPage: 100 });
   });
 
   it("reads overrides from the environment", () => {
-    const config = loadConfig({ DATABASE_URL: "postgresql://x", OPENAI_API_KEY: "k", PORT: "4000", MAX_CV_PAGES: "2", RUN_TTL_DAYS: "1" });
+    const config = loadConfig({ DATABASE_URL: "postgresql://x", OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32), PORT: "4000", MAX_CV_PAGES: "2", RUN_TTL_DAYS: "1", OWNED_RUN_TTL_DAYS: "30" });
     expect(config.port).toBe(4000);
     expect(config.limits.maxCvPages).toBe(2);
     expect(config.runTtlMs).toBe(24 * 60 * 60 * 1000);
+    expect(config.ownedRunTtlMs).toBe(30 * 24 * 60 * 60 * 1000);
   });
 
   it("fails fast when DATABASE_URL is missing", () => {
@@ -21,11 +23,11 @@ describe("loadConfig", () => {
   });
 
   it("fails fast on a value that is not a number", () => {
-    expect(() => loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", PORT: "abc" })).toThrow(/PORT/);
+    expect(() => loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32), PORT: "abc" })).toThrow(/PORT/);
   });
 
   it("applies the LLM and tracing defaults", () => {
-    const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" });
+    const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32) });
     expect(config.llm).toEqual({ apiKey: "k", baseUrl: undefined, model: "gpt-4.1-mini", judgeModel: "gpt-4.1-mini", contextTokens: 128_000, timeoutMs: 60_000, reasoningEffort: undefined });
     expect(config.tracing).toEqual({ traceContent: false, endpoint: undefined, projectName: undefined });
   });
@@ -33,7 +35,7 @@ describe("loadConfig", () => {
   it("reads LLM and tracing overrides", () => {
     const config = loadConfig({
       DATABASE_URL: "x",
-      OPENAI_API_KEY: "k",
+      OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32),
       OPENAI_BASE_URL: "http://localhost:11434/v1",
       LLM_MODEL: "m",
       TRACE_CONTENT: "true",
@@ -46,12 +48,12 @@ describe("loadConfig", () => {
   });
 
   it("passes LLM_REASONING_EFFORT through and rejects an empty value", () => {
-    expect(loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", LLM_REASONING_EFFORT: "none" }).llm.reasoningEffort).toBe("none");
-    expect(() => loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", LLM_REASONING_EFFORT: "" })).toThrow(/LLM_REASONING_EFFORT/);
+    expect(loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32), LLM_REASONING_EFFORT: "none" }).llm.reasoningEffort).toBe("none");
+    expect(() => loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32), LLM_REASONING_EFFORT: "" })).toThrow(/LLM_REASONING_EFFORT/);
   });
 
   it("defaults judgeModel to LLM_MODEL, lets LLM_JUDGE_MODEL override it, and rejects an empty value", () => {
-    const base = { DATABASE_URL: "x", OPENAI_API_KEY: "k" };
+    const base = { DATABASE_URL: "x", OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32) };
     expect(loadConfig({ ...base, LLM_MODEL: "m" }).llm.judgeModel).toBe("m");
     expect(loadConfig({ ...base, LLM_MODEL: "m", LLM_JUDGE_MODEL: "big" }).llm).toMatchObject({ model: "m", judgeModel: "big" });
     expect(() => loadConfig({ ...base, LLM_JUDGE_MODEL: "" })).toThrow(/LLM_JUDGE_MODEL/);
@@ -63,10 +65,10 @@ describe("loadConfig", () => {
   });
 
   it("refuses TRACE_CONTENT=true in production", () => {
-    expect(() => loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", NODE_ENV: "production", TRACE_CONTENT: "true" })).toThrow(
+    expect(() => loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32), NODE_ENV: "production", TRACE_CONTENT: "true" })).toThrow(
       /0006-trace-content-is-outside-run-deletion/,
     );
-    expect(() => loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", NODE_ENV: "production" })).not.toThrow();
+    expect(() => loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32), NODE_ENV: "production" })).not.toThrow();
   });
 });
 
@@ -75,6 +77,7 @@ describe("describeLlmSettings", () => {
     const config = loadConfig({
       DATABASE_URL: "x",
       OPENAI_API_KEY: "sk-secret",
+      BETTER_AUTH_SECRET: "s".repeat(32),
       OPENAI_BASE_URL: "https://user:pass@generativelanguage.googleapis.com/v1beta/openai/?key=abc",
       LLM_MODEL: "gemini-3.5-flash-lite",
       LLM_TIMEOUT_MS: "120000",
@@ -85,7 +88,26 @@ describe("describeLlmSettings", () => {
   });
 
   it("names the OpenAI host when no base URL is set", () => {
-    const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", LLM_JUDGE_MODEL: "judge-1" });
+    const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32), LLM_JUDGE_MODEL: "judge-1" });
     expect(describeLlmSettings(config.llm)).toBe("model=gpt-4.1-mini, judge=judge-1, timeoutMs=60000, llmHost=api.openai.com");
+  });
+
+  describe("auth settings", () => {
+    const base = { DATABASE_URL: "x", OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32) };
+
+    it("fails fast when BETTER_AUTH_SECRET is missing or shorter than 32 characters", () => {
+      expect(() => loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" })).toThrow(/BETTER_AUTH_SECRET/);
+      expect(() => loadConfig({ ...base, BETTER_AUTH_SECRET: "short" })).toThrow(/BETTER_AUTH_SECRET/);
+    });
+
+    it("applies the defaults: local origin, no Google, rate limiting on", () => {
+      expect(loadConfig(base).auth).toEqual({ secret: "s".repeat(32), appOrigin: "http://localhost:5173", google: undefined, rateLimit: true });
+    });
+
+    it("takes the Google pair together, and refuses only one of them", () => {
+      expect(loadConfig({ ...base, GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" }).auth.google).toEqual({ clientId: "id", clientSecret: "secret" });
+      expect(() => loadConfig({ ...base, GOOGLE_CLIENT_ID: "id" })).toThrow(/GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET/);
+      expect(() => loadConfig({ ...base, GOOGLE_CLIENT_SECRET: "secret" })).toThrow(/GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET/);
+    });
   });
 });

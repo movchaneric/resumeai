@@ -159,7 +159,7 @@ describe("LangGraph tracing without content", () => {
   });
 
   it("keeps the CV and Job Description text out of every span attribute and event", async () => {
-    const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" });
+    const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32) });
     const pdfText = await parseCv(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf")), config.limits);
     const llm = new FakeLlmClient().enqueue("extract_cv", extractedCv);
     const judge = new FakeLlmClient().enqueue("extract_job_profile", extractedJob).enqueueVoted("assess_coverage", coverageAnswer);

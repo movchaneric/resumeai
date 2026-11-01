@@ -24,6 +24,15 @@ const ConfigSchema = z.object({
   TRACE_CONTENT: z.enum(["true", "false"]).default("false"),
   PHOENIX_COLLECTOR_ENDPOINT: z.url().optional(),
   PHOENIX_PROJECT_NAME: z.string().min(1).optional(),
+  /** Signs and encrypts Better Auth's cookies and tokens. Required: the server does not start without it. */
+  BETTER_AUTH_SECRET: z.string().min(32),
+  /** The origin the browser uses (the Vite dev server in development). Better Auth builds its links and the Google redirect URI from it. */
+  APP_ORIGIN: z.url().default("http://localhost:5173"),
+  /** Both or neither; without them Google sign-in is not registered. */
+  GOOGLE_CLIENT_ID: z.string().min(1).optional(),
+  GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
+  /** Better Auth rate limiting. On by default; tests turn it off so many sign-ins from one address do not trip it. */
+  AUTH_RATE_LIMIT: z.enum(["on", "off"]).default("on"),
 });
 
 export type Config = ReturnType<typeof loadConfig>;
@@ -41,6 +50,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         "Trace content sits outside Run deletion; see docs/adr/0006-trace-content-is-outside-run-deletion.md",
     );
   }
+  if (Boolean(e.GOOGLE_CLIENT_ID) !== Boolean(e.GOOGLE_CLIENT_SECRET)) {
+    throw new Error("Invalid configuration: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together or not at all.");
+  }
+  const google = e.GOOGLE_CLIENT_ID && e.GOOGLE_CLIENT_SECRET ? { clientId: e.GOOGLE_CLIENT_ID, clientSecret: e.GOOGLE_CLIENT_SECRET } : undefined;
   return {
     port: e.PORT,
     databaseUrl: e.DATABASE_URL,
@@ -64,6 +77,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       contextTokens: e.LLM_CONTEXT_TOKENS,
       timeoutMs: e.LLM_TIMEOUT_MS,
       reasoningEffort: e.LLM_REASONING_EFFORT,
+    },
+    auth: {
+      secret: e.BETTER_AUTH_SECRET,
+      appOrigin: e.APP_ORIGIN,
+      google,
+      rateLimit: e.AUTH_RATE_LIMIT === "on",
     },
     tracing: {
       traceContent: e.TRACE_CONTENT === "true",

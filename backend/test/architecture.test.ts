@@ -73,6 +73,11 @@ describe("architecture rules", () => {
     expectNoViolations(violations, "Only src/llm/** and src/utils/tracing.ts may import @langchain/* (other than langgraph) or langchain");
   });
 
+  it("only src/auth imports better-auth", () => {
+    const violations = srcImports.filter((i) => (i.specifier === "better-auth" || i.specifier.startsWith("better-auth/")) && !isIn(i.file, join(srcDir, "auth")));
+    expectNoViolations(violations, "Only src/auth/** may import better-auth or better-auth/*");
+  });
+
   it("uses the @/ alias, not relative paths, to reach src code", () => {
     // src: no relative import at all. test: relative imports between test files (helpers, fixtures) are fine, but not into src, which must use @/.
     const violations = [

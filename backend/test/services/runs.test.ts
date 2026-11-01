@@ -20,7 +20,7 @@ import { COVERAGE_VOTES } from "@/scoring/assessCoverage.js";
 const COVERAGE = Array.from({ length: COVERAGE_VOTES }, () => "assess_coverage");
 
 const cv = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf"));
-const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" });
+const config = loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32) });
 
 /** In-memory stand-in for the Prisma-backed store, so the service is tested without a database. */
 class FakeStore {

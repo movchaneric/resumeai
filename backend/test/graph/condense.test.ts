@@ -95,7 +95,7 @@ describe("condensing", () => {
   it("does nothing for a CV that fits: no model call and no status write", async () => {
     const judge = new FakeLlmClient().enqueueVoted("assess_coverage", coverageAnswer);
     const shortCv = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../fixtures/cv.pdf"));
-    const text = await parseCv(shortCv, loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k" }).limits);
+    const text = await parseCv(shortCv, loadConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "k", BETTER_AUTH_SECRET: "s".repeat(32) }).limits);
     const { start, entered } = setup(judge, { text, extracted: extractedCv, profile: extractedJob });
     const state = await start();
     expect(state.changes).toEqual([]);

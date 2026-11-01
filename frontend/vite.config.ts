@@ -7,6 +7,8 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     proxy: {
+      // Better Auth matches routes on the same path it puts in its links and the Google redirect URI, so `/api/auth` goes through unchanged (no rewrite).
+      "/api/auth": { target: "http://localhost:3000", changeOrigin: true },
       // The backend has no CORS: the browser talks to this origin, and `/api/runs/...` becomes `/runs/...` on :3000.
       "/api": {
         target: "http://localhost:3000",

@@ -89,11 +89,11 @@ A piece of the CV, or a fact the user supplied during the session, that supports
 _Avoid_: Proof, source, reference
 
 **User Evidence**:
-Evidence the user supplied by answering a Question. The fact is trusted: we never question whether it is true. A Change built on it is still checked against its text, like any Change against CV Evidence. It reaches the Match Score only through Changes that put it into the CV.
+Evidence the user supplied by answering a Question. The fact is trusted: we never question whether it is true. A Change built on it is still checked against its text, like any Change against CV Evidence. After the Answers, the Requirements the user described are judged again with their User Evidence as citable Evidence (`ueN`), so an Answer can make a Requirement met and raise the Match Score; every later re-judge sees it too.
 _Avoid_: User input, user claim
 
 **Question**:
-A prompt asking the user about a must-have Requirement that the CV leaves unmet or only partially met (Soft Skills included). At most five are asked, once, before tailoring.
+A prompt asking the user about a must-have Requirement that the CV leaves unmet or only partially met (Soft Skills included). A skill partially met only through a Claim is not asked: the CV already says what it can. When the only doubt is a duration and the cited job starts in a bare year, the Question asks for the start month ("Your CV shows <role> from 2024 to now. Which month in 2024 did you start?"). At most five are asked, once, before tailoring.
 _Avoid_: Prompt, query
 
 **Answer**:
@@ -109,7 +109,7 @@ A Requirement (kind `soft_skill`) that asks for a behaviour or way of working, s
 _Avoid_: Trait, quality, people skill
 
 **Requirement Coverage**:
-A judgment of how well the CV satisfies one Requirement (met, partially met, unmet), with the CV evidence cited. A Requirement is met only when an Item shows it in use; a Claim alone makes it partially met at most, except for a language, which a Claim can meet. A duration ("3+ years") that the cited Items' dates cannot prove is partially met. A Soft Skill is met only when an Item describes the behaviour; otherwise it is unmet.
+A judgment of how well the CV satisfies one Requirement (met, partially met, unmet), with the CV evidence cited. A Requirement is met only when an Item shows it in use; a Claim alone makes it partially met at most, except for a language, which a Claim can meet. A duration ("3+ years") is met only when the shortest tenure of a cited Item reaches it; tenure is computed in code as of today, as a range when a date is only a year (January to December). A range that straddles the duration is partially met, and code corrects a met the dates cannot prove, unless a User answer gives the start date. A Soft Skill is met only when an Item describes the behaviour; otherwise it is unmet.
 _Avoid_: Match, hit
 
 **Claim**:

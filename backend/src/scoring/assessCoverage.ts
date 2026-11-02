@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { CoverageVerdictSchema } from "@resume-ai/shared";
-import type { Coverage, CoverageVerdict, Cv, Requirement } from "@resume-ai/shared";
+import type { Coverage, CoverageVerdict, Cv, Requirement, UserEvidence } from "@resume-ai/shared";
 import { LlmSchemaError, type LlmClient, type LlmMessage } from "@/llm/llmClient.js";
-import { renderCv, renderRequirements } from "@/prompts/renderCv.js";
+import { renderCv, renderRequirements, renderUserEvidence } from "@/prompts/renderCv.js";
 import { applyClaimRule, coverageIssues, type CoverageAnswer } from "@/scoring/coverageRules.js";
 import { CoverageError } from "@/scoring/errors.js";
 import { withSpan } from "@/utils/spans.js";
@@ -17,7 +17,8 @@ Rules:
 - If the reason has to infer the Requirement from something else ("indicating", "suggests", "shows ability to", "implies"), the verdict is at most "partially_met". If no Item states anything related, it is "unmet".
 - The reason may only describe what the cited Items say. Never add details that are not in them.
 - Requirements of kind soft_skill (ownership, attention to detail, collaboration, iterating quickly) are "met" only when an Item describes that behaviour. Otherwise they are "unmet". Never use "partially_met" for them.
-- Each dated Item in the CV shows its tenure as of today, for example "(1y11m to 2y10m as of Nov 2026)". A range appears when a date is only a year. A duration such as "3+ years" is "met" only when the SHORTEST tenure of a cited Item reaches it. If the range straddles the duration (shortest below, longest at or above), use "partially_met" and say the dates are too vague to prove it. If even the longest tenure falls short, use "partially_met" or "unmet" as the other rules say. Never add tenures of different Items together and never compute tenure yourself.
+- Each dated Item in the CV shows its tenure as of today, for example "(1y11m to 2y10m as of Nov 2026)". A range appears when a date is only a year. A duration such as "3+ years" is "met" only when the SHORTEST tenure of a cited Item reaches it. If the range straddles the duration (shortest below, longest at or above), use "partially_met" and say the dates are too vague to prove it. If even the longest tenure falls short, use "partially_met" or "unmet" as the other rules say. Never add tenures of different Items together and never compute tenure yourself, except from a start date in a User answer (see below).
+- A "User answers" block, when present, holds the candidate's own statements, each with an ID like [ue1]. Cite them like Items. An answer can make a Requirement "met" when it states the Requirement directly. An answer that gives a start date replaces the vague year of the role it names: count whole months from that date to Today, and judge a duration from that.
 - "unmet" cites no Evidence. "met" and "partially_met" cite at least one Item.
 - Write the reason first (1 to 2 sentences), then the Evidence IDs, then the verdict.
 - Never assume experience the CV does not show.
@@ -81,18 +82,20 @@ async function judgeOnce(
   cv: Cv,
   requirements: Requirement[],
   today: Date,
+  userEvidence: UserEvidence[],
   onRetry: () => void,
 ): Promise<CallResult> {
+  const answers = renderUserEvidence(userEvidence, requirements);
   const messages: LlmMessage[] = [
     { role: "system", content: COVERAGE_SYSTEM_PROMPT },
-    { role: "user", content: `Today: ${today.toISOString().slice(0, 10)}\n\nRequirements:\n${renderRequirements(requirements)}\n\nCV:\n${renderCv(cv, today)}` },
+    { role: "user", content: `Today: ${today.toISOString().slice(0, 10)}\n\nRequirements:\n${renderRequirements(requirements)}\n\nCV:\n${renderCv(cv, today)}${answers === "" ? "" : `\n\n${answers}`}` },
   ];
 
   /** One model call. Returns the answer, or the issues that make it unusable. */
   const attempt = async (input: LlmMessage[]): Promise<{ answer: CoverageAnswer } | { issues: string[] }> => {
     try {
       const answer = await llm.structured(CoverageAnswerSchema, input, { name: CALL_NAME });
-      const issues = coverageIssues(requirements, cv, answer);
+      const issues = coverageIssues(requirements, cv, answer, userEvidence);
       return issues.length === 0 ? { answer } : { issues };
     } catch (error) {
       if (error instanceof LlmSchemaError) return { issues: error.issues };
@@ -112,7 +115,7 @@ async function judgeOnce(
       throw new CoverageError("The model did not return a valid coverage assessment", result.issues);
     }
   }
-  return applyClaimRule(requirements, result.answer, { cv, today });
+  return applyClaimRule(requirements, result.answer, { cv, today, userEvidence });
 }
 
 /**
@@ -129,9 +132,10 @@ export async function assessCoverage(
   llm: LlmClient,
   cv: Cv,
   requirements: Requirement[],
-  options: { round?: number; votes?: number; today?: Date } = {},
+  options: { round?: number; votes?: number; today?: Date; userEvidence?: UserEvidence[] } = {},
 ): Promise<{ coverage: Coverage[]; downgrades: number }> {
   const votes = options.votes ?? COVERAGE_VOTES;
+  const userEvidence = options.userEvidence ?? [];
   const today = options.today ?? new Date(); // the one clock read; tests pass `today`
   return withSpan(CALL_NAME, async (span) => {
     if (options.round !== undefined) span.setAttribute("round", options.round);
@@ -140,7 +144,7 @@ export async function assessCoverage(
     let retries = 0;
     span.setAttribute("coverage.retries", retries);
     const onRetry = () => span.setAttribute("coverage.retries", ++retries);
-    const settled = await Promise.allSettled(Array.from({ length: votes }, () => judgeOnce(llm, cv, requirements, today, onRetry)));
+    const settled = await Promise.allSettled(Array.from({ length: votes }, () => judgeOnce(llm, cv, requirements, today, userEvidence, onRetry)));
     const succeeded = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
     const failed = settled.length - succeeded.length;
     span.setAttribute("coverage.failed_calls", failed);

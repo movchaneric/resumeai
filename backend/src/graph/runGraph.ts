@@ -4,7 +4,7 @@ import { describeFailure, type LlmClient } from "@/llm/llmClient.js";
 import { selectQuestions } from "@/tailoring/questions.js";
 import { tailorCv } from "@/tailoring/tailorCv.js";
 import { validateChanges } from "@/tailoring/validateChanges.js";
-import { setActiveSpanAttribute } from "@/utils/spans.js";
+import { setActiveSpanAttribute, withSpan } from "@/utils/spans.js";
 import { condenseDrop, condenseReword, measureCondense, type CondenseInput, type CondenseStepResult } from "@/tailoring/condense.js";
 import { removableBullets } from "@/tailoring/removable.js";
 import { mergeRoundIntoChanges } from "@/tailoring/mergeChanges.js";
@@ -23,6 +23,7 @@ export const NODE_STATUS = {
   extract: "extracting",
   assess_coverage: "extracting",
   collect_answers: STATUS_AT_POSITION.answers,
+  rejudge_answers: "tailoring",
   begin_round: "tailoring",
   tailor: "tailoring",
   validate: "tailoring",
@@ -180,11 +181,32 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
     .addNode("collect_answers", (state) => {
       const answers = interrupt<Question[], Answer[]>(state.questions);
       const recorded = recordAnswers(state.questions, answers);
-      // Nothing left to tailor when the user lacks every must-have that is not met: skip the rounds.
-      if (onlyGapsLeft(state.jobProfile!.requirements, state.coverage!, recorded.confirmedGaps)) {
-        return { ...recorded, exitReason: "ceiling" as const };
-      }
       return recorded;
+    })
+    // Judges again, once, the Requirements the user described, with their Answers as citable User Evidence. The other verdicts
+    // carry over. `scoreBefore` and `coverageBefore` stay the CV as uploaded, so the Answers' gain shows in the before/after.
+    // A failure here never fails the Run (like `final_rejudge`): the Answers are kept and the verdicts stay as they were.
+    .addNode("rejudge_answers", async (state) => {
+      const { requirements } = state.jobProfile!;
+      const asked = requirements.filter((r) => state.userEvidence.some((u) => u.requirementId === r.id));
+      let coverage = state.coverage!;
+      let scoreUpdate: { scoreAfter?: number } = {};
+      if (asked.length > 0) {
+        try {
+          await onEnter(state.runId, "rejudge_answers");
+          const judged = await withSpan("rejudge_answers", async (span) => {
+            span.setAttribute("answers.requirements", asked.length);
+            return assessCoverage(judgeLlm, state.cv!, asked, { userEvidence: state.userEvidence });
+          });
+          coverage = mergeCoverage(coverage, judged.coverage);
+          scoreUpdate = { scoreAfter: matchScore(requirements, coverage) };
+        } catch (error) {
+          console.error(`Run ${state.runId}: re-judging the Answers failed: ${describeFailure(error)}`);
+        }
+      }
+      // Nothing left to tailor when the user lacks every must-have that is not met: skip the rounds.
+      const ceiling = onlyGapsLeft(requirements, coverage, state.confirmedGaps);
+      return { coverage, ...scoreUpdate, ...(ceiling ? { exitReason: "ceiling" as const } : {}) };
     })
     .addNode("begin_round", async (state) => {
       const round = state.rounds + 1;
@@ -250,6 +272,7 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
         const tailored = applyChanges(state.cv!, mergeRoundIntoChanges(state.cv!, state.changes, pending.valid));
         const { coverage } = await assessCoverage(judgeLlm, tailored, requirementsListedBy(requirements, pending.valid), {
           round: pending.round,
+          userEvidence: state.userEvidence,
         });
         const merged = mergeCoverage(state.coverage!, coverage);
         return { pending: { ...pending, coverage: merged, score: matchScore(requirements, merged) } };
@@ -337,7 +360,7 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
       if (affected.length === 0) return { condensed: true };
       try {
         const condensed = applyChanges(state.cv!, state.changes);
-        const { coverage } = await assessCoverage(judgeLlm, condensed, affected, { round: state.rounds });
+        const { coverage } = await assessCoverage(judgeLlm, condensed, affected, { round: state.rounds, userEvidence: state.userEvidence });
         const merged = mergeCoverage(state.coverage!, coverage);
         return { condensed: true, coverage: merged, scoreAfter: matchScore(requirements, merged) };
       } catch (error) {
@@ -366,7 +389,7 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
       if (affected.length === 0) return {};
       try {
         const reviewed = applyChanges(state.cv!, keptChanges(state.changes));
-        const { coverage } = await assessCoverage(judgeLlm, reviewed, affected, { round: state.rounds });
+        const { coverage } = await assessCoverage(judgeLlm, reviewed, affected, { round: state.rounds, userEvidence: state.userEvidence });
         const merged = mergeCoverage(state.coverage!, coverage);
         return { coverage: merged, scoreAfter: matchScore(requirements, merged) };
       } catch (error) {
@@ -381,7 +404,8 @@ export function buildRunGraph({ llm, judgeLlm, judgeModel, jobProfileCache, chec
     .addEdge("extract", "assess_coverage")
     .addConditionalEdges("assess_coverage", (state) => (state.exitReason === null ? "select_questions" : "condense_measure"), ["select_questions", "condense_measure"])
     .addConditionalEdges("select_questions", (state) => (state.questions.length === 0 ? "begin_round" : "collect_answers"), ["begin_round", "collect_answers"])
-    .addConditionalEdges("collect_answers", (state) => (state.exitReason === null ? "begin_round" : "condense_measure"), ["begin_round", "condense_measure"])
+    .addEdge("collect_answers", "rejudge_answers")
+    .addConditionalEdges("rejudge_answers", (state) => (state.exitReason === null ? "begin_round" : "condense_measure"), ["begin_round", "condense_measure"])
     .addEdge("begin_round", "tailor")
     .addEdge("tailor", "validate")
     .addEdge("validate", "rejudge")

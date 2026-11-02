@@ -75,6 +75,7 @@ describe("a failing status write inside a tailoring round", () => {
       extract: "extracting",
       assess_coverage: "extracting",
       collect_answers: "awaiting_answers",
+      rejudge_answers: "tailoring",
       begin_round: "tailoring",
       tailor: "tailoring",
       validate: "tailoring",

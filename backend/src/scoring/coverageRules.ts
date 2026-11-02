@@ -1,5 +1,5 @@
 import { CoverageSchema, durationMonthsOf, tenureOf } from "@resume-ai/shared";
-import type { Coverage, CoverageVerdict, Cv, Requirement } from "@resume-ai/shared";
+import type { Coverage, CoverageVerdict, Cv, Requirement, UserEvidence } from "@resume-ai/shared";
 
 /** The model's Coverage answer. The model schema in `assessCoverage` must match this, field order included. */
 export type CoverageAnswer = {
@@ -52,10 +52,11 @@ export function collectItemIds(cv: Cv): Set<string> {
  * a Requirement with no verdict or several, a verdict for a Requirement not in the list,
  * an Evidence ID that is not in the CV, `met` / `partially_met` with no Evidence.
  */
-export function coverageIssues(requirements: Requirement[], cv: Cv, answer: CoverageAnswer): string[] {
+export function coverageIssues(requirements: Requirement[], cv: Cv, answer: CoverageAnswer, userEvidence: UserEvidence[] = []): string[] {
   const issues: string[] = [];
   const known = new Set<string>(requirements.map((r) => r.id));
   const itemIds = collectItemIds(cv);
+  for (const u of userEvidence) itemIds.add(u.id);
 
   const counts = new Map<string, number>();
   for (const v of answer.verdicts) counts.set(v.requirementId, (counts.get(v.requirementId) ?? 0) + 1);
@@ -91,7 +92,7 @@ export function coverageIssues(requirements: Requirement[], cv: Cv, answer: Cove
 export function applyClaimRule(
   requirements: Requirement[],
   answer: CoverageAnswer,
-  tenure?: { cv: Cv; today: Date },
+  tenure?: { cv: Cv; today: Date; userEvidence?: UserEvidence[] },
 ): { coverage: Coverage[]; downgrades: number } {
   const byId = new Map(answer.verdicts.map((v) => [v.requirementId, v]));
   let downgrades = 0;
@@ -119,7 +120,7 @@ export function applyClaimRule(
         reason: CLAIM_DOWNGRADE_REASON,
       });
     }
-    if (v.verdict === "met" && tenure !== undefined && !provesDuration(requirement, v.evidenceIds, tenure.cv, tenure.today)) {
+    if (v.verdict === "met" && tenure !== undefined && !provesDuration(requirement, v.evidenceIds, tenure.cv, tenure.today, tenure.userEvidence ?? [])) {
       downgrades += 1;
       return CoverageSchema.parse({
         requirementId: v.requirementId,
@@ -150,9 +151,11 @@ export function datedEvidence(cv: Cv, evidenceIds: string[]) {
  * usable dates, or the Requirement has no parsable duration, the model's verdict stands. Only downgrades `met`: upgrading
  * a `partially_met` would need to know why the model held back, which this code cannot tell.
  */
-function provesDuration(requirement: Requirement, evidenceIds: string[], cv: Cv, today: Date): boolean {
+function provesDuration(requirement: Requirement, evidenceIds: string[], cv: Cv, today: Date, userEvidence: UserEvidence[]): boolean {
   const months = durationMonthsOf(requirement.text);
   if (months === null) return true;
+  // A cited User answer (for example a start month) can settle what the CV dates cannot; the model uses it, so this check stands aside.
+  if (evidenceIds.some((id) => userEvidence.some((u) => u.id === id))) return true;
   const tenures = datedEvidence(cv, evidenceIds).flatMap((item) => {
     const t = tenureOf(item.dates, today);
     return t === null ? [] : [t];

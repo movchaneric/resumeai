@@ -1,10 +1,11 @@
 // Issue #90: the Questions step asked about React, Node.js and "2+ years" although the CV states all three.
 // These tests run the real Coverage chain with a fake model, then Question selection, with "today" pinned.
 import { describe, expect, it } from "vitest";
-import { RequirementSchema } from "@resume-ai/shared";
+import { QuestionIdSchema, RequirementSchema, UserEvidenceIdSchema } from "@resume-ai/shared";
 import type { Cv, DateRange, Requirement } from "@resume-ai/shared";
 import { assignCvIds } from "@/extraction/assignIds.js";
 import { assessCoverage } from "@/scoring/assessCoverage.js";
+
 import { DURATION_DOWNGRADE_REASON } from "@/scoring/coverageRules.js";
 import { matchScore } from "@/scoring/matchScore.js";
 import { selectQuestions } from "@/tailoring/questions.js";
@@ -110,5 +111,23 @@ describe("tenure", () => {
     const requirements = [req("req1", "Several years of full stack work", "experience")];
     const { coverage } = await run(cvWith(current("2024")), requirements, answer(["req1", "met", ["exp1"]]));
     expect(coverage[0]!.verdict).toBe("met");
+  });
+
+  it("lets an Answer with a start month make the duration met, citing the User answer", async () => {
+    const cv = cvWith(current("2024"));
+    const userEvidence = [
+      { id: UserEvidenceIdSchema.parse("ue1"), questionId: QuestionIdSchema.parse("q1"), requirementId: twoYears[0]!.id, text: "Started in March 2024." },
+    ];
+    const llm = new FakeLlmClient().enqueue("assess_coverage", answer(["req1", "met", ["exp1", "ue1"]]));
+    const { coverage } = await assessCoverage(llm, cv, twoYears, { votes: 1, today: TODAY, userEvidence });
+    const prompt = llm.calls[0]!.messages.filter((m) => m.role === "user").map((m) => m.content).join("\n");
+    expect(prompt).toContain("User answers (the candidate's own words, not in the CV):\n[ue1] Full Stack or Web development, 2+ years: Started in March 2024.");
+    expect(coverage[0]).toMatchObject({ verdict: "met", evidenceIds: ["exp1", "ue1"], reason: "model reason" });
+  });
+
+  it("still rejects a User answer ID that does not exist", async () => {
+    const llm = new FakeLlmClient().enqueue("assess_coverage", answer(["req1", "met", ["ue9"]]), answer(["req1", "partially_met", ["exp1"]]));
+    await assessCoverage(llm, cvWith(current("2024")), twoYears, { votes: 1, today: TODAY });
+    expect(llm.calls).toHaveLength(2); // the unknown ID forced a retry
   });
 });

@@ -45,6 +45,7 @@ function setup(coverage = verdicts("met", "unmet", "unmet", "unmet")) {
 }
 const input = { runId, cvText, jobDescriptionText: "Backend developer" };
 const noChanges = (judge: FakeLlmClient) => judge.enqueue("tailor", { changes: [] }, { changes: [] });
+const coverageCalls = (judge: FakeLlmClient) => judge.calls.filter((c) => c.name === "assess_coverage").length;
 
 describe("the select_questions and collect_answers nodes", () => {
   it("maps the answer-collecting node to awaiting_answers", () => {
@@ -77,7 +78,7 @@ describe("the select_questions and collect_answers nodes", () => {
 
   it("records User Evidence and Confirmed Gaps from the Answers, skips the rest, and goes on to review", async () => {
     const { runner, statuses, judge } = setup();
-    noChanges(judge);
+    noChanges(judge).enqueueVoted("assess_coverage", { verdicts: [{ requirementId: "req3", reason: "r", evidenceIds: ["ue1"], verdict: "partially_met" }] });
     await runner.start(input);
     const snapshot = await runner.answer(runId, [answer({ kind: "has_experience", questionId: "q2", text: "Ran a small cluster at Acme." })]);
     expect(snapshot.userEvidence).toEqual([{ id: "ue1", questionId: "q2", requirementId: "req3", text: "Ran a small cluster at Acme." }]);
@@ -87,7 +88,7 @@ describe("the select_questions and collect_answers nodes", () => {
 
   it("turns no_experience into a Confirmed Gap and numbers User Evidence in Question order", async () => {
     const { runner, judge } = setup(verdicts("met", "unmet", "unmet", "met"));
-    noChanges(judge);
+    noChanges(judge).enqueueVoted("assess_coverage", { verdicts: [{ requirementId: "req3", reason: "r", evidenceIds: [], verdict: "unmet" }] });
     await runner.start(input);
     const snapshot = await runner.answer(runId, [
       answer({ kind: "no_experience", questionId: "q1" }),
@@ -132,9 +133,10 @@ describe("User Evidence and Confirmed Gaps in tailoring", () => {
   };
   const emptyRounds = { changes: [] };
 
-  it("applies and re-judges an add Change that cites only User Evidence, and Coverage never sees the Answer", async () => {
+  it("applies and re-judges an add Change that cites only User Evidence, and Coverage sees the Answer", async () => {
     const { runner, judge } = setup();
     judge
+      .enqueueVoted("assess_coverage", { verdicts: [{ requirementId: "req3", reason: "r", evidenceIds: ["ue1"], verdict: "met" }] })
       .enqueue("tailor", { changes: [fromAnswer] }, emptyRounds, emptyRounds)
       .enqueue("claim_check", { verdicts: [{ id: "r1.c1", reason: "stated by the user", verdict: "supported" }] })
       .enqueueVoted("assess_coverage", { verdicts: [{ requirementId: "req3", reason: "r", evidenceIds: ["exp1.b2"], verdict: "met" }] });
@@ -149,13 +151,11 @@ describe("User Evidence and Confirmed Gaps in tailoring", () => {
     expect(snapshot.changes.map((c) => c.id)).toEqual(["r1.c1"]);
     expect(snapshot.coverage!.find((c) => c.requirementId === "req3")!.verdict).toBe("met");
 
-    const coveragePrompts = judge.calls.filter((c) => c.name === "assess_coverage").map((c) => c.messages.map((m) => m.content).join("\n"));
-    const rejudge = coveragePrompts.slice(-1)[0]!;
-    expect(rejudge).toContain("Operated a small cluster at Acme");
-    for (const prompt of coveragePrompts) {
-      expect(prompt).not.toContain("Ran a small cluster");
-      expect(prompt).not.toContain("User Evidence");
-    }
+    // Every Coverage call after the Answers carries the User answers block for the Requirements it judges (the first one is the CV alone).
+    const coveragePrompts = judge.calls.filter((c) => c.name === "assess_coverage").map((c) => c.messages.filter((m) => m.role === "user").map((m) => m.content).join("\n"));
+    expect(coveragePrompts[0]).not.toContain("User answers");
+    for (const prompt of coveragePrompts.slice(3)) expect(prompt).toContain("[ue1] Kubernetes: Ran a small cluster at Acme.");
+    expect(coveragePrompts.slice(-1)[0]).toContain("Operated a small cluster at Acme");
   });
 
   it("does not target Confirmed Gaps", async () => {
@@ -176,5 +176,68 @@ describe("User Evidence and Confirmed Gaps in tailoring", () => {
     expect(snapshot.rounds).toBe(0);
     expect(judge.calls.some((c) => c.name === "tailor")).toBe(false);
     expect(statuses).toEqual(["extracting", "awaiting_answers", "awaiting_review"]);
+  });
+});
+
+describe("the rejudge_answers node (issue #90)", () => {
+  const coverageFor = (requirementId: string, verdict: "met" | "partially_met" | "unmet", evidenceIds: string[]) => ({
+    verdicts: [{ requirementId, reason: "model reason", evidenceIds, verdict }],
+  });
+
+  it("judges again only the Requirements the user described, merges them, and raises the score", async () => {
+    const { runner, judge } = setup(verdicts("met", "unmet", "unmet", "unmet"));
+    noChanges(judge).enqueueVoted("assess_coverage", coverageFor("req3", "met", ["ue1"]));
+    const started = await runner.start(input);
+    const snapshot = await runner.answer(runId, [answer({ kind: "has_experience", questionId: "q2", text: "Ran a small cluster at Acme." })]);
+
+    expect(coverageCalls(judge)).toBe(6); // 3 votes for the first Coverage, 3 for the Answers
+    const prompt = judge.calls.filter((c) => c.name === "assess_coverage").slice(-1)[0]!.messages.filter((m) => m.role === "user").map((m) => m.content).join("\n");
+    expect(prompt).toContain("[req3]");
+    expect(prompt).not.toMatch(/\[req[124]\]/);
+    expect(prompt).toContain("User answers (the candidate's own words, not in the CV):\n[ue1] Kubernetes: Ran a small cluster at Acme.");
+
+    const verdictOf = (id: string) => snapshot.coverage!.find((c) => c.requirementId === id)!;
+    expect(verdictOf("req3")).toMatchObject({ verdict: "met", evidenceIds: ["ue1"] });
+    for (const id of ["req1", "req2", "req4"]) expect(verdictOf(id).verdict).toBe(started.coverage!.find((c) => c.requirementId === id)!.verdict);
+    expect(snapshot.scoreAfter!).toBeGreaterThan(started.scoreAfter!);
+    // The first-Coverage baseline stays the CV as uploaded.
+    expect(snapshot.scoreBefore).toBe(started.scoreBefore);
+    expect(snapshot.coverageBefore).toEqual(started.coverageBefore);
+  });
+
+  it("makes no model call for a no_experience Answer or a skipped Question: the Requirement stays a Confirmed Gap", async () => {
+    const { runner, judge } = setup();
+    noChanges(judge);
+    await runner.start(input);
+    const before = coverageCalls(judge);
+    const snapshot = await runner.answer(runId, [answer({ kind: "no_experience", questionId: "q1" })]);
+    expect(coverageCalls(judge)).toBe(before);
+    expect(snapshot.confirmedGaps).toEqual(["req2"]);
+    expect(snapshot.coverage!.find((c) => c.requirementId === "req2")!.verdict).toBe("unmet");
+  });
+
+  it("makes no extra call when the Run never paused", async () => {
+    const { runner, judge } = setup(verdicts("met", "met", "met", "unmet"));
+    noChanges(judge);
+    await runner.start(input);
+    expect(coverageCalls(judge)).toBe(3);
+  });
+
+  it("names the re-judge with a span", async () => {
+    const { runner, judge } = setup();
+    noChanges(judge).enqueueVoted("assess_coverage", coverageFor("req3", "met", ["ue1"]));
+    await runner.start(input);
+    await runner.answer(runId, [answer({ kind: "has_experience", questionId: "q2", text: "Ran a small cluster at Acme." })]);
+    expect(exporter.getFinishedSpans().some((s) => s.name === "rejudge_answers")).toBe(true);
+  });
+
+  it("keeps the verdicts and the Run going when the re-judge fails", async () => {
+    const { runner, judge } = setup();
+    noChanges(judge); // no Coverage response queued for the Answers: the call fails
+    await runner.start(input);
+    const snapshot = await runner.answer(runId, [answer({ kind: "has_experience", questionId: "q2", text: "Ran a small cluster at Acme." })]);
+    expect(snapshot.userEvidence).toHaveLength(1);
+    expect(snapshot.coverage!.find((c) => c.requirementId === "req3")!.verdict).toBe("unmet");
+    expect(snapshot.exitReason).not.toBeNull();
   });
 });

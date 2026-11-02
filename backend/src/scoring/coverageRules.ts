@@ -1,5 +1,5 @@
-import { CoverageSchema } from "@resume-ai/shared";
-import type { Coverage, CoverageVerdict, Cv, Requirement } from "@resume-ai/shared";
+import { CoverageSchema, durationMonthsOf, tenureOf } from "@resume-ai/shared";
+import type { Coverage, CoverageVerdict, Cv, Requirement, UserEvidence } from "@resume-ai/shared";
 
 /** The model's Coverage answer. The model schema in `assessCoverage` must match this, field order included. */
 export type CoverageAnswer = {
@@ -12,6 +12,10 @@ export const CLAIM_DOWNGRADE_REASON =
 
 /** Replaces the model's reason when a `partially_met` soft skill becomes `unmet`: a soft skill is met or it is not. */
 export const SOFT_SKILL_DOWNGRADE_REASON = "No Item describes this behaviour, and a soft skill is either met or unmet.";
+
+/** Replaces the model's reason when a `met` duration verdict is downgraded because the cited roles' shortest tenure falls short. */
+export const DURATION_DOWNGRADE_REASON =
+  "The dates of the cited roles do not prove the duration: even the shortest reading of their dates falls short.";
 
 /**
  * A Claim is the CV saying something about the candidate without showing it in use: the summary or a skill.
@@ -48,10 +52,11 @@ export function collectItemIds(cv: Cv): Set<string> {
  * a Requirement with no verdict or several, a verdict for a Requirement not in the list,
  * an Evidence ID that is not in the CV, `met` / `partially_met` with no Evidence.
  */
-export function coverageIssues(requirements: Requirement[], cv: Cv, answer: CoverageAnswer): string[] {
+export function coverageIssues(requirements: Requirement[], cv: Cv, answer: CoverageAnswer, userEvidence: UserEvidence[] = []): string[] {
   const issues: string[] = [];
   const known = new Set<string>(requirements.map((r) => r.id));
   const itemIds = collectItemIds(cv);
+  for (const u of userEvidence) itemIds.add(u.id);
 
   const counts = new Map<string, number>();
   for (const v of answer.verdicts) counts.set(v.requirementId, (counts.get(v.requirementId) ?? 0) + 1);
@@ -87,6 +92,7 @@ export function coverageIssues(requirements: Requirement[], cv: Cv, answer: Cove
 export function applyClaimRule(
   requirements: Requirement[],
   answer: CoverageAnswer,
+  tenure?: { cv: Cv; today: Date; userEvidence?: UserEvidence[] },
 ): { coverage: Coverage[]; downgrades: number } {
   const byId = new Map(answer.verdicts.map((v) => [v.requirementId, v]));
   let downgrades = 0;
@@ -114,6 +120,15 @@ export function applyClaimRule(
         reason: CLAIM_DOWNGRADE_REASON,
       });
     }
+    if (v.verdict === "met" && tenure !== undefined && !provesDuration(requirement, v.evidenceIds, tenure.cv, tenure.today, tenure.userEvidence ?? [])) {
+      downgrades += 1;
+      return CoverageSchema.parse({
+        requirementId: v.requirementId,
+        verdict: "partially_met",
+        evidenceIds: v.evidenceIds,
+        reason: DURATION_DOWNGRADE_REASON,
+      });
+    }
     return CoverageSchema.parse({
       requirementId: v.requirementId,
       verdict: v.verdict,
@@ -122,4 +137,29 @@ export function applyClaimRule(
     });
   });
   return { coverage, downgrades };
+}
+
+/** The dated Items (jobs, education, projects) among the Evidence, bullets counted as their parent. */
+export function datedEvidence(cv: Cv, evidenceIds: string[]) {
+  const roots = new Set(evidenceIds.map((id) => id.split(".")[0]!));
+  return [...cv.experience, ...cv.education, ...cv.projects].filter((item) => roots.has(item.id));
+}
+
+/**
+ * The duration rule, in code: a `met` verdict on a Requirement asking "N years" must be proven by the SHORTEST tenure of
+ * at least one cited dated Item (the best single role: roles may overlap, so tenures are not added). When no cited Item has
+ * usable dates, or the Requirement has no parsable duration, the model's verdict stands. Only downgrades `met`: upgrading
+ * a `partially_met` would need to know why the model held back, which this code cannot tell.
+ */
+function provesDuration(requirement: Requirement, evidenceIds: string[], cv: Cv, today: Date, userEvidence: UserEvidence[]): boolean {
+  const months = durationMonthsOf(requirement.text);
+  if (months === null) return true;
+  // A cited User answer (for example a start month) can settle what the CV dates cannot; the model uses it, so this check stands aside.
+  if (evidenceIds.some((id) => userEvidence.some((u) => u.id === id))) return true;
+  const tenures = datedEvidence(cv, evidenceIds).flatMap((item) => {
+    const t = tenureOf(item.dates, today);
+    return t === null ? [] : [t];
+  });
+  if (tenures.length === 0) return true;
+  return Math.max(...tenures.map((t) => t.minMonths)) >= months;
 }
